@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+
+ignoredBuiltDependencies:
+  - cpu-features
+  - esbuild
+  - protobufjs
+  - sharp
+  - ssh2
+
+allowBuilds:
+  cpu-features: false
+  esbuild: false
+  protobufjs: false
+  sharp: false
+  ssh2: false
