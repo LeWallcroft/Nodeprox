@@ -1,12 +1,12 @@
+import "dotenv/config";
+import { loadConfig } from "@nodeprox/config";
 import { buildApp } from "./app.js";
 
-const app = buildApp();
-const host = process.env.API_HOST ?? "127.0.0.1";
-const port = Number(process.env.API_PORT ?? 3000);
+const config = loadConfig();
+const app = buildApp({ logger: { level: config.LOG_LEVEL } });
 
 try {
-  await app.listen({ host, port });
-  console.log(`API listening on http://${host}:${port}`);
+  await app.listen({ host: config.API_HOST, port: config.API_PORT });
 } catch (error) {
   app.log.error(error);
   process.exitCode = 1;

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { loadDatabaseConfig } from "@nodeprox/config";
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({
@@ -6,9 +7,7 @@ export default defineConfig({
   schema: "./database/schema/*.ts",
   out: "./database/migrations",
   dbCredentials: {
-    url:
-      process.env.DATABASE_URL ??
-      "postgres://nodeprox:nodeprox@127.0.0.1:5432/nodeprox",
+    url: loadDatabaseConfig().DATABASE_URL,
   },
   strict: true,
   verbose: true,
