@@ -14,11 +14,18 @@ const configSchema = z.object({
 });
 
 const databaseConfigSchema = configSchema.pick({ DATABASE_URL: true });
+const adminBootstrapConfigSchema = z.object({
+  ADMIN_BOOTSTRAP_EMAIL: z.string().trim().toLowerCase().pipe(z.email()),
+  ADMIN_BOOTSTRAP_PASSWORD: z.string().min(1),
+});
 
 export type NodeProxConfig = z.infer<typeof configSchema>;
 export type NodeProxDatabaseConfig = z.infer<typeof databaseConfigSchema>;
+export type NodeProxAdminBootstrapConfig = z.infer<
+  typeof adminBootstrapConfigSchema
+>;
 
-export { configSchema, databaseConfigSchema };
+export { adminBootstrapConfigSchema, configSchema, databaseConfigSchema };
 
 export function loadConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
@@ -30,4 +37,10 @@ export function loadDatabaseConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxDatabaseConfig {
   return databaseConfigSchema.parse(env);
+}
+
+export function loadAdminBootstrapConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxAdminBootstrapConfig {
+  return adminBootstrapConfigSchema.parse(env);
 }
