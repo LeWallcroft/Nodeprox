@@ -10,6 +10,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@nodeprox/config": "workspace:*",
+    "@nodeprox/schemas": "workspace:*",
+    "@nodeprox/types": "workspace:*",
     "fastify": "^5.5.0"
   }
 }
