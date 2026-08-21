@@ -1,9 +1,14 @@
 import "dotenv/config";
 import { loadConfig } from "@nodeprox/config";
+import { createDatabase } from "../../../database/client.js";
 import { buildApp } from "./app.js";
 
 const config = loadConfig();
-const app = buildApp({ logger: { level: config.LOG_LEVEL } });
+const database = createDatabase(config.DATABASE_URL);
+const app = buildApp(
+  { logger: { level: config.LOG_LEVEL } },
+  { database: database.db, secureCookie: config.NODE_ENV === "production" },
+);
 
 try {
   await app.listen({ host: config.API_HOST, port: config.API_PORT });

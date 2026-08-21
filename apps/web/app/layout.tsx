@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import "./globals.css";
+import { QueryProvider } from "../components/providers/query-provider";
 
 export const metadata: Metadata = {
-  title: "NodeProx",
-  description: "NodeProx technical bootstrap",
+  title: "NodeProx Dashboard",
+  description: "NodeProx content operations dashboard",
 };
 
 export default function RootLayout({
@@ -10,7 +12,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es">
-      <body>{children}</body>
+      <body>
+        <QueryProvider>{children}</QueryProvider>
+      </body>
     </html>
   );
 }

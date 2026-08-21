@@ -10,6 +10,7 @@ ignoredBuiltDependencies:
   - ssh2
 
 allowBuilds:
+  argon2: true
   cpu-features: false
   esbuild: false
   protobufjs: false

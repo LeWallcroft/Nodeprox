@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --outDir dist --rootDir src",
+    "build": "tsc --outDir dist",
     "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "start": "node dist/apps/api/src/server.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
