@@ -1,8 +1,10 @@
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer,
 } from "@testcontainers/postgresql";
+import { createDatabase } from "../../database/client.js";
 
 declare module "vitest" {
   interface ProvidedContext {
@@ -32,6 +34,10 @@ export default async function setup({
   redisContainer = await new GenericContainer("redis:7-alpine")
     .withExposedPorts(6379)
     .start();
+
+  const database = createDatabase(postgresContainer.getConnectionUri());
+  await migrate(database.db, { migrationsFolder: "database/migrations" });
+  await database.sql.end();
 
   provide("infrastructure", {
     databaseUrl: postgresContainer.getConnectionUri(),

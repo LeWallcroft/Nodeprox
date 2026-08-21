@@ -12,6 +12,7 @@
     "db:check": "tsx database/scripts/check-connection.ts",
     "db:generate": "drizzle-kit generate --config database/drizzle.config.ts",
     "db:migrate": "tsx database/scripts/migrate.ts",
+    "db:seed:auth": "tsx database/scripts/seed-auth-user.ts",
     "dev": "pnpm --filter @nodeprox/api dev",
     "format": "biome format --write .",
     "format:check": "biome format .",
@@ -36,6 +37,7 @@
   },
   "dependencies": {
     "@nodeprox/config": "workspace:*",
+    "argon2": "^0.44.0",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.4",
     "postgres": "^3.4.7",

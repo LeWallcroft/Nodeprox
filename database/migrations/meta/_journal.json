@@ -8,6 +8,20 @@
       "when": 1787123574615,
       "tag": "0000_easy_moonstone",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787294118584,
+      "tag": "0001_wise_tinkerer",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787294135924,
+      "tag": "0002_strong_diamondback",
+      "breakpoints": true
     }
   ]
 }

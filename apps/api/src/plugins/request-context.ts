@@ -17,3 +17,10 @@ export function registerRequestContext(app: FastifyInstance): void {
 export function getRequestContext(): RequestContext | undefined {
   return requestContextStorage.getStore();
 }
+
+export function updateRequestContext(
+  updates: Partial<Omit<RequestContext, "requestId">>,
+): void {
+  const context = requestContextStorage.getStore();
+  if (context) Object.assign(context, updates);
+}

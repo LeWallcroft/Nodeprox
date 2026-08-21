@@ -1,5 +1,4 @@
 import { createClient } from "redis";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { afterAll, describe, expect, it } from "vitest";
 import { inject } from "vitest";
 import { createDatabase } from "../../database/client.js";
@@ -17,8 +16,6 @@ afterAll(async () => {
 
 describe("database foundation", () => {
   it("runs migrations and verifies PostgreSQL", async () => {
-    await migrate(database.db, { migrationsFolder: "database/migrations" });
-
     let result: (typeof bootstrapMetadata.$inferSelect)[] = [];
 
     await expect(
