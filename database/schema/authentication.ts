@@ -3,6 +3,7 @@ import {
   check,
   index,
   jsonb,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -11,6 +12,12 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
+export const userRoleEnum = pgEnum("user_role", [
+  "admin",
+  "gestor",
+  "uploader",
+]);
+
 export const users = pgTable(
   "users",
   {
@@ -18,6 +25,7 @@ export const users = pgTable(
     email: varchar("email", { length: 320 }).notNull(),
     passwordHash: text("password_hash").notNull(),
     status: varchar("status", { length: 16 }).notNull(),
+    role: userRoleEnum("role").notNull().default("uploader"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

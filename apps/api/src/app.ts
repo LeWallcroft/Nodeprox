@@ -9,6 +9,7 @@ import { HealthRepository } from "./modules/health/health.repository.js";
 import { HealthService } from "./modules/health/health.service.js";
 import type { NodeProxDatabase } from "../../../database/client.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
+import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -25,11 +26,12 @@ export function buildApp(
   registerErrorHandler(app);
   registerHealthController(app, new HealthService(new HealthRepository()));
   if (dependencies.database) {
-    registerAuthentication(
+    const authentication = registerAuthentication(
       app,
       dependencies.database,
       dependencies.secureCookie ?? false,
     );
+    registerAuthorization(app, dependencies.database, authentication);
   }
 
   return app;

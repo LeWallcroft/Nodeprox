@@ -9,11 +9,16 @@ import { SessionService } from "../application/services/session.service.js";
 import { UserRepository } from "../infrastructure/persistence/drizzle/user.repository.js";
 export { optionalSession, requireSession } from "./session-guards.js";
 
+export interface AuthenticationRuntime {
+  service: SessionService;
+  cookies: SessionCookieAdapter;
+}
+
 export function registerAuthentication(
   app: FastifyInstance,
   db: NodeProxDatabase,
   secureCookie: boolean,
-): void {
+): AuthenticationRuntime {
   const users = new UserRepository(db);
   const sessions = new SessionRepository(db);
   const service = new SessionService(
@@ -22,9 +27,7 @@ export function registerAuthentication(
     new Argon2PasswordHasher(),
     updateRequestContext,
   );
-  registerAuthenticationController(
-    app,
-    service,
-    new SessionCookieAdapter(secureCookie),
-  );
+  const cookies = new SessionCookieAdapter(secureCookie);
+  registerAuthenticationController(app, service, cookies);
+  return { service, cookies };
 }
