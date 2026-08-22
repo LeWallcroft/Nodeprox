@@ -13,6 +13,7 @@ import {
   auditLogs,
   chapterPermissions,
   chapters,
+  series,
   systemConfig,
   users,
 } from "../../database/schema/index.js";
@@ -37,6 +38,7 @@ const ownerEmail = `chapter-owner-${ownerId}@example.com`;
 const helperEmail = `chapter-helper-${helperId}@example.com`;
 const otherEmail = `chapter-other-${otherId}@example.com`;
 const hasher = new Argon2PasswordHasher();
+const legacySeriesIds: string[] = [];
 
 function cookieValue(header: string | string[] | undefined): string {
   const value = Array.isArray(header) ? header[0] : header;
@@ -55,9 +57,18 @@ async function login(email: string): Promise<string> {
 }
 
 async function insertChapter(id: string): Promise<void> {
+  const seriesId = randomUUID();
+  legacySeriesIds.push(seriesId);
+  await database.db.insert(series).values({
+    id: seriesId,
+    title: `Legacy ${seriesId}`,
+    slug: `legacy-${seriesId}`,
+    createdBy: ownerId,
+  });
   await database.db.insert(chapters).values({
     id,
-    seriesId: randomUUID(),
+    seriesId,
+    chapterNumber: 1,
     createdBy: ownerId,
   });
 }
@@ -125,6 +136,7 @@ afterAll(async () => {
     .where(eq(chapters.id, idempotentChapterId));
   await database.db.delete(chapters).where(eq(chapters.id, cooldownChapterId));
   await database.db.delete(chapters).where(eq(chapters.id, ownershipChapterId));
+  await database.db.delete(series).where(inArray(series.id, legacySeriesIds));
   await database.db
     .delete(auditLogs)
     .where(inArray(auditLogs.actorId, [ownerId, helperId, otherId]));

@@ -11,6 +11,7 @@ import type { NodeProxDatabase } from "../../../database/client.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
 import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
+import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -37,11 +38,18 @@ export function buildApp(
       dependencies.database,
       authentication,
     );
-    registerChapterPermissionPlugin(
+    const chapterPermissions = registerChapterPermissionPlugin(
       app,
       dependencies.database,
       authentication,
       authorization,
+    );
+    registerSeriesPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+      chapterPermissions,
     );
   }
 

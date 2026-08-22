@@ -2,6 +2,8 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  integer,
+  pgEnum,
   pgTable,
   text,
   timestamp,
@@ -9,6 +11,16 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { users } from "./authentication.js";
+import { series } from "./series.js";
+
+export const chapterStatusEnum = pgEnum("chapter_status", [
+  "draft",
+  "uploading",
+  "uploaded",
+  "processing",
+  "ready",
+  "failed",
+]);
 
 const delegablePermissionValues = [
   "chapters.read",
@@ -24,7 +36,12 @@ export const chapters = pgTable(
   "chapters",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    seriesId: uuid("series_id").notNull(),
+    seriesId: uuid("series_id")
+      .notNull()
+      .references(() => series.id, { onDelete: "restrict" }),
+    chapterNumber: integer("chapter_number").notNull(),
+    title: text("title"),
+    status: chapterStatusEnum("status").notNull().default("draft"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),
@@ -35,7 +52,14 @@ export const chapters = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [index("chapters_series_id_idx").on(table.seriesId)],
+  (table) => [
+    index("chapters_series_id_idx").on(table.seriesId),
+    uniqueIndex("chapters_series_number_unique").on(
+      table.seriesId,
+      table.chapterNumber,
+    ),
+    check("chapters_number_positive", sql`${table.chapterNumber} > 0`),
+  ],
 );
 
 export const chapterPermissions = pgTable(
