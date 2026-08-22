@@ -10,6 +10,7 @@ import { HealthService } from "./modules/health/health.service.js";
 import type { NodeProxDatabase } from "../../../database/client.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
 import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
+import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -31,7 +32,17 @@ export function buildApp(
       dependencies.database,
       dependencies.secureCookie ?? false,
     );
-    registerAuthorization(app, dependencies.database, authentication);
+    const authorization = registerAuthorization(
+      app,
+      dependencies.database,
+      authentication,
+    );
+    registerChapterPermissionPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+    );
   }
 
   return app;
