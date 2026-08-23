@@ -33,22 +33,19 @@ export class B2Storage implements StoragePort {
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
-    let sizeBytes = 0;
-    input.body.on("data", (chunk: Buffer | string) => {
-      sizeBytes += Buffer.byteLength(chunk);
-    });
     const result = await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
         Key: input.key,
         Body: input.body as never,
         ContentType: input.contentType,
+        ContentLength: input.sizeBytes,
       }),
     );
     const etag = result.ETag?.replaceAll('"', "");
     return {
       key: input.key,
-      sizeBytes: sizeBytes || input.sizeBytes,
+      sizeBytes: input.sizeBytes,
       contentType: input.contentType,
       ...(etag ? { etag } : {}),
     };

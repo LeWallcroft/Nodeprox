@@ -21,17 +21,24 @@ describe("B2Storage contract", () => {
       .mockResolvedValueOnce({});
     Object.defineProperty(adapter, "client", { value: { send } });
 
-    await expect(
-      adapter.put({
-        key: "chapters/chapter/uploads/upload.zip",
-        body: Readable.from([Buffer.from("PK\\x03\\x04")]),
-        contentType: "application/zip",
-        sizeBytes: 4,
-      }),
-    ).resolves.toMatchObject({
+    const input = {
+      key: "chapters/chapter/uploads/upload.zip",
+      body: Readable.from([Buffer.from("PK\\x03\\x04")]),
+      contentType: "application/zip",
+      sizeBytes: 4,
+    };
+    const result = await adapter.put(input);
+    expect(result).toMatchObject({
       key: "chapters/chapter/uploads/upload.zip",
       etag: "etag-1",
+      sizeBytes: input.sizeBytes,
     });
+    const putCommand = send.mock.calls[0]?.[0] as {
+      input: Record<string, unknown>;
+    };
+    expect(putCommand.input.ContentLength).toBe(input.sizeBytes);
+    expect(putCommand.input.Body).toBe(input.body);
+    expect((input.body as Readable).readableFlowing).toBeNull();
     await expect(
       adapter.exists("chapters/chapter/uploads/upload.zip"),
     ).resolves.toBe(true);
