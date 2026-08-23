@@ -8,8 +8,8 @@ export function DataTable({
   label?: string;
 }) {
   return (
-    <div className="data-table-wrap">
-      <table className="data-table" aria-label={label}>
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse bg-surface" aria-label={label}>
         {children}
       </table>
     </div>

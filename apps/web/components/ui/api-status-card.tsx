@@ -19,11 +19,18 @@ export function ApiStatusCard() {
   };
 
   return (
-    <section className="panel" aria-labelledby="api-status-title">
-      <div className="panel-heading">
+    <section
+      className="rounded-xl border border-border bg-surface p-5"
+      aria-labelledby="api-status-title"
+    >
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <span className="eyebrow">Integración</span>
-          <h3 id="api-status-title">Estado de API</h3>
+          <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+            Integración
+          </span>
+          <h3 id="api-status-title" className="mb-2 mt-0 text-lg font-semibold">
+            Estado de API
+          </h3>
         </div>
         <StatusBadge
           label={
@@ -39,7 +46,10 @@ export function ApiStatusCard() {
         />
       </div>
       {query.isLoading ? (
-        <div className="status-loading" aria-live="polite">
+        <div
+          className="mt-4 flex items-center justify-between gap-4 max-[640px]:flex-col max-[640px]:items-stretch"
+          aria-live="polite"
+        >
           <Skeleton />
           <span>Conectando con Fastify…</span>
         </div>
@@ -53,7 +63,7 @@ export function ApiStatusCard() {
           }
           action={
             <button
-              className="button button-secondary"
+              className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
               type="button"
               onClick={testConnection}
             >
@@ -62,10 +72,15 @@ export function ApiStatusCard() {
           }
         />
       ) : (
-        <div className="status-success" aria-live="polite">
-          <p>Fastify respondió correctamente al endpoint de lectura.</p>
+        <div
+          className="mt-4 flex items-center justify-between gap-4 max-[640px]:flex-col max-[640px]:items-stretch"
+          aria-live="polite"
+        >
+          <p className="m-0 text-muted">
+            Fastify respondió correctamente al endpoint de lectura.
+          </p>
           <button
-            className="button button-secondary"
+            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             type="button"
             onClick={testConnection}
           >

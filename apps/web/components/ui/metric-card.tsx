@@ -8,10 +8,12 @@ export function MetricCard({
   detail?: string;
 }) {
   return (
-    <article className="metric-card">
-      <span className="eyebrow">{label}</span>
-      <strong>{value}</strong>
-      {detail ? <span className="muted">{detail}</span> : null}
+    <article className="grid gap-2 rounded-xl border border-border bg-surface p-[18px]">
+      <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+        {label}
+      </span>
+      <strong className="text-[28px] font-semibold">{value}</strong>
+      {detail ? <span className="text-muted">{detail}</span> : null}
     </article>
   );
 }

@@ -8,14 +8,17 @@ export function ProgressBar({
   const boundedValue = Math.min(100, Math.max(0, value));
   return (
     <div
-      className="progress-bar"
+      className="h-2 overflow-hidden rounded-full bg-[#e7ebf0]"
       role="progressbar"
       aria-label={label}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={boundedValue}
     >
-      <span style={{ width: `${boundedValue}%` }} />
+      <span
+        className="block h-full rounded-full bg-primary transition-[width] duration-200"
+        style={{ width: `${boundedValue}%` }}
+      />
     </div>
   );
 }
