@@ -12,10 +12,13 @@ import { registerAuthentication } from "./modules/authentication/presentation/au
 import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
+import type { NodeProxStorageConfig } from "@nodeprox/config";
+import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
   secureCookie?: boolean;
+  storage?: NodeProxStorageConfig;
 }
 
 export function buildApp(
@@ -50,6 +53,17 @@ export function buildApp(
       authentication,
       authorization,
       chapterPermissions,
+    );
+    registerUploadPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+      chapterPermissions,
+      dependencies.storage ?? {
+        provider: "filesystem",
+        uploadMaxSizeBytes: 536870912,
+      },
     );
   }
 
