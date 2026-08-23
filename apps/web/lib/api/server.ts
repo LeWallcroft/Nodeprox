@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { ApiError, type ApiRequestOptions } from "./types";
+import { normalizeApiError, type ApiRequestOptions } from "./types";
 
 const apiBaseUrl = process.env.NODEPROX_API_URL ?? "http://localhost:3001";
 
@@ -16,11 +16,15 @@ export async function apiRequestServer<T>(
     headers: requestHeaders,
     cache: "no-store",
   });
-  if (!response.ok)
-    throw new ApiError(
-      response.status,
-      `API request failed: ${response.status}`,
-    );
+  if (!response.ok) {
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = undefined;
+    }
+    throw normalizeApiError(response.status, payload);
+  }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
