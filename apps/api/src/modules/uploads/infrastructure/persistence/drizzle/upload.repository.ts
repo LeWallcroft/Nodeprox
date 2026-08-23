@@ -1,11 +1,13 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapters,
+  processingOutbox,
   uploads,
 } from "../../../../../../../../database/schema/index.js";
 import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
+import type { ProcessingOutboxPort } from "../../../../processing/application/ports.js";
 import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import type {
   UploadAuditPort,
@@ -31,7 +33,11 @@ const toRecord = (row: typeof uploads.$inferSelect): UploadRecord => ({
 });
 
 export class DrizzleUploadRepository
-  implements UploadRepositoryPort, UploadAuditPort, AuthorizationAuditRepository
+  implements
+    UploadRepositoryPort,
+    UploadAuditPort,
+    AuthorizationAuditRepository,
+    ProcessingOutboxPort
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
@@ -74,6 +80,18 @@ export class DrizzleUploadRepository
         .update(chapters)
         .set({ status: "uploaded", updatedAt: new Date() })
         .where(eq(chapters.id, row.chapterId));
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, row.chapterId))
+        .limit(1);
+      if (!chapter) throw new Error("chapter-not-found-after-upload");
+      await tx.insert(processingOutbox).values({
+        uploadId: row.id,
+        chapterId: row.chapterId,
+        seriesId: chapter.seriesId,
+        storageKey: row.storageKey,
+      });
       return toRecord(row);
     });
   }
@@ -99,6 +117,42 @@ export class DrizzleUploadRepository
           .set({ status: "draft", updatedAt: new Date() })
           .where(eq(chapters.id, row.chapterId));
     });
+  }
+
+  async findPending(limit: number) {
+    const rows = await this.db
+      .select({
+        id: processingOutbox.id,
+        chapterId: processingOutbox.chapterId,
+        seriesId: processingOutbox.seriesId,
+        uploadId: processingOutbox.uploadId,
+        sourceStorageKey: processingOutbox.storageKey,
+      })
+      .from(processingOutbox)
+      .where(
+        and(
+          eq(processingOutbox.status, "pending"),
+          lte(processingOutbox.availableAt, new Date()),
+        ),
+      )
+      .limit(limit);
+    return rows;
+  }
+
+  async markEnqueued(id: string): Promise<void> {
+    await this.db
+      .update(processingOutbox)
+      .set({
+        status: "enqueued",
+        attempts: sql`${processingOutbox.attempts} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(processingOutbox.id, id),
+          eq(processingOutbox.status, "pending"),
+        ),
+      );
   }
 
   async append(input: {

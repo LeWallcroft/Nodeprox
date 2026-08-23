@@ -1,0 +1,18 @@
+{
+  "name": "@nodeprox/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./port": "./src/port.ts",
+    "./adapters": "./src/adapters.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1115.0",
+    "@nodeprox/config": "workspace:*"
+  }
+}

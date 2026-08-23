@@ -7,6 +7,7 @@ import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapters,
+  processingOutbox,
   series,
   uploads,
   users,
@@ -129,6 +130,15 @@ describe("M4-A chapter upload", () => {
       chapterId,
       status: "uploaded",
       filename: "chapter.zip",
+    });
+    const [intent] = await database.db
+      .select()
+      .from(processingOutbox)
+      .where(eq(processingOutbox.chapterId, chapterId));
+    expect(intent).toMatchObject({
+      chapterId,
+      uploadId: response.json().uploadId,
+      status: "pending",
     });
     const second = await app.inject({
       method: "POST",

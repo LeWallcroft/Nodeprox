@@ -6,6 +6,16 @@ export interface RequestContext {
   sessionId?: string;
 }
 
+export type ProcessChapterInput = {
+  chapterId: string;
+  seriesId: string;
+  uploadId: string;
+  sourceStorageKey: string;
+};
+export interface ProcessingQueuePort {
+  enqueueChapterProcessing(input: ProcessChapterInput): Promise<void>;
+}
+
 export interface ProblemDetails {
   type: string;
   title: string;

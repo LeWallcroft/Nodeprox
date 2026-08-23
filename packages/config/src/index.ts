@@ -31,6 +31,21 @@ const b2ConfigSchema = z.object({
   B2_KEY_ID: z.string().trim().min(1),
   B2_APPLICATION_KEY: z.string().trim().min(1),
 });
+const processingConfigSchema = z.object({
+  REDIS_URL: z.url(),
+  PROCESSING_QUEUE_NAME: z.string().trim().min(1).default("chapter-processing"),
+  PROCESSING_MAX_ENTRIES: z.coerce.number().int().positive().default(1000),
+  PROCESSING_MAX_TOTAL_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(536870912),
+  PROCESSING_MAX_IMAGE_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(67108864),
+});
 
 export type NodeProxConfig = z.infer<typeof configSchema>;
 export type NodeProxDatabaseConfig = z.infer<typeof databaseConfigSchema>;
@@ -44,18 +59,26 @@ export type NodeProxStorageConfig =
       uploadMaxSizeBytes: number;
       b2: z.infer<typeof b2ConfigSchema>;
     };
+export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
 
 export {
   adminBootstrapConfigSchema,
   b2ConfigSchema,
   configSchema,
   databaseConfigSchema,
+  processingConfigSchema,
 };
 
 export function loadConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxConfig {
   return configSchema.parse(env);
+}
+
+export function loadProcessingConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxProcessingConfig {
+  return processingConfigSchema.parse(env);
 }
 
 export function loadDatabaseConfig(

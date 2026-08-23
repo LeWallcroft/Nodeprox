@@ -14,7 +14,10 @@
     "@fastify/multipart": "^10.1.1",
     "@nodeprox/config": "workspace:*",
     "@nodeprox/schemas": "workspace:*",
+    "@nodeprox/storage": "workspace:*",
     "@nodeprox/types": "workspace:*",
-    "fastify": "^5.5.0"
+    "bullmq": "^6.2.0",
+    "fastify": "^5.5.0",
+    "ioredis": "^6.0.0"
   }
 }

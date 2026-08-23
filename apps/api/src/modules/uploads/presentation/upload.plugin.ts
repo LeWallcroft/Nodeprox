@@ -1,7 +1,6 @@
 import multipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
 import { Readable } from "node:stream";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
@@ -123,7 +122,7 @@ export function registerUploadPlugin(
   const storage =
     storageConfig.provider === "b2"
       ? new B2Storage(storageConfig.b2)
-      : new FilesystemStorage(join(tmpdir(), "nodeprox", "uploads"));
+      : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
   const service = new ChapterUploadService(
     chapterPermissions,
     repository,

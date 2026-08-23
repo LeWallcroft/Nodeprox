@@ -9,7 +9,11 @@ import type {
 } from "../../apps/api/src/modules/uploads/application/ports/upload.ports.js";
 
 const permission = {
-  check: vi.fn().mockResolvedValue({ allowed: true, reason: "owner" }),
+  check: vi.fn().mockResolvedValue({
+    allowed: true,
+    reason: "owner",
+    seriesId: "series-1",
+  }),
 } as unknown as ChapterPermissionService;
 const context = { userId: "user-1", sessionId: "session-1" };
 
@@ -21,6 +25,7 @@ function setup() {
     removePending: vi.fn().mockResolvedValue(undefined),
   };
   const storage: StoragePort = {
+    get: vi.fn(),
     put: vi.fn().mockResolvedValue({
       key: "key",
       sizeBytes: 4,
@@ -82,7 +87,7 @@ describe("chapter upload compensation", () => {
     );
     await expect(service.upload(input())).rejects.toThrow("db failed");
     expect(storage.delete).toHaveBeenCalledWith(
-      expect.stringContaining("chapters/chapter-1/uploads/"),
+      expect.stringContaining("uploads/series-1/chapter-1/"),
     );
     expect(uploads.removePending).toHaveBeenCalled();
   });

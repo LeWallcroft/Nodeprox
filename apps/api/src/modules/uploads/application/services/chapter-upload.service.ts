@@ -52,7 +52,7 @@ export class ChapterUploadService {
       throw new UploadConflictError();
 
     const uploadId = randomUUID();
-    const storageKey = `chapters/${input.chapterId}/uploads/${uploadId}.zip`;
+    const storageKey = `uploads/${decision.seriesId}/${input.chapterId}/${uploadId}.zip`;
     await this.uploads.createPending({
       id: uploadId,
       chapterId: input.chapterId,

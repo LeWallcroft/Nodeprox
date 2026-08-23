@@ -135,6 +135,22 @@ try {
   }
 
   try {
+    const stream = await storage.get(key);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+    if (!Buffer.concat(chunks).equals(body))
+      throw new Error("object content mismatch after get");
+  } catch (error) {
+    let cleanup: SafeFailure | undefined;
+    try {
+      await storage.delete(key);
+    } catch (cleanupError) {
+      cleanup = safeFailure(cleanupError);
+    }
+    reportFailure("get", error, cleanup);
+  }
+
+  try {
     await storage.delete(key);
   } catch (error) {
     reportFailure("delete", error);
@@ -151,6 +167,7 @@ try {
   console.log("✓ configuration");
   console.log("✓ put");
   console.log("✓ exists");
+  console.log("✓ get");
   console.log("✓ delete");
   console.log("✓ cleanup");
 } catch {
