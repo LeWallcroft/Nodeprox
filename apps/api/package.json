@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "tsc --outDir dist",
-    "dev": "tsx watch src/server.ts",
+    "dev": "node --env-file=../../.env --import tsx/esm --watch src/server.ts",
     "start": "node dist/apps/api/src/server.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1115.0",
+    "@fastify/multipart": "^10.1.1",
     "@nodeprox/config": "workspace:*",
     "@nodeprox/schemas": "workspace:*",
     "@nodeprox/types": "workspace:*",

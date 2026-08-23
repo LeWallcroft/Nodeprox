@@ -1,5 +1,4 @@
-import "dotenv/config";
-import { loadConfig } from "@nodeprox/config";
+import { loadConfig, loadStorageConfig } from "@nodeprox/config";
 import { createDatabase } from "../../../database/client.js";
 import { buildApp } from "./app.js";
 
@@ -7,7 +6,11 @@ const config = loadConfig();
 const database = createDatabase(config.DATABASE_URL);
 const app = buildApp(
   { logger: { level: config.LOG_LEVEL } },
-  { database: database.db, secureCookie: config.NODE_ENV === "production" },
+  {
+    database: database.db,
+    secureCookie: config.NODE_ENV === "production",
+    storage: loadStorageConfig(),
+  },
 );
 
 try {
