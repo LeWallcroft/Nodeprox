@@ -1,13 +1,12 @@
 import { normalizeApiError, type ApiRequestOptions } from "./types";
 
-const apiBaseUrl =
-  process.env.NEXT_PUBLIC_NODEPROX_API_URL ?? "http://localhost:3001";
+const sameOriginApiPrefix = "/api";
 
 export async function apiRequestBrowser<T>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetch(`${sameOriginApiPrefix}${path}`, {
     ...options,
     credentials: "include",
   });

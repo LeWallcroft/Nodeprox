@@ -1,28 +1,28 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { apiRequestBrowser } from "../../../lib/api/browser";
+import { useLogin } from "../../../lib/domains/auth/hooks";
+import { errorMessage } from "../../../components/domains/feedback";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const login = useLogin();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setLoading(true);
     setError(null);
     try {
-      await apiRequestBrowser<void>("/auth/login", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+      await login.mutateAsync({ email, password });
       window.location.assign("/");
-    } catch {
-      setError("No se pudo iniciar sesión. Revisa tus credenciales.");
-      setLoading(false);
+    } catch (cause) {
+      setError(
+        errorMessage(
+          cause,
+          "No se pudo iniciar sesión. Revisa tus credenciales.",
+        ),
+      );
     }
   }
 
@@ -78,9 +78,9 @@ export default function LoginPage() {
           <button
             className="inline-flex min-h-control items-center justify-center rounded-lg border border-transparent bg-primary px-3.5 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60"
             type="submit"
-            disabled={loading}
+            disabled={login.isPending}
           >
-            {loading ? "Ingresando..." : "Ingresar"}
+            {login.isPending ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
       </section>

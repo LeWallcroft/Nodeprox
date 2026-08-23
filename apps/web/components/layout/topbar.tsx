@@ -1,8 +1,12 @@
 "use client";
 
 import type { AuthenticatedUserView } from "../../lib/api/types";
+import { useRouter } from "next/navigation";
+import { useLogout } from "../../lib/domains/auth/hooks";
 
 export function Topbar({ user }: { user: AuthenticatedUserView | null }) {
+  const router = useRouter();
+  const logout = useLogout();
   function openMobileNavigation() {
     window.dispatchEvent(new Event("nodeprox:open-mobile-nav"));
   }
@@ -33,6 +37,17 @@ export function Topbar({ user }: { user: AuthenticatedUserView | null }) {
         <span className="max-[640px]:hidden">
           {user?.email ?? "Sesión no disponible"}
         </span>
+        <button
+          className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3 font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
+          type="button"
+          disabled={logout.isPending}
+          onClick={async () => {
+            await logout.mutateAsync();
+            router.replace("/login");
+          }}
+        >
+          {logout.isPending ? "Saliendo…" : "Salir"}
+        </button>
       </div>
     </header>
   );
