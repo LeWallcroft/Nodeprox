@@ -14,6 +14,7 @@
     "db:migrate": "tsx database/scripts/migrate.ts",
     "db:seed:auth": "tsx database/scripts/seed-auth-user.ts",
     "db:bootstrap:admin": "tsx database/scripts/bootstrap-admin.ts",
+    "storage:smoke:b2": "tsx scripts/storage-smoke-b2.ts",
     "dev": "pnpm --filter @nodeprox/api dev",
     "format": "biome format --write .",
     "format:check": "biome format .",

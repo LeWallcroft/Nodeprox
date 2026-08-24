@@ -4,9 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --outDir dist --rootDir src",
+    "build": "tsc --outDir dist",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js",
+    "start": "node dist/apps/worker/src/index.js",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nodeprox/config": "workspace:*",
+    "@nodeprox/storage": "workspace:*",
+    "@nodeprox/types": "workspace:*",
+    "bullmq": "^6.2.0",
+    "drizzle-orm": "^0.44.7",
+    "ioredis": "^6.0.0",
+    "postgres": "^3.4.9",
+    "unzipper": "^0.12.5"
   }
 }

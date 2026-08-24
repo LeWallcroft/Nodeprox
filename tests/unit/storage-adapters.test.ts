@@ -1,7 +1,10 @@
 import { Readable } from "node:stream";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import type { StoragePort } from "../../apps/api/src/modules/uploads/application/ports/storage.ports.js";
 import { B2Storage } from "../../apps/api/src/modules/uploads/infrastructure/storage/b2.storage.js";
+import { FilesystemStorage } from "../../apps/api/src/modules/uploads/infrastructure/storage/filesystem.storage.js";
 
 const b2Config = {
   B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
@@ -21,17 +24,24 @@ describe("B2Storage contract", () => {
       .mockResolvedValueOnce({});
     Object.defineProperty(adapter, "client", { value: { send } });
 
-    await expect(
-      adapter.put({
-        key: "chapters/chapter/uploads/upload.zip",
-        body: Readable.from([Buffer.from("PK\\x03\\x04")]),
-        contentType: "application/zip",
-        sizeBytes: 4,
-      }),
-    ).resolves.toMatchObject({
+    const input = {
+      key: "chapters/chapter/uploads/upload.zip",
+      body: Readable.from([Buffer.from("PK\\x03\\x04")]),
+      contentType: "application/zip",
+      sizeBytes: 4,
+    };
+    const result = await adapter.put(input);
+    expect(result).toMatchObject({
       key: "chapters/chapter/uploads/upload.zip",
       etag: "etag-1",
+      sizeBytes: input.sizeBytes,
     });
+    const putCommand = send.mock.calls[0]?.[0] as {
+      input: Record<string, unknown>;
+    };
+    expect(putCommand.input.ContentLength).toBe(input.sizeBytes);
+    expect(putCommand.input.Body).toBe(input.body);
+    expect((input.body as Readable).readableFlowing).toBeNull();
     await expect(
       adapter.exists("chapters/chapter/uploads/upload.zip"),
     ).resolves.toBe(true);
@@ -55,5 +65,47 @@ describe("B2Storage contract", () => {
       value: { send: vi.fn().mockRejectedValue(failure) },
     });
     await expect(adapter.exists("unknown.zip")).rejects.toBe(failure);
+  });
+
+  it("reads a B2 object as a stream and preserves provider errors", async () => {
+    const adapter: StoragePort = new B2Storage(b2Config);
+    const body = Readable.from([Buffer.from("zip")]);
+    const send = vi.fn().mockResolvedValue({ Body: body });
+    Object.defineProperty(adapter, "client", { value: { send } });
+    await expect(
+      (await adapter.get("uploads/source.zip")).toArray(),
+    ).resolves.toEqual([Buffer.from("zip")]);
+
+    const failure = new Error("provider unavailable");
+    Object.defineProperty(adapter, "client", {
+      value: { send: vi.fn().mockRejectedValue(failure) },
+    });
+    await expect(adapter.get("uploads/source.zip")).rejects.toBe(failure);
+  });
+});
+
+describe("FilesystemStorage contract", () => {
+  it("reads objects as streams and rejects traversal", async () => {
+    const root = await mkdtemp(`${tmpdir()}\\nodeprox-storage-test-`);
+    try {
+      const adapter: StoragePort = new FilesystemStorage(root);
+      await adapter.put({
+        key: "uploads/source.zip",
+        body: Readable.from([Buffer.from("zip")]),
+        contentType: "application/zip",
+        sizeBytes: 3,
+      });
+      await expect(
+        (await adapter.get("uploads/source.zip")).toArray(),
+      ).resolves.toEqual([Buffer.from("zip")]);
+      await expect(adapter.get("../outside.zip")).rejects.toThrow(
+        "Invalid storage key",
+      );
+      await expect(adapter.get("missing.zip")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

@@ -14,7 +14,7 @@ import type {
 } from "../ports/chapter.ports.js";
 
 export type ChapterPermissionResult =
-  | { allowed: true; reason: "owner" | "helper" | "role" }
+  | { allowed: true; reason: "owner" | "helper" | "role"; seriesId: string }
   | {
       allowed: false;
       reason: "unauthenticated" | "not-found" | "denied" | "policy-error";
@@ -142,16 +142,16 @@ export class ChapterPermissionService {
             roleDecision.reason === "policy-error" ? "policy-error" : "denied",
         };
       if (roleDecision.role === "admin" || roleDecision.role === "gestor")
-        return { allowed: true, reason: "role" };
+        return { allowed: true, reason: "role", seriesId: chapter.seriesId };
       if (chapter.createdBy === input.context.userId)
-        return { allowed: true, reason: "owner" };
+        return { allowed: true, reason: "owner", seriesId: chapter.seriesId };
       const helper = await this.permissions.hasActivePermission({
         chapterId: input.chapterId,
         helperUserId: input.context.userId,
         permission: input.permission as DelegableChapterPermission,
       });
       return helper
-        ? { allowed: true, reason: "helper" }
+        ? { allowed: true, reason: "helper", seriesId: chapter.seriesId }
         : { allowed: false, reason: "denied" };
     } catch {
       return { allowed: false, reason: "policy-error" };

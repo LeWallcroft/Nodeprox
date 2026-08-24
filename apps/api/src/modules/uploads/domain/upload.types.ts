@@ -1,9 +1,4 @@
-export type StoredObject = {
-  key: string;
-  sizeBytes: number;
-  contentType: string;
-  etag?: string;
-};
+export type { StoredObject } from "@nodeprox/storage/port";
 
 export type UploadRecord = {
   id: string;
