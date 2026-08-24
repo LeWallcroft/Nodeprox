@@ -2,6 +2,17 @@ export interface ApiRequestOptions extends RequestInit {
   headers?: HeadersInit;
 }
 
+export interface ProblemDetails {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string;
+  instance?: string;
+  code?: string;
+  requestId?: string;
+  errors?: readonly unknown[];
+}
+
 export interface AuthenticatedUserView {
   id: string;
   email: string;
@@ -17,8 +28,23 @@ export class ApiError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly code?: string,
+    readonly details?: ProblemDetails,
   ) {
     super(message);
     this.name = "ApiError";
   }
+}
+
+export function normalizeApiError(status: number, payload?: unknown): ApiError {
+  const body = isProblemDetails(payload) ? payload : undefined;
+  const message =
+    typeof body?.detail === "string" && body.detail.trim()
+      ? body.detail
+      : `API request failed (${status})`;
+  return new ApiError(status, message, body?.code, body);
+}
+
+function isProblemDetails(payload: unknown): payload is ProblemDetails {
+  return typeof payload === "object" && payload !== null;
 }

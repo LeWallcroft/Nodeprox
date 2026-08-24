@@ -3,7 +3,10 @@ import type { BreadcrumbItem } from "../../lib/navigation/types";
 
 export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
   return (
-    <nav className="breadcrumbs" aria-label="Breadcrumbs">
+    <nav
+      className="flex flex-wrap gap-2 text-[13px] text-muted"
+      aria-label="Breadcrumbs"
+    >
       {items.map((item) => (
         <span
           key={`${item.href ?? item.label}-${item.current ? "current" : "item"}`}
@@ -16,7 +19,7 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
             </span>
           )}
           {item !== items.at(-1) ? (
-            <span className="breadcrumb-separator" aria-hidden="true">
+            <span className="ml-2 text-[#a5b1bd]" aria-hidden="true">
               /
             </span>
           ) : null}

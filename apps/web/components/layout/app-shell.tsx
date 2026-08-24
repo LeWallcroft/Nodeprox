@@ -11,11 +11,13 @@ export function AppShell({
   user: AuthenticatedUserView | null;
 }) {
   return (
-    <div className="app-shell">
+    <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <div className="shell-main">
+      <div className="min-w-0 flex-1">
         <Topbar user={user} />
-        <main className="content-area">{children}</main>
+        <main className="mx-auto w-full max-w-content p-page max-[640px]:p-page-mobile">
+          {children}
+        </main>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ export function SearchInput({
 }) {
   return (
     <input
-      className="search-input"
+      className="h-control-lg w-full max-w-xs rounded-lg border border-border bg-surface px-3 text-text placeholder:text-muted focus:border-primary focus:outline focus:outline-2 focus:outline-primary/20"
       type="search"
       placeholder={placeholder}
       aria-label={placeholder}
