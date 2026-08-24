@@ -130,6 +130,7 @@ describe("M4-A chapter upload", () => {
       chapterId,
       status: "uploaded",
       filename: "chapter.zip",
+      sizeBytes: Buffer.byteLength("PK\x03\x04nodeprox"),
     });
     const [intent] = await database.db
       .select()

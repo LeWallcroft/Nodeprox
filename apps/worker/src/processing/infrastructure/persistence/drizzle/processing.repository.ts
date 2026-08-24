@@ -11,6 +11,7 @@ import type {
   ProcessingAuditPort,
   ProcessingRepositoryPort,
 } from "../../../application/ports.js";
+import { sanitizeAuditMetadata } from "@nodeprox/types";
 export class DrizzleProcessingRepository
   implements ProcessingRepositoryPort, ProcessingAuditPort
 {
@@ -91,7 +92,7 @@ export class DrizzleProcessingRepository
       action: input.action,
       resourceType: input.resourceType,
       ...(input.resourceId ? { resourceId: input.resourceId } : {}),
-      metadata: input.metadata ?? {},
+      metadata: sanitizeAuditMetadata(input.metadata),
     });
   }
 }

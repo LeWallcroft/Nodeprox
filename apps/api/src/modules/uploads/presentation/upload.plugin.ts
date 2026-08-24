@@ -1,6 +1,5 @@
 import multipart from "@fastify/multipart";
 import type { FastifyInstance } from "fastify";
-import { Readable } from "node:stream";
 import { join } from "node:path";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
@@ -24,6 +23,7 @@ import {
 import { B2Storage } from "../infrastructure/storage/b2.storage.js";
 import { FilesystemStorage } from "../infrastructure/storage/filesystem.storage.js";
 import { DrizzleUploadRepository } from "../infrastructure/persistence/drizzle/upload.repository.js";
+import { stageMultipartFile } from "./multipart-file.js";
 
 const problem = (
   code: string,
@@ -88,28 +88,6 @@ const unprocessable = problem(
   "Unprocessable upload",
 );
 
-async function prefix(
-  stream: NodeJS.ReadableStream,
-): Promise<{ stream: NodeJS.ReadableStream; magicBytes: Uint8Array }> {
-  const source = stream as Readable;
-  const header = await new Promise<Buffer>((resolve, reject) => {
-    const onData = (chunk: Buffer | string) => {
-      source.pause();
-      resolve(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    };
-    source.once("data", onData);
-    source.once("error", reject);
-    source.once("end", () => resolve(Buffer.alloc(0)));
-  });
-  const combined = Readable.from(
-    (async function* () {
-      yield header;
-      for await (const chunk of source) yield chunk;
-    })(),
-  );
-  return { stream: combined, magicBytes: header.subarray(0, 4) };
-}
-
 export function registerUploadPlugin(
   app: FastifyInstance,
   db: NodeProxDatabase,
@@ -153,7 +131,7 @@ export function registerUploadPlugin(
       if (!params.chapterId) throw invalidMultipart;
       const part = await request.file().catch(() => null);
       if (part?.fieldname !== "file") throw invalidMultipart;
-      const prepared = await prefix(part.file);
+      const prepared = await stageMultipartFile(part.file);
       try {
         const result = await service.upload({
           context: { userId: context.userId, sessionId: context.sessionId },
@@ -162,7 +140,7 @@ export function registerUploadPlugin(
             stream: prepared.stream,
             filename: part.filename,
             contentType: part.mimetype,
-            sizeBytes: 0,
+            sizeBytes: prepared.sizeBytes,
             magicBytes: prepared.magicBytes,
             isTruncated: () => part.file.truncated,
           },
@@ -178,6 +156,8 @@ export function registerUploadPlugin(
           throw unprocessable;
         }
         throw error;
+      } finally {
+        await prepared.cleanup();
       }
     },
   );

@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
 import { createDatabase } from "../../database/client.js";
 import {
+  auditLogs,
   chapters,
   images,
   series,
@@ -93,6 +94,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await database.db.delete(auditLogs).where(eq(auditLogs.actorId, userId));
   await database.db.delete(images).where(inArray(images.chapterId, chapterIds));
   await database.db.delete(uploads).where(inArray(uploads.id, uploadIds));
   await database.db.delete(chapters).where(inArray(chapters.id, chapterIds));
@@ -103,6 +105,37 @@ afterAll(async () => {
 });
 
 describe("M4-B processing integration", () => {
+  it("sanitizes processing audit metadata at the persistence boundary", async () => {
+    const repository = new DrizzleProcessingRepository(database.db);
+    const actorId = userId;
+    await repository.append({
+      actorId,
+      action: "chapter.processing.completed",
+      resourceType: "chapter",
+      metadata: { result: "completed", imageCount: 4 },
+    });
+    const [record] = await database.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.actorId, actorId));
+    expect(record?.metadata).toEqual({ result: "completed", imageCount: 4 });
+    await expect(
+      repository.append({
+        actorId,
+        action: "chapter.processing.failed",
+        resourceType: "chapter",
+        metadata: {
+          token: "not-persisted",
+          accessToken: "not-persisted",
+          cookie: "not-persisted",
+          authorization: "not-persisted",
+          B2_APPLICATION_KEY: "not-persisted",
+        },
+      }),
+    ).rejects.toThrow("Audit metadata key is not allowed");
+    await database.db.delete(auditLogs).where(eq(auditLogs.actorId, actorId));
+  });
+
   it("processes uploaded to ready and persists image metadata", async () => {
     const fixture = await createFixture();
     const storage = new FilesystemStorage(storageRoot);
