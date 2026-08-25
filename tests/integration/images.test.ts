@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { FilesystemStorage } from "../../packages/storage/src/adapters.js";
+import { loadConfig } from "../../packages/config/src/index.js";
+import { PublicMediaUrl } from "../../apps/api/src/modules/images/domain/public-media-url.js";
 import { createDatabase } from "../../database/client.js";
 import {
   chapters,
@@ -128,6 +130,21 @@ describe("M5-B Images HTTP contract", () => {
       ],
     });
     expect(response.json().images[0]).not.toHaveProperty("storageKey");
+
+    const config = loadConfig({
+      DATABASE_URL: infrastructure.databaseUrl,
+      REDIS_URL: infrastructure.redisUrl,
+    });
+    const publicUrl = PublicMediaUrl.fromImage(config.PUBLIC_MEDIA_ORIGIN, {
+      id: imageId,
+      seriesId,
+      chapterId,
+      extension: "jpg",
+      contentType: "image/jpeg",
+    });
+    expect(publicUrl.toString()).toBe(
+      `https://media.nodeprox.org/series/${seriesId}/chapters/${chapterId}/images/${imageId}.jpg`,
+    );
   });
 
   it("returns metadata and streams content with persisted headers", async () => {
