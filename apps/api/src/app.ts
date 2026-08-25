@@ -18,11 +18,18 @@ import { registerImagePlugin } from "./modules/images/presentation/image.plugin.
 import { B2Storage } from "./modules/uploads/infrastructure/storage/b2.storage.js";
 import { FilesystemStorage } from "./modules/uploads/infrastructure/storage/filesystem.storage.js";
 import { join } from "node:path";
+import { DEFAULT_PUBLIC_MEDIA_ORIGIN } from "@nodeprox/config";
+import { DrizzleChapterCoreRepository } from "./modules/series/infrastructure/persistence/drizzle/series.repository.js";
+import { DrizzleImageRepository } from "./modules/images/infrastructure/persistence/drizzle/image.repository.js";
+import { DrizzlePublishedChapterRepository } from "./modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
+import { GetPublishedChapter } from "./modules/publication/application/services/get-published-chapter.js";
+import { registerPublicationPlugin } from "./modules/publication/presentation/publication.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
   secureCookie?: boolean;
   storage?: NodeProxStorageConfig;
+  publicMediaOrigin?: string;
 }
 
 export function buildApp(
@@ -83,6 +90,17 @@ export function buildApp(
       authentication,
       chapterPermissions,
       imageStorage,
+    );
+    const publishedRepository = new DrizzlePublishedChapterRepository(
+      new DrizzleChapterCoreRepository(dependencies.database),
+      new DrizzleImageRepository(dependencies.database),
+    );
+    registerPublicationPlugin(
+      app,
+      new GetPublishedChapter(
+        publishedRepository,
+        dependencies.publicMediaOrigin ?? DEFAULT_PUBLIC_MEDIA_ORIGIN,
+      ),
     );
   }
 

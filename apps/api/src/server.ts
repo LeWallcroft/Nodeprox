@@ -26,6 +26,7 @@ const app = buildApp(
     database: database.db,
     secureCookie: config.NODE_ENV === "production",
     storage: loadStorageConfig(),
+    publicMediaOrigin: config.PUBLIC_MEDIA_ORIGIN,
   },
 );
 dispatcher.start();
