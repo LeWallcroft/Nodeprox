@@ -1,3 +1,12 @@
+const SUPPORTED_ZIP_MIME_TYPES = new Set([
+  "application/zip",
+  "application/x-zip-compressed",
+]);
+
+export function isSupportedZipMimeType(mimeType: string): boolean {
+  return SUPPORTED_ZIP_MIME_TYPES.has(mimeType);
+}
+
 export function validateUploadMetadata(input: {
   filename: string;
   contentType: string;
@@ -19,7 +28,7 @@ export function validateUploadMetadata(input: {
     !filename.toLowerCase().endsWith(".zip")
   )
     throw new InvalidUploadError("extension");
-  if (input.contentType !== "application/zip")
+  if (!isSupportedZipMimeType(input.contentType))
     throw new InvalidUploadError("content-type");
   if (!Number.isInteger(input.sizeBytes) || input.sizeBytes < 0)
     throw new InvalidUploadError("size");

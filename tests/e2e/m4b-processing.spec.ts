@@ -172,8 +172,8 @@ test.describe("M4-B real upload processing", () => {
       const uploaded = await api.post(`/chapters/${chapterId}/upload`, {
         multipart: {
           file: {
-            name: "chapter.zip",
-            mimeType: "application/zip",
+            name: "24.zip",
+            mimeType: "application/x-zip-compressed",
             buffer: validZip,
           },
         },
