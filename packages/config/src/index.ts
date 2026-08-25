@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const DEFAULT_PUBLIC_MEDIA_ORIGIN = "https://media.nodeprox.org";
+
 const configSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -13,7 +15,7 @@ const configSchema = z.object({
   REDIS_URL: z.url(),
   PUBLIC_MEDIA_ORIGIN: z
     .url()
-    .default("https://media.nodeprox.org")
+    .default(DEFAULT_PUBLIC_MEDIA_ORIGIN)
     .refine((value) => {
       const url = new URL(value);
       return (

@@ -149,6 +149,7 @@ async function login(
 test.describe("M4-B real upload processing", () => {
   test("processes a valid ZIP through API, outbox, BullMQ and Worker", async () => {
     let api = await request.newContext({ baseURL: "http://127.0.0.1:3001" });
+    let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
     const slug = `e2e-valid-${Date.now()}`;
     let seriesId = "";
@@ -208,6 +209,33 @@ test.describe("M4-B real upload processing", () => {
         rows.every((row) => row.sizeBytes > 0 && row.checksum.length === 64),
       ).toBe(true);
 
+      anonymous = await request.newContext({
+        baseURL: "http://127.0.0.1:3001",
+      });
+      const publicChapter = await anonymous.get(
+        `/public/chapters/${chapterId}`,
+      );
+      expect(publicChapter.status()).toBe(200);
+      const publicPayload = await publicChapter.json();
+      expect(publicPayload.id).toBe(chapterId);
+      expect(
+        publicPayload.images.map(
+          (image: { filename: string }) => image.filename,
+        ),
+      ).toEqual(["01.jpg", "02.png", "03.webp", "04.gif"]);
+      expect(
+        publicPayload.images.every((image: { url: string }) =>
+          image.url.startsWith(
+            `https://media.nodeprox.org/series/${seriesId}/chapters/${chapterId}/images/`,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        publicPayload.images.every(
+          (image: { storageKey?: string }) => !image.storageKey,
+        ),
+      ).toBe(true);
+
       const listed = await api.get(`/chapters/${chapterId}/images`);
       expect(listed.status()).toBe(200);
       const listedImages = (await listed.json()).images as Array<{
@@ -250,11 +278,13 @@ test.describe("M4-B real upload processing", () => {
         await database.db.delete(series).where(eq(series.id, seriesId));
       await database.sql.end();
       await api.dispose();
+      await anonymous?.dispose();
     }
   });
 
   test("marks an invalid ZIP failed and cleans partial processing state", async () => {
     let api = await request.newContext({ baseURL: "http://127.0.0.1:3001" });
+    let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
     const slug = `e2e-invalid-${Date.now()}`;
     let seriesId = "";
@@ -271,6 +301,11 @@ test.describe("M4-B real upload processing", () => {
         headers: { origin: "http://127.0.0.1:3001" },
       });
       chapterId = (await createdChapter.json()).id;
+      anonymous = await request.newContext({
+        baseURL: "http://127.0.0.1:3001",
+      });
+      const notReady = await anonymous.get(`/public/chapters/${chapterId}`);
+      expect(notReady.status()).toBe(404);
       const uploaded = await api.post(`/chapters/${chapterId}/upload`, {
         multipart: {
           file: {
@@ -323,6 +358,7 @@ test.describe("M4-B real upload processing", () => {
       );
       await database.sql.end();
       await api.dispose();
+      await anonymous?.dispose();
     }
   });
 });
