@@ -14,6 +14,10 @@ import { registerChapterPermissionPlugin } from "./modules/chapters/presentation
 import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
 import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
+import { registerImagePlugin } from "./modules/images/presentation/image.plugin.js";
+import { B2Storage } from "./modules/uploads/infrastructure/storage/b2.storage.js";
+import { FilesystemStorage } from "./modules/uploads/infrastructure/storage/filesystem.storage.js";
+import { join } from "node:path";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -64,6 +68,21 @@ export function buildApp(
         provider: "filesystem",
         uploadMaxSizeBytes: 536870912,
       },
+    );
+    const storageConfig = dependencies.storage ?? {
+      provider: "filesystem" as const,
+      uploadMaxSizeBytes: 536870912,
+    };
+    const imageStorage =
+      storageConfig.provider === "b2"
+        ? new B2Storage(storageConfig.b2)
+        : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
+    registerImagePlugin(
+      app,
+      dependencies.database,
+      authentication,
+      chapterPermissions,
+      imageStorage,
     );
   }
 
