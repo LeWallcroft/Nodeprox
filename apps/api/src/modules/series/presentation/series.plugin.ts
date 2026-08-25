@@ -10,9 +10,13 @@ import type { AuthorizationService } from "../../authorization/application/servi
 import { ChapterDeleteService } from "../../chapters/application/services/chapter-delete.service.js";
 import { ChapterCoreService } from "../../chapters/application/services/chapter-core.service.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
-import { DrizzleChapterCoreRepository } from "../infrastructure/persistence/drizzle/series.repository.js";
-import { DrizzleSeriesRepository } from "../infrastructure/persistence/drizzle/series.repository.js";
+import {
+  ChapterSequenceError,
+  DrizzleChapterCoreRepository,
+  DrizzleSeriesRepository,
+} from "../infrastructure/persistence/drizzle/series.repository.js";
 import { SeriesService } from "../application/services/series.service.js";
+import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
 const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
@@ -31,6 +35,7 @@ const chapterCreateSchema = z
   })
   .strict();
 const chapterPatchSchema = chapterCreateSchema.partial().strict();
+const assignmentSchema = z.object({ uploaderId: z.uuid() }).strict();
 
 const error = (
   code: string,
@@ -107,7 +112,13 @@ export function registerSeriesPlugin(
   );
   const repository = new DrizzleSeriesRepository(db);
   const chapters = new DrizzleChapterCoreRepository(db);
-  const seriesService = new SeriesService(repository, chapters, authorization);
+  const seriesService = new SeriesService(
+    repository,
+    chapters,
+    authorization,
+    repository,
+    new UserRepository(db),
+  );
   const chapterCore = new ChapterCoreService(chapters, chapterPermissions);
   const chapterDelete = new ChapterDeleteService(chapters, authorization);
 
@@ -117,6 +128,7 @@ export function registerSeriesPlugin(
         context(),
         parse(seriesCreateSchema, request.body),
       );
+      if ("forbidden" in result) throw forbidden;
       return reply.code(201).send(result);
     } catch (cause) {
       if (isUnique(cause)) throw conflict;
@@ -166,6 +178,36 @@ export function registerSeriesPlugin(
     },
   );
 
+  app.put(
+    "/series/:seriesId/uploader",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const { uploaderId } = parse(assignmentSchema, request.body);
+      const result = await seriesService.assignUploader(
+        context(),
+        seriesId,
+        uploaderId,
+      );
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      if ("invalidTarget" in result) throw invalid;
+      return { assigned: true };
+    },
+  );
+
+  app.delete(
+    "/series/:seriesId/uploader",
+    { preHandler: session },
+    async (request, reply) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const result = await seriesService.clearUploader(context(), seriesId);
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      return reply.code(204).send();
+    },
+  );
+
   app.post(
     "/series/:seriesId/chapters",
     { preHandler: session },
@@ -181,7 +223,8 @@ export function registerSeriesPlugin(
         if ("forbidden" in result) throw forbidden;
         return reply.code(201).send(result);
       } catch (cause) {
-        if (isUnique(cause)) throw conflict;
+        if (isUnique(cause) || cause instanceof ChapterSequenceError)
+          throw conflict;
         throw cause;
       }
     },
@@ -220,6 +263,7 @@ export function registerSeriesPlugin(
         );
         if ("notFound" in result) throw notFound;
         if ("denied" in result) throw forbidden;
+        if ("conflict" in result) throw conflict;
         return result.chapter;
       } catch (cause) {
         if (isUnique(cause)) throw conflict;

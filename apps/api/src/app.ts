@@ -9,6 +9,7 @@ import { HealthRepository } from "./modules/health/health.repository.js";
 import { HealthService } from "./modules/health/health.service.js";
 import type { NodeProxDatabase } from "../../../database/client.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
+import { requireSession } from "./modules/authentication/presentation/session-guards.js";
 import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
@@ -21,9 +22,11 @@ import { join } from "node:path";
 import { DEFAULT_PUBLIC_MEDIA_ORIGIN } from "@nodeprox/config";
 import { DrizzleChapterCoreRepository } from "./modules/series/infrastructure/persistence/drizzle/series.repository.js";
 import { DrizzleImageRepository } from "./modules/images/infrastructure/persistence/drizzle/image.repository.js";
+import { ImageQueryService } from "./modules/images/application/services/image-query.service.js";
 import { DrizzlePublishedChapterRepository } from "./modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
 import { GetPublishedChapter } from "./modules/publication/application/services/get-published-chapter.js";
 import { registerPublicationPlugin } from "./modules/publication/presentation/publication.plugin.js";
+import { registerIdentityPlugin } from "./modules/identity/presentation/identity.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -51,6 +54,12 @@ export function buildApp(
       app,
       dependencies.database,
       authentication,
+    );
+    registerIdentityPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
     );
     const chapterPermissions = registerChapterPermissionPlugin(
       app,
@@ -84,13 +93,17 @@ export function buildApp(
       storageConfig.provider === "b2"
         ? new B2Storage(storageConfig.b2)
         : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
-    registerImagePlugin(
-      app,
-      dependencies.database,
-      authentication,
-      chapterPermissions,
-      imageStorage,
-    );
+    registerImagePlugin(app, {
+      imageQueryService: new ImageQueryService(
+        new DrizzleImageRepository(dependencies.database),
+        chapterPermissions,
+        imageStorage,
+      ),
+      sessionGuard: requireSession(
+        authentication.service,
+        authentication.cookies,
+      ),
+    });
     const publishedRepository = new DrizzlePublishedChapterRepository(
       new DrizzleChapterCoreRepository(dependencies.database),
       new DrizzleImageRepository(dependencies.database),

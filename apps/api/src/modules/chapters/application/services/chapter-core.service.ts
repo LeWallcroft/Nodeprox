@@ -36,6 +36,11 @@ export class ChapterCoreService {
       permission: "chapters.edit",
     });
     if (!decision.allowed) return { denied: true as const };
+    if (
+      input.chapterNumber !== undefined &&
+      input.chapterNumber !== chapter.chapterNumber
+    )
+      return { conflict: true as const };
     const updated = await this.chapters.update(id, input);
     return updated ? { chapter: updated } : { notFound: true as const };
   }

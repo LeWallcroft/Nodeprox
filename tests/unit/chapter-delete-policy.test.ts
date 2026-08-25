@@ -13,8 +13,15 @@ describe("M3 chapter delete policy", () => {
       evaluateChapterDelete({ ...base, actorRole: "admin" }),
     ).toMatchObject({ allowed: true, reason: "admin" });
     expect(
-      evaluateChapterDelete({ ...base, actorRole: "gestor" }),
+      evaluateChapterDelete({
+        ...base,
+        actorRole: "gestor",
+        seriesOwner: true,
+      }),
     ).toMatchObject({ allowed: true, reason: "gestor" });
+    expect(
+      evaluateChapterDelete({ ...base, actorRole: "gestor" }),
+    ).toMatchObject({ allowed: false, reason: "not-owner" });
     expect(
       evaluateChapterDelete({
         ...base,

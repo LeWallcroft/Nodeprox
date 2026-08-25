@@ -14,7 +14,11 @@ import type {
 } from "../ports/chapter.ports.js";
 
 export type ChapterPermissionResult =
-  | { allowed: true; reason: "owner" | "helper" | "role"; seriesId: string }
+  | {
+      allowed: true;
+      reason: "owner" | "helper" | "assigned" | "role";
+      seriesId: string;
+    }
   | {
       allowed: false;
       reason: "unauthenticated" | "not-found" | "denied" | "policy-error";
@@ -141,10 +145,28 @@ export class ChapterPermissionService {
           reason:
             roleDecision.reason === "policy-error" ? "policy-error" : "denied",
         };
-      if (roleDecision.role === "admin" || roleDecision.role === "gestor")
+      if (roleDecision.role === "admin")
+        return { allowed: true, reason: "role", seriesId: chapter.seriesId };
+      if (
+        roleDecision.role === "gestor" &&
+        this.chapters.isSeriesOwner &&
+        (await this.chapters.isSeriesOwner(
+          chapter.seriesId,
+          input.context.userId,
+        ))
+      )
         return { allowed: true, reason: "role", seriesId: chapter.seriesId };
       if (chapter.createdBy === input.context.userId)
         return { allowed: true, reason: "owner", seriesId: chapter.seriesId };
+      if (
+        this.chapters.isAssigned &&
+        (await this.chapters.isAssigned(chapter.seriesId, input.context.userId))
+      )
+        return {
+          allowed: true,
+          reason: "assigned",
+          seriesId: chapter.seriesId,
+        };
       const helper = await this.permissions.hasActivePermission({
         chapterId: input.chapterId,
         helperUserId: input.context.userId,
@@ -179,12 +201,14 @@ export class ChapterPermissionService {
     if (!chapter) return { allowed: false, reason: "not-found" };
     const decision = await this.authorization.authorize(context, permission);
     if (!decision.allowed) return { allowed: false, reason: "denied" };
+    if (decision.role === "admin") return { allowed: true };
     if (
-      decision.role === "admin" ||
-      decision.role === "gestor" ||
-      chapter.createdBy === context.userId
+      decision.role === "gestor" &&
+      this.chapters.isSeriesOwner &&
+      (await this.chapters.isSeriesOwner(chapter.seriesId, context.userId))
     )
       return { allowed: true };
+    if (chapter.createdBy === context.userId) return { allowed: true };
     return { allowed: false, reason: "denied" };
   }
 

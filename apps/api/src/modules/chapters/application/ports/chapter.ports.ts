@@ -6,6 +6,8 @@ import type { DelegableChapterPermission } from "../../domain/chapter-permission
 
 export interface ChapterRepositoryPort {
   findById(id: string): Promise<ChapterRecord | null>;
+  isAssigned?(seriesId: string, userId: string): Promise<boolean>;
+  isSeriesOwner?(seriesId: string, userId: string): Promise<boolean>;
 }
 
 export interface ChapterUserPort {
