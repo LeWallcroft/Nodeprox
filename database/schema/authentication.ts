@@ -37,7 +37,7 @@ export const users = pgTable(
     uniqueIndex("users_email_unique").on(table.email),
     check(
       "users_status_check",
-      sql`${table.status} in ('active', 'suspended', 'disabled')`,
+      sql`${table.status} in ('pending', 'active', 'rejected', 'suspended', 'disabled')`,
     ),
   ],
 );

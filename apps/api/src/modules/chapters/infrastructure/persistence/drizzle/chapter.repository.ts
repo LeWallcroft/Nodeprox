@@ -4,6 +4,8 @@ import {
   auditLogs,
   chapterPermissions,
   chapters,
+  series,
+  seriesAssignments,
   users,
 } from "../../../../../../../../database/schema/index.js";
 import { isCooldownActive } from "../../../domain/chapter-permission.policy.js";
@@ -60,6 +62,35 @@ export class DrizzleChapterRepository
           .limit(1)
       )[0] ?? null;
     return row ? toChapter(row) : null;
+  }
+
+  async isAssigned(seriesId: string, userId: string): Promise<boolean> {
+    const row =
+      (
+        await this.db
+          .select({ id: seriesAssignments.id })
+          .from(seriesAssignments)
+          .where(
+            and(
+              eq(seriesAssignments.seriesId, seriesId),
+              eq(seriesAssignments.uploaderId, userId),
+            ),
+          )
+          .limit(1)
+      )[0] ?? null;
+    return row !== null;
+  }
+
+  async isSeriesOwner(seriesId: string, userId: string): Promise<boolean> {
+    const row =
+      (
+        await this.db
+          .select({ id: series.id })
+          .from(series)
+          .where(and(eq(series.id, seriesId), eq(series.createdBy, userId)))
+          .limit(1)
+      )[0] ?? null;
+    return row !== null;
   }
 
   async existsById(id: string): Promise<boolean> {

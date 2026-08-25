@@ -11,6 +11,7 @@ export interface SeriesRepositoryPort {
     createdBy: string;
   }): Promise<SeriesRecord>;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
+  listAll(): Promise<SeriesRecord[]>;
   findById(id: string): Promise<SeriesRecord | null>;
   update(
     id: string,
@@ -22,6 +23,25 @@ export interface SeriesRepositoryPort {
   ): Promise<SeriesRecord | null>;
   delete(id: string): Promise<void>;
   countChapters(id: string): Promise<number>;
+}
+
+export interface SeriesAssignmentRepositoryPort {
+  listAssignedSeriesIds(uploaderId: string): Promise<string[]>;
+  isAssigned(seriesId: string, uploaderId: string): Promise<boolean>;
+  assign(input: {
+    seriesId: string;
+    uploaderId: string;
+    assignedBy: string;
+  }): Promise<void>;
+  clear(seriesId: string): Promise<void>;
+}
+
+export interface SeriesUserPort {
+  findById(id: string): Promise<{
+    id: string;
+    status: string;
+    role?: "admin" | "gestor" | "uploader";
+  } | null>;
 }
 
 export interface ChapterCoreRepositoryPort {
@@ -41,4 +61,5 @@ export interface ChapterCoreRepositoryPort {
     },
   ): Promise<ChapterCoreRecord | null>;
   delete(id: string): Promise<void>;
+  isAssigned?(seriesId: string, uploaderId: string): Promise<boolean>;
 }

@@ -57,14 +57,14 @@ beforeAll(async () => {
       email: emails.owner,
       passwordHash,
       status: "active",
-      role: "uploader",
+      role: "gestor",
     },
     {
       id: otherId,
       email: emails.other,
       passwordHash,
       status: "active",
-      role: "uploader",
+      role: "gestor",
     },
     {
       id: helperId,
@@ -273,7 +273,7 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: otherCookie },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await app.inject({
@@ -331,7 +331,7 @@ describe("M3 Series and Chapters Core", () => {
     expect(forged.statusCode).toBe(422);
   });
 
-  it("keeps Chapter delete non-delegable while allowing admin, gestor, and owner", async () => {
+  it("keeps Chapter delete non-delegable while enforcing managed Series scope", async () => {
     const ownerCookie = await login(emails.owner);
     const helperCookie = await login(emails.helper);
     const adminCookie = await login(emails.admin);
@@ -413,7 +413,7 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: gestorCookie },
         })
       ).statusCode,
-    ).toBe(204);
+    ).toBe(403);
     expect(
       (
         await app.inject({

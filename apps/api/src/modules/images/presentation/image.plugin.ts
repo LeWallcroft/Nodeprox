@@ -1,14 +1,8 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { NodeProxDatabase } from "../../../../../../database/client.js";
-import type { StoragePort } from "@nodeprox/storage/port";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
-import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
-import type { SessionService } from "../../authentication/application/services/session.service.js";
-import { requireSession } from "../../authentication/presentation/session-guards.js";
-import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
-import { ImageQueryService } from "../application/services/image-query.service.js";
+import type { ImageQueryService } from "../application/services/image-query.service.js";
 import {
   ChapterNotFoundError,
   ImageAccessDeniedError,
@@ -16,7 +10,6 @@ import {
   ImageContentNotFoundError,
   ImageNotFoundError,
 } from "../application/services/image-query.service.js";
-import { DrizzleImageRepository } from "../infrastructure/persistence/drizzle/image.repository.js";
 
 const idSchema = z.object({ chapterId: z.uuid() }).strict();
 const imageIdSchema = z.object({ imageId: z.uuid() }).strict();
@@ -84,22 +77,19 @@ function context() {
   return { userId: value.userId, sessionId: value.sessionId };
 }
 
+type ImageSessionGuard = (
+  request: FastifyRequest,
+  reply: FastifyReply,
+) => Promise<void>;
+
 export function registerImagePlugin(
   app: FastifyInstance,
-  db: NodeProxDatabase,
-  authentication: { service: SessionService; cookies: SessionCookieAdapter },
-  chapterPermissions: ChapterPermissionService,
-  storage: StoragePort,
+  dependencies: {
+    imageQueryService: ImageQueryService;
+    sessionGuard: ImageSessionGuard;
+  },
 ): void {
-  const service = new ImageQueryService(
-    new DrizzleImageRepository(db),
-    chapterPermissions,
-    storage,
-  );
-  const session = requireSession(
-    authentication.service,
-    authentication.cookies,
-  );
+  const { imageQueryService: service, sessionGuard: session } = dependencies;
 
   app.get(
     "/chapters/:chapterId/images",

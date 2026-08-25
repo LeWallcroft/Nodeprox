@@ -44,4 +44,27 @@ export class UserRepository implements UserRepositoryPort {
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, id));
   }
+
+  async list() {
+    const rows = await this.db.select().from(users);
+    return rows.map(toUserRecord);
+  }
+
+  async updateStatus(id: string, status: typeof users.$inferInsert.status) {
+    const [row] = await this.db
+      .update(users)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return row ? toUserRecord(row) : null;
+  }
+
+  async updateRole(id: string, role: typeof users.$inferInsert.role) {
+    const [row] = await this.db
+      .update(users)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return row ? toUserRecord(row) : null;
+  }
 }

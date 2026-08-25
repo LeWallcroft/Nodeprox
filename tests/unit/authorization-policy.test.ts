@@ -42,7 +42,7 @@ describe("M2-A authorization policy", () => {
     const policy = serviceFor(new FakeRoles("uploader"));
     await expect(
       policy.authorize(context, PERMISSIONS.APPROVALS_CONSUME),
-    ).resolves.toMatchObject({ allowed: true, role: "uploader" });
+    ).resolves.toMatchObject({ allowed: false, reason: "permission-denied" });
     await expect(
       policy.authorize(context, PERMISSIONS.ADMIN_API_MANAGE),
     ).resolves.toMatchObject({ allowed: false, reason: "permission-denied" });
@@ -73,7 +73,7 @@ describe("M2-A authorization policy", () => {
       }),
     ).resolves.toMatchObject({
       allowed: false,
-      reason: "resource-context-unavailable",
+      reason: "permission-denied",
     });
   });
 

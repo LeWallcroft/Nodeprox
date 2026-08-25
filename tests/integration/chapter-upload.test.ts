@@ -45,7 +45,7 @@ async function login(targetEmail = email): Promise<string> {
 beforeAll(async () => {
   const passwordHash = await hasher.hash(password);
   await database.db.insert(users).values([
-    { id: userId, email, passwordHash, status: "active", role: "uploader" },
+    { id: userId, email, passwordHash, status: "active", role: "gestor" },
     {
       id: otherId,
       email: otherEmail,
