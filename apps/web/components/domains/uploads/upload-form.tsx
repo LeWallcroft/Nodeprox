@@ -5,6 +5,7 @@ import { errorMessage } from "../feedback";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { useUploadChapter } from "../../../lib/domains/uploads/hooks";
+import { isZipFile } from "../../../lib/domains/uploads/utils";
 
 export function UploadForm({
   seriesId,
@@ -24,8 +25,8 @@ export function UploadForm({
     if (!selected) return;
     if (!selected.name.toLowerCase().endsWith(".zip"))
       setValidation("Selecciona un archivo con extensión .zip.");
-    else if (selected.type && selected.type !== "application/zip")
-      setValidation("El archivo debe tener MIME application/zip.");
+    else if (!isZipFile(selected))
+      setValidation("El archivo debe tener MIME compatible con ZIP.");
     else if (/[\\/\0]/.test(selected.name))
       setValidation("El nombre del archivo no es válido.");
   }
