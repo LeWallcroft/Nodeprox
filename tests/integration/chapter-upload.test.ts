@@ -157,26 +157,52 @@ describe("M4-A chapter upload", () => {
     });
     expect(forbidden.statusCode).toBe(403);
 
-    const mimeChapter = await app.inject({
+    const alternateMimeChapter = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie },
       payload: { chapterNumber: 2 },
     });
-    const mimeUpload = multipart("application/octet-stream", "PK\x03\x04");
-    const mimeRejected = await app.inject({
+    const alternateMimeUpload = multipart(
+      "application/x-zip-compressed",
+      "PK\x03\x04nodeprox",
+    );
+    const alternateMimeAccepted = await app.inject({
       method: "POST",
-      url: `/chapters/${mimeChapter.json().id}/upload`,
-      headers: { cookie, ...mimeUpload.headers },
-      payload: mimeUpload.body,
+      url: `/chapters/${alternateMimeChapter.json().id}/upload`,
+      headers: { cookie, ...alternateMimeUpload.headers },
+      payload: alternateMimeUpload.body,
     });
-    expect(mimeRejected.statusCode).toBe(415);
+    expect(alternateMimeAccepted.statusCode).toBe(201);
+
+    const rejectedMimes = [
+      "image/jpeg",
+      "image/png",
+      "application/pdf",
+      "application/x-msdownload",
+    ];
+    for (const [index, contentType] of rejectedMimes.entries()) {
+      const rejectedChapter = await app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/chapters`,
+        headers: { cookie },
+        payload: { chapterNumber: index + 3 },
+      });
+      const rejectedUpload = multipart(contentType, "PK\x03\x04");
+      const rejected = await app.inject({
+        method: "POST",
+        url: `/chapters/${rejectedChapter.json().id}/upload`,
+        headers: { cookie, ...rejectedUpload.headers },
+        payload: rejectedUpload.body,
+      });
+      expect(rejected.statusCode).toBe(415);
+    }
 
     const magicChapter = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie },
-      payload: { chapterNumber: 3 },
+      payload: { chapterNumber: 7 },
     });
     const magicUpload = multipart("application/zip", "NOPE");
     const magicRejected = await app.inject({
