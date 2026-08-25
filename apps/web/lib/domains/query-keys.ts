@@ -11,4 +11,7 @@ export const queryKeys = {
   chapters: {
     detail: (chapterId: string) => ["chapters", "detail", chapterId] as const,
   },
+  publication: {
+    chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,
+  },
 } as const;

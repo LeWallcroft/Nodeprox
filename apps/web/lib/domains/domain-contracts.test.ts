@@ -4,6 +4,7 @@ import { createChapter, listChapters } from "./chapters/api";
 import { queryKeys } from "./query-keys";
 import { deleteSeries, listSeries } from "./series/api";
 import { uploadChapter } from "./uploads/api";
+import { getPublicChapter } from "./publication/api";
 
 describe("frontend domain contract adapters", () => {
   it("keeps domain query keys stable", () => {
@@ -23,6 +24,33 @@ describe("frontend domain contract adapters", () => {
       "detail",
       "chapter-1",
     ]);
+    expect(queryKeys.publication.chapter("chapter-1")).toEqual([
+      "public",
+      "chapters",
+      "chapter-1",
+    ]);
+  });
+
+  it("uses the public chapter manifest route and preserves its public URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "chapter-1",
+          images: [{ url: "https://media.nodeprox.org/image.webp" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const manifest = await getPublicChapter("chapter-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/public/chapters/chapter-1",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(manifest.images[0]?.url).toBe(
+      "https://media.nodeprox.org/image.webp",
+    );
+    vi.unstubAllGlobals();
   });
 
   it("uses the real Series and Chapter routes", async () => {

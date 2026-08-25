@@ -35,6 +35,10 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (/^chapters\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
   if (/^chapters\/[^/]+\/upload$/.test(value)) return method === "POST";
+  if (/^chapters\/[^/]+\/images$/.test(value)) return method === "GET";
+  if (/^images\/[^/]+$/.test(value)) return method === "GET";
+  if (/^images\/[^/]+\/content$/.test(value)) return method === "GET";
+  if (/^public\/chapters\/[^/]+$/.test(value)) return method === "GET";
   return false;
 }
 

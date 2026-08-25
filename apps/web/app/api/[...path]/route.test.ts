@@ -146,6 +146,26 @@ describe("same-origin API proxy", () => {
     },
   );
 
+  it.each([
+    ["chapters", "chapter-1", "images"],
+    ["images", "image-1"],
+    ["images", "image-1", "content"],
+    ["public", "chapters", "chapter-1"],
+  ])("allows the F1 GET route %s", async (...path) => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ images: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", backend);
+    const response = await GET(
+      new Request(`http://localhost:3000/api/${path.join("/")}`),
+      context(path),
+    );
+    expect(response.status).toBe(200);
+    vi.unstubAllGlobals();
+  });
+
   it("rejects invalid paths and contains backend connection errors", async () => {
     const invalid = await GET(
       new Request("http://localhost:3000/api/admin/raw"),
