@@ -11,6 +11,18 @@ const configSchema = z.object({
     .default("info"),
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),
+  PUBLIC_MEDIA_ORIGIN: z
+    .url()
+    .default("https://media.nodeprox.org")
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        (url.pathname === "/" || url.pathname === "") &&
+        !url.search &&
+        !url.hash
+      );
+    }, "PUBLIC_MEDIA_ORIGIN must be an absolute HTTP(S) origin without a path"),
   UPLOAD_MAX_SIZE_BYTES: z.coerce.number().int().positive().default(536870912),
   B2_ENDPOINT: z.url().optional(),
   B2_REGION: z.string().trim().min(1).optional(),

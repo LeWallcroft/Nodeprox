@@ -16,7 +16,39 @@ describe("NodeProx configuration", () => {
       API_PORT: 3000,
       LOG_LEVEL: "info",
       NODE_ENV: "development",
+      PUBLIC_MEDIA_ORIGIN: "https://media.nodeprox.org",
     });
+  });
+
+  it("validates the public media origin", () => {
+    expect(
+      loadConfig({
+        DATABASE_URL: "postgres://nodeprox:nodeprox@localhost:5432/nodeprox",
+        REDIS_URL: "redis://localhost:6379",
+        PUBLIC_MEDIA_ORIGIN: "https://media.example.test/",
+      }).PUBLIC_MEDIA_ORIGIN,
+    ).toBe("https://media.example.test/");
+    expect(() =>
+      loadConfig({
+        DATABASE_URL: "postgres://nodeprox:nodeprox@localhost:5432/nodeprox",
+        REDIS_URL: "redis://localhost:6379",
+        PUBLIC_MEDIA_ORIGIN: "https://media.example.test/path",
+      }),
+    ).toThrow();
+
+    for (const invalidOrigin of [
+      "ftp://media.nodeprox.org",
+      "https://media.nodeprox.org?foo=bar",
+      "https://media.nodeprox.org#section",
+    ]) {
+      expect(() =>
+        loadConfig({
+          DATABASE_URL: "postgres://nodeprox:nodeprox@localhost:5432/nodeprox",
+          REDIS_URL: "redis://localhost:6379",
+          PUBLIC_MEDIA_ORIGIN: invalidOrigin,
+        }),
+      ).toThrow();
+    }
   });
 
   it("rejects missing infrastructure configuration", () => {
