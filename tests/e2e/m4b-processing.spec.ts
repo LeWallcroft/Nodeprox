@@ -207,6 +207,37 @@ test.describe("M4-B real upload processing", () => {
       expect(
         rows.every((row) => row.sizeBytes > 0 && row.checksum.length === 64),
       ).toBe(true);
+
+      const listed = await api.get(`/chapters/${chapterId}/images`);
+      expect(listed.status()).toBe(200);
+      const listedImages = (await listed.json()).images as Array<{
+        id: string;
+        filename: string;
+        sortOrder: number;
+        storageKey?: string;
+      }>;
+      expect(listedImages.map((image) => image.filename)).toEqual([
+        "01.jpg",
+        "02.png",
+        "03.webp",
+        "04.gif",
+      ]);
+      expect(listedImages.map((image) => image.sortOrder)).toEqual([
+        1, 2, 3, 4,
+      ]);
+      expect(listedImages.every((image) => !image.storageKey)).toBe(true);
+
+      const first = listedImages[0];
+      if (!first) throw new Error("expected first image");
+      const metadata = await api.get(`/images/${first.id}`);
+      expect(metadata.status()).toBe(200);
+      expect((await metadata.json()).storageKey).toBeUndefined();
+
+      const content = await api.get(`/images/${first.id}/content`);
+      expect(content.status()).toBe(200);
+      expect(content.headers()["content-type"]).toContain("image/jpeg");
+      expect(Number(content.headers()["content-length"])).toBeGreaterThan(0);
+      expect((await content.body()).length).toBeGreaterThan(0);
     } finally {
       if (chapterId) {
         await database.db.delete(images).where(eq(images.chapterId, chapterId));
