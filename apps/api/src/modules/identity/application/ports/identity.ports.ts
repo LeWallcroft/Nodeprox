@@ -16,6 +16,13 @@ export interface IdentityUserRepositoryPort {
   findByEmail(email: string): Promise<UserRecord | null>;
   findById(id: string): Promise<UserRecord | null>;
   list(): Promise<UserRecord[]>;
-  updateStatus(id: string, status: UserStatus): Promise<UserRecord | null>;
-  updateRole(id: string, role: IdentityRole): Promise<UserRecord | null>;
+  review(input: {
+    id: string;
+    expectedStatus: UserStatus;
+    status: UserStatus;
+    role?: IdentityRole | undefined;
+  }): Promise<
+    | { outcome: "updated"; user: UserRecord }
+    | { outcome: "not-found" | "conflict" }
+  >;
 }

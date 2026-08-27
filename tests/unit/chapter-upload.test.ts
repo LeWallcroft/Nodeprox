@@ -11,13 +11,15 @@ const valid = {
   contentType: "application/zip",
   sizeBytes: 10,
   maxSizeBytes: 100,
-  magicBytes: Uint8Array.from([0x50, 0x4b, 0x03, 0x04]),
 };
 
 describe("chapter upload policy", () => {
   it("accepts only the supported ZIP transport MIME types", () => {
     expect(isSupportedZipMimeType("application/zip")).toBe(true);
     expect(isSupportedZipMimeType("application/x-zip-compressed")).toBe(true);
+    expect(isSupportedZipMimeType("  Application/X-Zip-Compressed  ")).toBe(
+      true,
+    );
     expect(isSupportedZipMimeType("image/jpeg")).toBe(false);
     expect(isSupportedZipMimeType("image/png")).toBe(false);
     expect(isSupportedZipMimeType("application/pdf")).toBe(false);
@@ -41,12 +43,9 @@ describe("chapter upload policy", () => {
         contentType: "application/octet-stream",
       }),
     ).toThrow(InvalidUploadError);
-    expect(() =>
-      validateUploadMetadata({
-        ...valid,
-        magicBytes: Uint8Array.from([0, 0, 0, 0]),
-      }),
-    ).toThrow(InvalidUploadError);
+    expect(() => validateUploadMetadata({ ...valid, sizeBytes: 0 })).toThrow(
+      InvalidUploadError,
+    );
     expect(() => validateUploadMetadata({ ...valid, sizeBytes: 101 })).toThrow(
       UploadTooLargeError,
     );

@@ -34,6 +34,20 @@ class FakeUsers implements IdentityUserRepositoryPort {
   async list() {
     return this.records;
   }
+  async review(input: {
+    id: string;
+    expectedStatus: UserRecord["status"];
+    status: UserRecord["status"];
+    role?: "admin" | "gestor" | "uploader" | undefined;
+  }) {
+    const record = await this.findById(input.id);
+    if (!record) return { outcome: "not-found" as const };
+    if (record.status !== input.expectedStatus)
+      return { outcome: "conflict" as const };
+    record.status = input.status;
+    if (input.role) record.role = input.role;
+    return { outcome: "updated" as const, user: record };
+  }
   async updateStatus(id: string, status: UserRecord["status"]) {
     const record = await this.findById(id);
     if (!record) return null;
@@ -92,5 +106,16 @@ describe("A1 identity service", () => {
     await expect(
       service.review(context, "user-1", { status: "active", role: "uploader" }),
     ).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  it("rejects invalid status transitions", async () => {
+    const users = new FakeUsers();
+    const service = new IdentityService(users, passwords, {
+      authorize: async () => ({ allowed: true, role: "admin" }),
+    } as never);
+    await expect(
+      service.review(context, "user-1", { status: "suspended" }),
+    ).rejects.toMatchObject({ name: "IdentityStateConflictError" });
+    expect(users.records[0]?.status).toBe("pending");
   });
 });

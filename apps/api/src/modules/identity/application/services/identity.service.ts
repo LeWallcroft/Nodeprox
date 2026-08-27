@@ -76,9 +76,16 @@ export class IdentityService {
     await this.requireAdmin(context);
     const existing = await this.users.findById(userId);
     if (!existing) return null;
-    if (input.role) await this.users.updateRole(userId, input.role);
-    const updated = await this.users.updateStatus(userId, input.status);
-    return updated ? publicUser(updated) : null;
+    if (!isReviewTransitionAllowed(existing, input))
+      throw new IdentityStateConflictError();
+    const result = await this.users.review({
+      id: userId,
+      expectedStatus: existing.status,
+      status: input.status,
+      ...(input.role ? { role: input.role } : {}),
+    });
+    if (result.outcome === "conflict") throw new IdentityStateConflictError();
+    return result.outcome === "updated" ? publicUser(result.user) : null;
   }
 
   private async requireAdmin(context: AuthorizationContext): Promise<void> {
@@ -87,5 +94,28 @@ export class IdentityService {
       PERMISSIONS.ADMIN_USERS_MANAGE,
     );
     if (!decision.allowed) throw unauthorized();
+  }
+}
+
+function isReviewTransitionAllowed(
+  existing: UserRecord,
+  input: {
+    status: Extract<UserStatus, "active" | "rejected" | "suspended">;
+    role?: IdentityRole | undefined;
+  },
+): boolean {
+  if (existing.status === input.status)
+    return input.role !== undefined && input.role !== existing.role;
+  if (existing.status === "pending")
+    return input.status === "active" || input.status === "rejected";
+  if (existing.status === "active") return input.status === "suspended";
+  if (existing.status === "suspended") return input.status === "active";
+  return false;
+}
+
+export class IdentityStateConflictError extends Error {
+  constructor() {
+    super("identity-state-conflict");
+    this.name = "IdentityStateConflictError";
   }
 }

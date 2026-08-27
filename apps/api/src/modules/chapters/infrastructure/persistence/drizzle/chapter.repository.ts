@@ -21,6 +21,9 @@ import type {
 import type { DelegableChapterPermission } from "../../../domain/chapter-permission.policy.js";
 import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
 import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
+import { lockCurrentAuthorization } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
+import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
+import { evaluateChapterContextualAuthorization } from "../../../domain/chapter-permission.policy.js";
 
 const toChapter = (row: typeof chapters.$inferSelect): ChapterRecord => ({
   id: row.id,
@@ -217,6 +220,90 @@ export class DrizzleChapterRepository
         }),
       });
       return { count: active.length };
+    });
+  }
+
+  async revokeIfAuthorized(
+    input: Parameters<ChapterPermissionRepositoryPort["revokeIfAuthorized"]>[0],
+  ): ReturnType<ChapterPermissionRepositoryPort["revokeIfAuthorized"]> {
+    const snapshot = await this.findById(input.chapterId);
+    if (!snapshot) return { outcome: "not-found" };
+    return this.db.transaction(async (tx) => {
+      const actor = await lockCurrentAuthorization({
+        tx,
+        actor: input.actor,
+        permission: PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+      });
+      if (!actor.allowed) return { outcome: "denied" as const };
+
+      let isSeriesOwner = false;
+      let isAssigned = false;
+      if (actor.role !== "admin") {
+        const [lockedSeries] = await tx
+          .select({ createdBy: series.createdBy })
+          .from(series)
+          .where(eq(series.id, snapshot.seriesId))
+          .limit(1)
+          .for("update");
+        if (!lockedSeries) return { outcome: "not-found" as const };
+        isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
+        const [assignment] = await tx
+          .select({ uploaderId: seriesAssignments.uploaderId })
+          .from(seriesAssignments)
+          .where(eq(seriesAssignments.seriesId, snapshot.seriesId))
+          .limit(1)
+          .for("update");
+        isAssigned = assignment?.uploaderId === input.actor.userId;
+      }
+
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, input.chapterId))
+        .limit(1)
+        .for("update");
+      if (!chapter) return { outcome: "not-found" as const };
+      if (chapter.seriesId !== snapshot.seriesId)
+        return { outcome: "denied" as const };
+      const reason = evaluateChapterContextualAuthorization({
+        role: actor.role,
+        isSeriesOwner,
+        isAssigned,
+        hasHelperPermission: false,
+      });
+      if (!reason) return { outcome: "denied" as const };
+
+      const active = await tx
+        .select({ id: chapterPermissions.id })
+        .from(chapterPermissions)
+        .where(
+          and(
+            eq(chapterPermissions.chapterId, input.chapterId),
+            eq(chapterPermissions.helperUserId, input.helperUserId),
+            isNull(chapterPermissions.revokedAt),
+          ),
+        )
+        .for("update");
+      await tx
+        .update(chapterPermissions)
+        .set({ revokedAt: input.now, revokedBy: input.actor.userId })
+        .where(
+          and(
+            eq(chapterPermissions.chapterId, input.chapterId),
+            eq(chapterPermissions.helperUserId, input.helperUserId),
+            isNull(chapterPermissions.revokedAt),
+          ),
+        );
+      await tx.insert(auditLogs).values({
+        actorId: input.actor.userId,
+        action: "chapter.permission.revoked",
+        resourceType: "chapter",
+        resourceId: input.chapterId,
+        metadata: sanitizeAuditMetadata({
+          result: active.length > 0 ? "revoked" : "none",
+        }),
+      });
+      return { outcome: "revoked" as const, count: active.length };
     });
   }
 

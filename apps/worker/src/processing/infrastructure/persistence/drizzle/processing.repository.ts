@@ -63,12 +63,14 @@ export class DrizzleProcessingRepository
           checksum: record.checksum,
         })),
       );
-      await tx
+      const [chapter] = await tx
         .update(chapters)
         .set({ status: "ready", updatedAt: new Date() })
         .where(
           and(eq(chapters.id, chapterId), eq(chapters.status, "processing")),
-        );
+        )
+        .returning({ id: chapters.id });
+      if (!chapter) throw new Error("chapter-ready-transition-conflict");
     });
   }
   async deleteImages(chapterId: string): Promise<void> {

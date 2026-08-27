@@ -1,11 +1,10 @@
-import multipart from "@fastify/multipart";
-import type { FastifyInstance } from "fastify";
-import { join } from "node:path";
-import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import type { UploadTransferPort } from "@nodeprox/storage/port";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
+import type { FastifyInstance } from "fastify";
+import { z } from "zod";
+import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
-import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
@@ -15,15 +14,28 @@ import {
   UploadConflictError,
   UploadDeniedError,
   UploadNotFoundError,
+  UploadedObjectMismatchError,
+  UploadedObjectNotFoundError,
+  UploadProviderUnavailableError,
 } from "../application/services/chapter-upload.service.js";
 import {
   InvalidUploadError,
   UploadTooLargeError,
 } from "../domain/upload.policy.js";
-import { B2Storage } from "../infrastructure/storage/b2.storage.js";
-import { FilesystemStorage } from "../infrastructure/storage/filesystem.storage.js";
 import { DrizzleUploadRepository } from "../infrastructure/persistence/drizzle/upload.repository.js";
-import { stageMultipartFile } from "./multipart-file.js";
+
+const paramsSchema = z.object({ chapterId: z.uuid() }).strict();
+const uploadParamsSchema = z
+  .object({ chapterId: z.uuid(), uploadId: z.uuid() })
+  .strict();
+const initiateSchema = z
+  .object({
+    filename: z.string(),
+    contentType: z.string(),
+    sizeBytes: z.number(),
+  })
+  .strict();
+const STALE_UPLOAD_SWEEP_MS = 15 * 60 * 1000;
 
 const problem = (
   code: string,
@@ -39,10 +51,10 @@ const problem = (
     type: `https://nodeprox.dev/problems/${code}`,
   });
 
-const invalidMultipart = problem(
+const invalid = problem(
   "upload-invalid",
-  "The upload is invalid.",
-  400,
+  "The upload metadata is invalid.",
+  422,
   "Invalid upload",
 );
 const unauthorized = problem(
@@ -58,16 +70,28 @@ const forbidden = problem(
   "Forbidden",
 );
 const notFound = problem(
-  "chapter-not-found",
-  "The requested chapter was not found.",
+  "chapter-upload-not-found",
+  "The requested chapter or upload was not found.",
   404,
-  "Chapter not found",
+  "Chapter upload not found",
 );
 const conflict = problem(
   "upload-conflict",
-  "This chapter already has an upload.",
+  "The upload conflicts with the current Chapter state.",
   409,
   "Upload conflict",
+);
+const objectMissing = problem(
+  "upload-object-missing",
+  "The uploaded object is not available for verification.",
+  409,
+  "Uploaded object missing",
+);
+const objectMismatch = problem(
+  "upload-object-mismatch",
+  "The uploaded object does not match the initiated upload.",
+  422,
+  "Uploaded object mismatch",
 );
 const tooLarge = problem(
   "upload-too-large",
@@ -81,30 +105,54 @@ const unsupported = problem(
   415,
   "Unsupported media type",
 );
-const unprocessable = problem(
-  "upload-unprocessable",
-  "The ZIP upload metadata is invalid.",
-  422,
-  "Unprocessable upload",
+const providerUnavailable = problem(
+  "upload-provider-unavailable",
+  "The upload provider is temporarily unavailable.",
+  503,
+  "Upload provider unavailable",
 );
 
+function parse<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
+  const result = schema.safeParse(value);
+  if (!result.success) throw invalid;
+  return result.data;
+}
+
+function context() {
+  const value = getRequestContext();
+  if (!value?.userId || !value.sessionId) throw unauthorized;
+  return { userId: value.userId, sessionId: value.sessionId };
+}
+
+function mapUploadError(error: unknown): never {
+  if (error instanceof UploadDeniedError) throw forbidden;
+  if (error instanceof UploadNotFoundError) throw notFound;
+  if (error instanceof UploadConflictError) throw conflict;
+  if (error instanceof UploadedObjectNotFoundError) throw objectMissing;
+  if (error instanceof UploadedObjectMismatchError) throw objectMismatch;
+  if (error instanceof UploadTooLargeError) throw tooLarge;
+  if (error instanceof UploadProviderUnavailableError)
+    throw providerUnavailable;
+  if (error instanceof InvalidUploadError) {
+    if (error.reason === "content-type") throw unsupported;
+    throw invalid;
+  }
+  throw error;
+}
 export function registerUploadPlugin(
   app: FastifyInstance,
   db: NodeProxDatabase,
   authentication: { service: SessionService; cookies: SessionCookieAdapter },
-  authorization: AuthorizationService,
   chapterPermissions: ChapterPermissionService,
   storageConfig: NodeProxStorageConfig,
+  transfer: UploadTransferPort,
 ): void {
   const repository = new DrizzleUploadRepository(db);
-  const storage =
-    storageConfig.provider === "b2"
-      ? new B2Storage(storageConfig.b2)
-      : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
   const service = new ChapterUploadService(
     chapterPermissions,
     repository,
-    storage,
+    repository,
+    transfer,
     repository,
     storageConfig.uploadMaxSizeBytes,
   );
@@ -113,52 +161,72 @@ export function registerUploadPlugin(
     authentication.cookies,
   );
 
-  app.register(multipart, {
-    limits: {
-      files: 1,
-      fields: 10,
-      fileSize: storageConfig.uploadMaxSizeBytes,
-    },
-  });
-  void authorization;
   app.post(
-    "/chapters/:chapterId/upload",
+    "/chapters/:chapterId/uploads/initiate",
     { preHandler: session },
     async (request, reply) => {
-      const context = getRequestContext();
-      if (!context?.userId || !context.sessionId) throw unauthorized;
-      const params = request.params as { chapterId?: string };
-      if (!params.chapterId) throw invalidMultipart;
-      const part = await request.file().catch(() => null);
-      if (part?.fieldname !== "file") throw invalidMultipart;
-      const prepared = await stageMultipartFile(part.file);
       try {
-        const result = await service.upload({
-          context: { userId: context.userId, sessionId: context.sessionId },
-          chapterId: params.chapterId,
-          file: {
-            stream: prepared.stream,
-            filename: part.filename,
-            contentType: part.mimetype,
-            sizeBytes: prepared.sizeBytes,
-            magicBytes: prepared.magicBytes,
-            isTruncated: () => part.file.truncated,
-          },
-        });
-        return reply.code(201).send(result);
+        const { chapterId } = parse(paramsSchema, request.params);
+        const body = parse(initiateSchema, request.body);
+        return reply.code(201).send(
+          await service.initiate({
+            context: context(),
+            chapterId,
+            ...body,
+          }),
+        );
       } catch (error) {
-        if (error instanceof UploadDeniedError) throw forbidden;
-        if (error instanceof UploadNotFoundError) throw notFound;
-        if (error instanceof UploadConflictError) throw conflict;
-        if (error instanceof UploadTooLargeError) throw tooLarge;
-        if (error instanceof InvalidUploadError) {
-          if (error.reason === "content-type") throw unsupported;
-          throw unprocessable;
-        }
-        throw error;
-      } finally {
-        await prepared.cleanup();
+        mapUploadError(error);
       }
     },
   );
+
+  app.post(
+    "/chapters/:chapterId/uploads/:uploadId/complete",
+    { preHandler: session },
+    async (request) => {
+      try {
+        const { chapterId, uploadId } = parse(
+          uploadParamsSchema,
+          request.params,
+        );
+        return await service.complete({
+          context: context(),
+          chapterId,
+          uploadId,
+        });
+      } catch (error) {
+        mapUploadError(error);
+      }
+    },
+  );
+
+  app.post(
+    "/chapters/:chapterId/uploads/:uploadId/abort",
+    { preHandler: session },
+    async (request, reply) => {
+      try {
+        const { chapterId, uploadId } = parse(
+          uploadParamsSchema,
+          request.params,
+        );
+        await service.abort({ context: context(), chapterId, uploadId });
+        return reply.code(204).send();
+      } catch (error) {
+        mapUploadError(error);
+      }
+    },
+  );
+
+  const sweep = setInterval(
+    () =>
+      void service.cleanupStale(
+        new Date(
+          Date.now() - (storageConfig.uploadPendingTtlSeconds ?? 86400) * 1000,
+        ),
+      ),
+    STALE_UPLOAD_SWEEP_MS,
+  );
+  sweep.unref();
+  app.addHook("onClose", async () => clearInterval(sweep));
 }

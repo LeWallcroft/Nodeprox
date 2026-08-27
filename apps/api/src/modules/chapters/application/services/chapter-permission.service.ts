@@ -3,6 +3,7 @@ import type { AuthorizationService } from "../../../authorization/application/se
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import type { AuthorizationAuditRepository } from "../../../authorization/application/ports/authorization.ports.js";
 import {
+  evaluateChapterContextualAuthorization,
   isDelegableChapterPermission,
   type DelegableChapterPermission,
 } from "../../domain/chapter-permission.policy.js";
@@ -16,7 +17,7 @@ import type {
 export type ChapterPermissionResult =
   | {
       allowed: true;
-      reason: "owner" | "helper" | "assigned" | "role";
+      reason: "helper" | "assigned" | "role";
       seriesId: string;
     }
   | {
@@ -114,13 +115,15 @@ export class ChapterPermissionService {
         ? { notFound: true }
         : { denied: true };
     }
-    const result = await this.permissions.revoke({
+    const result = await this.permissions.revokeIfAuthorized({
+      actor: input.context,
       chapterId: input.chapterId,
       helperUserId: input.helperUserId,
-      revokedBy: input.context.userId,
       now: new Date(),
     });
-    return result;
+    if (result.outcome === "not-found") return { notFound: true };
+    if (result.outcome === "denied") return { denied: true };
+    return { count: result.count };
   }
 
   async check(input: {
@@ -145,35 +148,49 @@ export class ChapterPermissionService {
           reason:
             roleDecision.reason === "policy-error" ? "policy-error" : "denied",
         };
-      if (roleDecision.role === "admin")
-        return { allowed: true, reason: "role", seriesId: chapter.seriesId };
-      if (
+      const isSeriesOwner =
         roleDecision.role === "gestor" &&
-        this.chapters.isSeriesOwner &&
-        (await this.chapters.isSeriesOwner(
-          chapter.seriesId,
-          input.context.userId,
-        ))
-      )
-        return { allowed: true, reason: "role", seriesId: chapter.seriesId };
-      if (chapter.createdBy === input.context.userId)
-        return { allowed: true, reason: "owner", seriesId: chapter.seriesId };
-      if (
-        this.chapters.isAssigned &&
-        (await this.chapters.isAssigned(chapter.seriesId, input.context.userId))
-      )
+        Boolean(
+          this.chapters.isSeriesOwner &&
+            (await this.chapters.isSeriesOwner(
+              chapter.seriesId,
+              input.context.userId,
+            )),
+        );
+      const isAssigned =
+        roleDecision.role === "uploader" &&
+        Boolean(
+          this.chapters.isAssigned &&
+            (await this.chapters.isAssigned(
+              chapter.seriesId,
+              input.context.userId,
+            )),
+        );
+      const contextualReason = evaluateChapterContextualAuthorization({
+        role: roleDecision.role,
+        isSeriesOwner,
+        isAssigned,
+        hasHelperPermission: false,
+      });
+      if (contextualReason)
         return {
           allowed: true,
-          reason: "assigned",
+          reason: contextualReason,
           seriesId: chapter.seriesId,
         };
-      const helper = await this.permissions.hasActivePermission({
+      const hasHelperPermission = await this.permissions.hasActivePermission({
         chapterId: input.chapterId,
         helperUserId: input.context.userId,
         permission: input.permission as DelegableChapterPermission,
       });
-      return helper
-        ? { allowed: true, reason: "helper", seriesId: chapter.seriesId }
+      const reason = evaluateChapterContextualAuthorization({
+        role: roleDecision.role,
+        isSeriesOwner: false,
+        isAssigned: false,
+        hasHelperPermission,
+      });
+      return reason
+        ? { allowed: true, reason, seriesId: chapter.seriesId }
         : { allowed: false, reason: "denied" };
     } catch {
       return { allowed: false, reason: "policy-error" };
@@ -208,7 +225,12 @@ export class ChapterPermissionService {
       (await this.chapters.isSeriesOwner(chapter.seriesId, context.userId))
     )
       return { allowed: true };
-    if (chapter.createdBy === context.userId) return { allowed: true };
+    if (
+      decision.role === "uploader" &&
+      this.chapters.isAssigned &&
+      (await this.chapters.isAssigned(chapter.seriesId, context.userId))
+    )
+      return { allowed: true };
     return { allowed: false, reason: "denied" };
   }
 

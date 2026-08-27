@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1115.0",
-    "@fastify/multipart": "^10.1.1",
     "@nodeprox/config": "workspace:*",
     "@nodeprox/schemas": "workspace:*",
     "@nodeprox/storage": "workspace:*",

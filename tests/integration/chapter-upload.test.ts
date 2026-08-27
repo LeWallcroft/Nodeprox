@@ -1,3 +1,9 @@
+import {
+  UploadTransferObjectNotFoundError,
+  UploadTransferProviderError,
+  type UploadTransferPort,
+  type VerifiedUploadedObject,
+} from "../../packages/storage/src/port.js";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
@@ -13,17 +19,81 @@ import {
   users,
 } from "../../database/schema/index.js";
 
+class FakeTransfer implements UploadTransferPort {
+  readonly initiated: string[] = [];
+  readonly objects = new Map<string, VerifiedUploadedObject>();
+  verifyFailure: Error | null = null;
+  private verificationStarted: (() => void) | null = null;
+  private verificationRelease: Promise<void> | null = null;
+
+  async initiate(input: { key: string }) {
+    this.initiated.push(input.key);
+    return {
+      mode: "single" as const,
+      method: "PUT" as const,
+      url: `https://s3.example.test/${encodeURIComponent(input.key)}?signature=temporary`,
+      headers: { "content-type": "application/zip" },
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+  }
+
+  async verify(input: { key: string }) {
+    this.verificationStarted?.();
+    if (this.verificationRelease) await this.verificationRelease;
+    if (this.verifyFailure) {
+      const failure = this.verifyFailure;
+      this.verifyFailure = null;
+      throw failure;
+    }
+    const object = this.objects.get(input.key);
+    if (!object) throw new UploadTransferObjectNotFoundError();
+    return object;
+  }
+
+  async abort(input: { key: string }) {
+    this.objects.delete(input.key);
+  }
+
+  blockVerification() {
+    let started!: () => void;
+    let release!: () => void;
+    const startedPromise = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    this.verificationStarted = started;
+    this.verificationRelease = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return {
+      started: startedPromise,
+      release: () => {
+        this.verificationStarted = null;
+        this.verificationRelease = null;
+        release();
+      },
+    };
+  }
+}
+
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
+const transfer = new FakeTransfer();
 const app = buildApp(
   { logger: false },
-  { database: database.db, secureCookie: false },
+  {
+    database: database.db,
+    secureCookie: false,
+    storage: { provider: "filesystem", uploadMaxSizeBytes: 8 },
+    uploadTransfer: transfer,
+  },
 );
 const password = "m4-upload-password";
 const userId = randomUUID();
 const otherId = randomUUID();
+const replacementId = randomUUID();
 const email = `m4-upload-${userId}@example.com`;
 const otherEmail = `m4-upload-other-${otherId}@example.com`;
+const replacementEmail = `m4-upload-replacement-${replacementId}@example.com`;
 const hasher = new Argon2PasswordHasher();
 
 function cookieValue(header: string | string[] | undefined): string {
@@ -42,6 +112,108 @@ async function login(targetEmail = email): Promise<string> {
   return cookieValue(response.headers["set-cookie"]);
 }
 
+async function createChapter(cookie: string, chapterNumber: number) {
+  const createdSeries = await app.inject({
+    method: "POST",
+    url: "/series",
+    headers: { cookie },
+    payload: {
+      title: `Upload Series ${chapterNumber}`,
+      slug: `upload-${userId}-${chapterNumber}`,
+    },
+  });
+  const seriesId = createdSeries.json().id as string;
+  const createdChapter = await app.inject({
+    method: "POST",
+    url: `/series/${seriesId}/chapters`,
+    headers: { cookie },
+    payload: { chapterNumber: 1 },
+  });
+  return createdChapter.json().id as string;
+}
+
+async function initiate(
+  cookie: string,
+  chapterId: string,
+  sizeBytes = 4,
+  contentType = "application/zip",
+  filename = "chapter.zip",
+) {
+  return app.inject({
+    method: "POST",
+    url: `/chapters/${chapterId}/uploads/initiate`,
+    headers: { cookie },
+    payload: {
+      filename,
+      contentType,
+      sizeBytes,
+    },
+  });
+}
+
+async function seriesIdForChapter(chapterId: string): Promise<string> {
+  const [chapter] = await database.db
+    .select({ seriesId: chapters.seriesId })
+    .from(chapters)
+    .where(eq(chapters.id, chapterId));
+  if (!chapter) throw new Error("Expected chapter series");
+  return chapter.seriesId;
+}
+
+async function assignUploader(
+  ownerCookie: string,
+  chapterId: string,
+  uploaderId: string,
+) {
+  const response = await app.inject({
+    method: "PUT",
+    url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
+    headers: { cookie: ownerCookie },
+    payload: { uploaderId },
+  });
+  expect(response.statusCode).toBe(200);
+}
+
+async function revokeUploader(ownerCookie: string, chapterId: string) {
+  return app.inject({
+    method: "DELETE",
+    url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
+    headers: { cookie: ownerCookie },
+  });
+}
+
+async function prepareAssignedUpload(chapterNumber: number) {
+  const ownerCookie = await login();
+  const uploaderCookie = await login(otherEmail);
+  const chapterId = await createChapter(ownerCookie, chapterNumber);
+  await assignUploader(ownerCookie, chapterId, otherId);
+  const initiated = await initiate(uploaderCookie, chapterId);
+  expect(initiated.statusCode).toBe(201);
+  const uploadId = initiated.json().uploadId as string;
+  const [upload] = await database.db
+    .select()
+    .from(uploads)
+    .where(eq(uploads.id, uploadId));
+  if (!upload) throw new Error("Expected pending upload");
+  transfer.objects.set(upload.storageKey, {
+    key: upload.storageKey,
+    sizeBytes: upload.sizeBytes,
+    contentType: upload.contentType,
+  });
+  return { ownerCookie, uploaderCookie, chapterId, uploadId, upload };
+}
+
+async function waitUntil(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for lock");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 beforeAll(async () => {
   const passwordHash = await hasher.hash(password);
   await database.db.insert(users).values([
@@ -53,178 +225,445 @@ beforeAll(async () => {
       status: "active",
       role: "uploader",
     },
+    {
+      id: replacementId,
+      email: replacementEmail,
+      passwordHash,
+      status: "active",
+      role: "uploader",
+    },
   ]);
 });
 
 afterAll(async () => {
   await database.db
     .delete(auditLogs)
-    .where(inArray(auditLogs.actorId, [userId, otherId]));
+    .where(inArray(auditLogs.actorId, [userId, otherId, replacementId]));
   await database.db.delete(uploads).where(eq(uploads.createdBy, userId));
   await database.db.delete(chapters).where(eq(chapters.createdBy, userId));
   await database.db.delete(series).where(eq(series.createdBy, userId));
-  await database.db.delete(users).where(inArray(users.id, [userId, otherId]));
+  await database.db
+    .delete(users)
+    .where(inArray(users.id, [userId, otherId, replacementId]));
   await app.close();
   await database.sql.end();
 });
 
-describe("M4-A chapter upload", () => {
-  it("requires authentication and stores one ZIP with server-side metadata", async () => {
+describe("direct chapter upload transfer", () => {
+  it("validates metadata and authorization before issuing a grant", async () => {
     const unauthenticated = await app.inject({
       method: "POST",
-      url: `/chapters/${randomUUID()}/upload`,
+      url: `/chapters/${randomUUID()}/uploads/initiate`,
+      payload: {
+        filename: "chapter.zip",
+        contentType: "application/zip",
+        sizeBytes: 4,
+      },
     });
     expect(unauthenticated.statusCode).toBe(401);
 
     const cookie = await login();
-    const createdSeries = await app.inject({
-      method: "POST",
-      url: "/series",
-      headers: { cookie },
-      payload: { title: "Upload Series", slug: `upload-${userId}` },
-    });
-    const seriesId = createdSeries.json().id as string;
-    const createdChapter = await app.inject({
-      method: "POST",
-      url: `/series/${seriesId}/chapters`,
-      headers: { cookie },
-      payload: { chapterNumber: 1 },
-    });
-    const chapterId = createdChapter.json().id as string;
-    const multipart = (contentType: string, bytes: string, fields = "") => {
-      const boundary = `upload-${randomUUID()}`;
-      const extraField = fields
-        ? [
-            `--${boundary}`,
-            'Content-Disposition: form-data; name="ownerId"',
-            "",
-            fields,
-          ]
-        : [];
-      const body = [
-        ...extraField,
-        `--${boundary}`,
-        'Content-Disposition: form-data; name="file"; filename="chapter.zip"',
-        `Content-Type: ${contentType}`,
-        "",
-        bytes,
-        `--${boundary}--`,
-        "",
-      ].join("\r\n");
-      return {
-        body,
-        headers: {
-          "content-type": `multipart/form-data; boundary=${boundary}`,
-        },
-      };
-    };
-    const validUpload = multipart("application/zip", "PK\x03\x04nodeprox");
-    const response = await app.inject({
-      method: "POST",
-      url: `/chapters/${chapterId}/upload`,
-      headers: { cookie, ...validUpload.headers },
-      payload: validUpload.body,
-    });
-    expect(response.statusCode).toBe(201);
-    expect(response.json()).toMatchObject({
-      chapterId,
-      status: "uploaded",
-      filename: "chapter.zip",
-      sizeBytes: Buffer.byteLength("PK\x03\x04nodeprox"),
-    });
-    const [intent] = await database.db
-      .select()
-      .from(processingOutbox)
-      .where(eq(processingOutbox.chapterId, chapterId));
-    expect(intent).toMatchObject({
-      chapterId,
-      uploadId: response.json().uploadId,
-      status: "pending",
-    });
-    const second = await app.inject({
-      method: "POST",
-      url: `/chapters/${chapterId}/upload`,
-      headers: { cookie, ...validUpload.headers },
-      payload: validUpload.body,
-    });
-    expect(second.statusCode).toBe(409);
-
-    const forbidden = await app.inject({
-      method: "POST",
-      url: `/chapters/${chapterId}/upload`,
-      headers: { cookie: await login(otherEmail), ...validUpload.headers },
-      payload: validUpload.body,
-    });
-    expect(forbidden.statusCode).toBe(403);
-
-    const alternateMimeChapter = await app.inject({
-      method: "POST",
-      url: `/series/${seriesId}/chapters`,
-      headers: { cookie },
-      payload: { chapterNumber: 2 },
-    });
-    const alternateMimeUpload = multipart(
-      "application/x-zip-compressed",
-      "PK\x03\x04nodeprox",
-    );
-    const alternateMimeAccepted = await app.inject({
-      method: "POST",
-      url: `/chapters/${alternateMimeChapter.json().id}/upload`,
-      headers: { cookie, ...alternateMimeUpload.headers },
-      payload: alternateMimeUpload.body,
-    });
-    expect(alternateMimeAccepted.statusCode).toBe(201);
-
-    const rejectedMimes = [
+    const chapterId = await createChapter(cookie, 1);
+    expect((await initiate(cookie, chapterId, 0)).statusCode).toBe(422);
+    expect((await initiate(cookie, chapterId, 9)).statusCode).toBe(413);
+    expect(
+      (await initiate(await login(otherEmail), chapterId, 4)).statusCode,
+    ).toBe(403);
+    for (const [index, contentType] of [
       "image/jpeg",
       "image/png",
       "application/pdf",
       "application/x-msdownload",
-    ];
-    for (const [index, contentType] of rejectedMimes.entries()) {
-      const rejectedChapter = await app.inject({
-        method: "POST",
-        url: `/series/${seriesId}/chapters`,
-        headers: { cookie },
-        payload: { chapterNumber: index + 3 },
-      });
-      const rejectedUpload = multipart(contentType, "PK\x03\x04");
-      const rejected = await app.inject({
-        method: "POST",
-        url: `/chapters/${rejectedChapter.json().id}/upload`,
-        headers: { cookie, ...rejectedUpload.headers },
-        payload: rejectedUpload.body,
-      });
-      expect(rejected.statusCode).toBe(415);
+    ].entries()) {
+      const rejectedChapterId = await createChapter(cookie, 20 + index);
+      expect(
+        (await initiate(cookie, rejectedChapterId, 4, contentType)).statusCode,
+      ).toBe(415);
     }
-
-    const magicChapter = await app.inject({
-      method: "POST",
-      url: `/series/${seriesId}/chapters`,
-      headers: { cookie },
-      payload: { chapterNumber: 7 },
-    });
-    const magicUpload = multipart("application/zip", "NOPE");
-    const magicRejected = await app.inject({
-      method: "POST",
-      url: `/chapters/${magicChapter.json().id}/upload`,
-      headers: { cookie, ...magicUpload.headers },
-      payload: magicUpload.body,
-    });
-    expect(magicRejected.statusCode).toBe(422);
-
-    const forged = multipart(
-      "application/zip",
-      "PK\x03\x04nodeprox",
-      "ownerId=attacker&role=admin&permission=admin.storage.manage&storageKey=../../secrets.zip",
+    const alternateMimeChapterId = await createChapter(cookie, 30);
+    const alternateMime = await initiate(
+      cookie,
+      alternateMimeChapterId,
+      4,
+      "  Application/X-Zip-Compressed  ",
+      "24.zip",
     );
-    const forgedRejected = await app.inject({
-      method: "POST",
-      url: `/chapters/${magicChapter.json().id}/upload`,
-      headers: { cookie, ...forged.headers },
-      payload: forged.body,
+    expect(alternateMime.statusCode).toBe(201);
+    expect(alternateMime.json().transfer.headers).toMatchObject({
+      "content-type": "application/zip",
     });
-    expect(forgedRejected.statusCode).toBe(201);
-    expect(forgedRejected.json().filename).toBe("chapter.zip");
+    const [alternateMimeUpload] = await database.db
+      .select({
+        contentType: uploads.contentType,
+        originalFilename: uploads.originalFilename,
+      })
+      .from(uploads)
+      .where(eq(uploads.id, alternateMime.json().uploadId as string));
+    expect(alternateMimeUpload).toEqual({
+      contentType: "application/zip",
+      originalFilename: "24.zip",
+    });
+    const forged = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/initiate`,
+      headers: { cookie },
+      payload: {
+        filename: "chapter.zip",
+        contentType: "application/zip",
+        sizeBytes: 4,
+        storageKey: "../../secrets.zip",
+      },
+    });
+    expect(forged.statusCode).toBe(422);
+  });
+
+  it("keeps initiate pending and completes only after verified HEAD metadata", async () => {
+    const cookie = await login();
+    const chapterId = await createChapter(cookie, 2);
+    const initiated = await initiate(cookie, chapterId);
+    expect(initiated.statusCode).toBe(201);
+    expect(initiated.json()).toMatchObject({ status: "pending", sizeBytes: 4 });
+    expect(initiated.body).not.toContain("B2_APPLICATION_KEY");
+    expect(initiated.body).not.toContain("application-secret");
+
+    const uploadId = initiated.json().uploadId as string;
+    const [pendingRow] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(pendingRow).toMatchObject({ status: "pending", sizeBytes: 4 });
+    const [uploadingChapter] = await database.db
+      .select()
+      .from(chapters)
+      .where(eq(chapters.id, chapterId));
+    expect(uploadingChapter?.status).toBe("uploading");
+
+    const completeUrl = `/chapters/${chapterId}/uploads/${uploadId}/complete`;
+    const missing = await app.inject({
+      method: "POST",
+      url: completeUrl,
+      headers: { cookie },
+    });
+    expect(missing.statusCode).toBe(409);
+    expect(missing.json().code).toBe("upload-object-missing");
+
+    transfer.objects.set(pendingRow?.storageKey ?? "", {
+      key: pendingRow?.storageKey ?? "",
+      sizeBytes: 3,
+      contentType: "application/zip",
+    });
+    const mismatch = await app.inject({
+      method: "POST",
+      url: completeUrl,
+      headers: { cookie },
+    });
+    expect(mismatch.statusCode).toBe(422);
+
+    transfer.objects.set(pendingRow?.storageKey ?? "", {
+      key: pendingRow?.storageKey ?? "",
+      sizeBytes: 4,
+      contentType: "application/zip",
+      etag: "etag-1",
+    });
+    const completed = await app.inject({
+      method: "POST",
+      url: completeUrl,
+      headers: { cookie },
+    });
+    expect(completed.statusCode).toBe(200);
+    expect(completed.json()).toMatchObject({
+      status: "uploaded",
+      sizeBytes: 4,
+    });
+    const [intent] = await database.db
+      .select()
+      .from(processingOutbox)
+      .where(eq(processingOutbox.uploadId, uploadId));
+    expect(intent).toMatchObject({ uploadId, status: "pending" });
+  });
+
+  it("aborts consistently and sanitizes provider failures", async () => {
+    const cookie = await login();
+    const abortChapterId = await createChapter(cookie, 3);
+    const initiated = await initiate(cookie, abortChapterId);
+    const uploadId = initiated.json().uploadId as string;
+    const aborted = await app.inject({
+      method: "POST",
+      url: `/chapters/${abortChapterId}/uploads/${uploadId}/abort`,
+      headers: { cookie },
+    });
+    expect(aborted.statusCode).toBe(204);
+    const [chapter] = await database.db
+      .select()
+      .from(chapters)
+      .where(eq(chapters.id, abortChapterId));
+    expect(chapter?.status).toBe("draft");
+
+    const failureChapterId = await createChapter(cookie, 4);
+    const failureInitiated = await initiate(cookie, failureChapterId);
+    transfer.verifyFailure = new UploadTransferProviderError({
+      cause: new Error("SignatureDoesNotMatch application-secret"),
+    });
+    const failure = await app.inject({
+      method: "POST",
+      url: `/chapters/${failureChapterId}/uploads/${failureInitiated.json().uploadId}/complete`,
+      headers: { cookie },
+    });
+    expect(failure.statusCode).toBe(503);
+    expect(failure.json().code).toBe("upload-provider-unavailable");
+    expect(failure.body).not.toContain("SignatureDoesNotMatch");
+    expect(failure.body).not.toContain("application-secret");
+  });
+
+  it("serializes complete against abort across concurrent requests", async () => {
+    const cookie = await login();
+    const chapterId = await createChapter(cookie, 5);
+    const initiated = await initiate(cookie, chapterId);
+    const uploadId = initiated.json().uploadId as string;
+    const [pendingRow] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    transfer.objects.set(pendingRow?.storageKey ?? "", {
+      key: pendingRow?.storageKey ?? "",
+      sizeBytes: 4,
+      contentType: "application/zip",
+    });
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+      headers: { cookie },
+    });
+    await gate.started;
+    const abort = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/abort`,
+      headers: { cookie },
+    });
+    expect(abort.statusCode).toBe(409);
+    gate.release();
+    expect((await completion).statusCode).toBe(200);
+    expect(transfer.objects.has(pendingRow?.storageKey ?? "")).toBe(true);
+  });
+
+  it("lets a committed revocation win while B2 HEAD is in progress and keeps the orphan cleanable", async () => {
+    const prepared = await prepareAssignedUpload(6);
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await gate.started;
+    expect(
+      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
+        .statusCode,
+    ).toBe(204);
+    gate.release();
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    const [chapter] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, prepared.chapterId));
+    expect(upload?.status).toBe("pending");
+    expect(chapter?.status).toBe("uploading");
+    expect(transfer.objects.has(prepared.upload.storageKey)).toBe(true);
+
+    const cleanup = await app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/abort`,
+      headers: { cookie: prepared.ownerCookie },
+    });
+    expect(cleanup.statusCode).toBe(204);
+    expect(transfer.objects.has(prepared.upload.storageKey)).toBe(false);
+  });
+
+  it("treats uploader reassignment before finalization as revocation for the prior actor", async () => {
+    const prepared = await prepareAssignedUpload(7);
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await gate.started;
+    await assignUploader(
+      prepared.ownerCookie,
+      prepared.chapterId,
+      replacementId,
+    );
+    gate.release();
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("revalidates and locks an active helper permission before publishing uploaded", async () => {
+    const ownerCookie = await login();
+    const helperCookie = await login(replacementEmail);
+    const chapterId = await createChapter(ownerCookie, 10);
+    const grant = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/permissions`,
+      headers: { cookie: ownerCookie },
+      payload: { userId: replacementId, permissions: ["images.upload"] },
+    });
+    expect(grant.statusCode).toBe(204);
+    const initiated = await initiate(helperCookie, chapterId);
+    expect(initiated.statusCode).toBe(201);
+    const uploadId = initiated.json().uploadId as string;
+    const [pending] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (!pending) throw new Error("Expected helper upload");
+    transfer.objects.set(pending.storageKey, {
+      key: pending.storageKey,
+      sizeBytes: pending.sizeBytes,
+      contentType: pending.contentType,
+    });
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+      headers: { cookie: helperCookie },
+    });
+    await gate.started;
+    const revoked = await app.inject({
+      method: "DELETE",
+      url: `/chapters/${chapterId}/permissions/${replacementId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(revoked.statusCode).toBe(204);
+    gate.release();
+    expect((await completion).statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("revalidates after revocation commits between preliminary authorization and claim", async () => {
+    const prepared = await prepareAssignedUpload(8);
+    let releaseLock!: () => void;
+    let lockReady!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      lockReady = resolve;
+    });
+    const blocker = database.sql.begin(async (tx) => {
+      await tx`select id from uploads where id = ${prepared.uploadId} for update`;
+      lockReady();
+      await held;
+    });
+    await ready;
+
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await waitUntil(async () => {
+      const [row] = await database.sql<{ waiting: boolean }[]>`
+        select exists (
+          select 1
+          from pg_stat_activity
+          where wait_event_type = 'Lock'
+            and query ilike '%update "uploads"%'
+        ) as waiting
+      `;
+      return row?.waiting === true;
+    });
+    expect(
+      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
+        .statusCode,
+    ).toBe(204);
+    releaseLock();
+    await blocker;
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("serializes a concurrent revocation after final authority locks and commit", async () => {
+    const prepared = await prepareAssignedUpload(9);
+    let releaseOutbox!: () => void;
+    let outboxLocked!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseOutbox = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      outboxLocked = resolve;
+    });
+    const blocker = database.sql.begin(async (tx) => {
+      await tx`lock table processing_outbox in access exclusive mode`;
+      outboxLocked();
+      await held;
+    });
+    await ready;
+
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await waitUntil(async () => {
+      const [row] = await database.sql<{ waiting: boolean }[]>`
+        select exists (
+          select 1
+          from pg_locks locks
+          join pg_class relation on relation.oid = locks.relation
+          where relation.relname = 'processing_outbox'
+            and locks.granted = false
+        ) as waiting
+      `;
+      return row?.waiting === true;
+    });
+
+    let revocationSettled = false;
+    const revocation = revokeUploader(
+      prepared.ownerCookie,
+      prepared.chapterId,
+    ).finally(() => {
+      revocationSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(revocationSettled).toBe(false);
+    releaseOutbox();
+    await blocker;
+
+    expect((await completion).statusCode).toBe(200);
+    expect((await revocation).statusCode).toBe(204);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("uploaded");
+    const noLongerVisible = await app.inject({
+      method: "GET",
+      url: `/series/${await seriesIdForChapter(prepared.chapterId)}`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    expect(noLongerVisible.statusCode).toBe(403);
   });
 });

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { ChapterForm } from "../../../../components/domains/chapters/chapter-form";
+import { ChapterPublicationSection } from "../../../../components/domains/publication/chapter-publication-section";
 import { UploadForm } from "../../../../components/domains/uploads/upload-form";
 import { errorMessage } from "../../../../components/domains/feedback";
 import { Button } from "../../../../components/ui/button";
@@ -172,11 +173,14 @@ export default function ChapterDetailPage() {
         >
           <h2 className="mt-0 text-xl font-semibold">Procesamiento listo</h2>
           <p className="mb-0 text-muted">
-            El Chapter está listo. La visualización de imágenes requiere un
-            contrato HTTP futuro.
+            El Chapter está listo para publicación.
           </p>
         </section>
       ) : null}
+      <ChapterPublicationSection
+        chapterId={currentChapter.id}
+        chapterStatus={currentChapter.status}
+      />
       <section
         className="rounded-xl border border-border bg-surface p-5"
         aria-labelledby="upload-title"

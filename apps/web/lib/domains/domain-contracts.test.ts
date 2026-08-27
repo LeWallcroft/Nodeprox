@@ -4,6 +4,7 @@ import { createChapter, listChapters } from "./chapters/api";
 import { queryKeys } from "./query-keys";
 import { deleteSeries, listSeries } from "./series/api";
 import { uploadChapter } from "./uploads/api";
+import { getPublicChapter } from "./publication/api";
 
 describe("frontend domain contract adapters", () => {
   it("keeps domain query keys stable", () => {
@@ -23,6 +24,33 @@ describe("frontend domain contract adapters", () => {
       "detail",
       "chapter-1",
     ]);
+    expect(queryKeys.publication.chapter("chapter-1")).toEqual([
+      "public",
+      "chapters",
+      "chapter-1",
+    ]);
+  });
+
+  it("uses the public chapter manifest route and preserves its public URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "chapter-1",
+          images: [{ url: "https://media.nodeprox.org/image.webp" }],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const manifest = await getPublicChapter("chapter-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/public/chapters/chapter-1",
+      expect.objectContaining({ credentials: "include" }),
+    );
+    expect(manifest.images[0]?.url).toBe(
+      "https://media.nodeprox.org/image.webp",
+    );
+    vi.unstubAllGlobals();
   });
 
   it("uses the real Series and Chapter routes", async () => {
@@ -50,31 +78,80 @@ describe("frontend domain contract adapters", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends uploads as multipart with the required file field", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          chapterId: "chapter-1",
-          uploadId: "upload-1",
-          status: "uploaded",
-          filename: "chapter.zip",
-          sizeBytes: 4,
-        }),
-        { status: 201 },
-      ),
-    );
+  it("sends only metadata through /api and transfers ZIP bytes directly", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            chapterId: "chapter-1",
+            uploadId: "upload-1",
+            status: "pending",
+            filename: "chapter.zip",
+            sizeBytes: 4,
+            transfer: {
+              mode: "single",
+              method: "PUT",
+              url: "https://s3.example.test/direct-upload",
+              headers: { "content-type": "application/zip" },
+              expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+          }),
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            chapterId: "chapter-1",
+            uploadId: "upload-1",
+            status: "uploaded",
+            filename: "chapter.zip",
+            sizeBytes: 4,
+          }),
+          { status: 200 },
+        ),
+      );
     vi.stubGlobal("fetch", fetchMock);
+    const directRequests: FakeDirectRequest[] = [];
+    class FakeDirectRequest {
+      status = 200;
+      readonly upload = { addEventListener: vi.fn() };
+      readonly listeners = new Map<string, () => void>();
+      open = vi.fn();
+      setRequestHeader = vi.fn();
+      addEventListener = vi.fn((name: string, listener: () => void) => {
+        this.listeners.set(name, listener);
+      });
+      send = vi.fn(() => this.listeners.get("load")?.());
+      constructor() {
+        directRequests.push(this);
+      }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeDirectRequest);
     const file = new File(["PK\x03\x04"], "chapter.zip", {
-      type: "application/zip",
+      type: "application/x-zip-compressed",
     });
     await uploadChapter("chapter-1", file);
-    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(request.method).toBe("POST");
-    expect(request.body).toBeInstanceOf(FormData);
-    expect((request.body as FormData).get("file")).toBeInstanceOf(File);
-    expect((request.body as FormData).get("file")).toMatchObject({
-      name: "chapter.zip",
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/chapters/chapter-1/uploads/initiate",
+      "/api/chapters/chapter-1/uploads/upload-1/complete",
+    ]);
+    const initiateCall = fetchMock.mock.calls[0];
+    if (!initiateCall) throw new Error("expected initiate request");
+    const metadata = JSON.parse(
+      (initiateCall[1] as RequestInit).body as string,
+    );
+    expect(metadata).toEqual({
+      filename: "chapter.zip",
+      contentType: "application/zip",
+      sizeBytes: 4,
     });
+    expect(directRequests[0]?.open).toHaveBeenCalledWith(
+      "PUT",
+      "https://s3.example.test/direct-upload",
+    );
+    expect(directRequests[0]?.send).toHaveBeenCalledWith(file);
     vi.unstubAllGlobals();
   });
 

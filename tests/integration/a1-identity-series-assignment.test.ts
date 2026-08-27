@@ -1,9 +1,11 @@
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { rmSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inject } from "vitest";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+} from "../../packages/storage/src/port.js";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
@@ -12,15 +14,39 @@ import {
   chapters,
   series,
   seriesAssignments,
-  uploads,
   users,
 } from "../../database/schema/index.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
+
+class AssignmentTransfer implements UploadTransferPort {
+  async initiate(input: { key: string }) {
+    return {
+      mode: "single" as const,
+      method: "PUT" as const,
+      url: `https://s3.example.test/${encodeURIComponent(input.key)}?signature=temporary`,
+      headers: { "content-type": "application/zip" },
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    };
+  }
+
+  async verify(): Promise<never> {
+    throw new UploadTransferObjectNotFoundError();
+  }
+
+  async abort(): Promise<void> {}
+}
+
+const transfer = new AssignmentTransfer();
 const app = buildApp(
   { logger: false },
-  { database: database.db, secureCookie: false },
+  {
+    database: database.db,
+    secureCookie: false,
+    storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+    uploadTransfer: transfer,
+  },
 );
 const password = "a1-correct-password";
 const hasher = new Argon2PasswordHasher();
@@ -179,6 +205,16 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       .where(eq(users.email, email));
     const pendingId = pending[0]?.id;
     expect(pendingId).toBeDefined();
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/admin/users/${pendingId}`,
+          headers: { cookie: adminCookie },
+          payload: { status: "suspended" },
+        })
+      ).statusCode,
+    ).toBe(409);
     const approval = await app.inject({
       method: "PATCH",
       url: `/admin/users/${pendingId}`,
@@ -190,29 +226,20 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       status: "active",
       role: "uploader",
     });
-    await database.db
-      .update(users)
-      .set({ status: "rejected" })
-      .where(eq(users.id, pendingId as string));
+    const activeCookie = await login(email);
+    const suspended = await app.inject({
+      method: "PATCH",
+      url: `/admin/users/${pendingId}`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended" },
+    });
+    expect(suspended.statusCode).toBe(200);
     expect(
       (
         await app.inject({
-          method: "POST",
-          url: "/auth/login",
-          payload: { email, password },
-        })
-      ).statusCode,
-    ).toBe(401);
-    await database.db
-      .update(users)
-      .set({ status: "suspended" })
-      .where(eq(users.id, pendingId as string));
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/auth/login",
-          payload: { email, password },
+          method: "GET",
+          url: "/auth/session",
+          headers: { cookie: activeCookie },
         })
       ).statusCode,
     ).toBe(401);
@@ -228,6 +255,39 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       role: "uploader",
     });
     expect(await login(email)).toBeTruthy();
+
+    const rejectedEmail = `rejected-${randomUUID()}@example.com`;
+    await app.inject({
+      method: "POST",
+      url: "/auth/register",
+      payload: { email: rejectedEmail, password },
+    });
+    const [rejectedUser] = await database.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, rejectedEmail));
+    expect(rejectedUser).toBeDefined();
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/admin/users/${rejectedUser?.id}`,
+          headers: { cookie: adminCookie },
+          payload: { status: "rejected" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/auth/login",
+          payload: { email: rejectedEmail, password },
+        })
+      ).statusCode,
+    ).toBe(401);
+    if (rejectedUser)
+      await database.db.delete(users).where(eq(users.id, rejectedUser.id));
     await database.db.delete(users).where(eq(users.id, pendingId as string));
   });
 
@@ -432,6 +492,16 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       (
         await app.inject({
           method: "PATCH",
+          url: `/chapters/${firstChapterId}`,
+          headers: { cookie: uploaderCookie },
+          payload: { title: "Creator denied after reassignment" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
           url: `/chapters/${ownerChapterId}`,
           headers: { cookie: uploaderCookie },
           payload: { title: "Denied after reassignment" },
@@ -458,32 +528,17 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       ).statusCode,
     ).toBe(403);
 
-    const multipart = () => {
-      const boundary = `a1-${randomUUID()}`;
-      const body = [
-        `--${boundary}`,
-        'Content-Disposition: form-data; name="file"; filename="chapter.zip"',
-        "Content-Type: application/zip",
-        "",
-        "PK\x03\x04nodeprox",
-        `--${boundary}--`,
-        "",
-      ].join("\r\n");
-      return {
-        body,
-        headers: {
-          "content-type": `multipart/form-data; boundary=${boundary}`,
-        },
-      };
-    };
-    const deniedUpload = multipart();
     expect(
       (
         await app.inject({
           method: "POST",
-          url: `/chapters/${ownerChapterId}/upload`,
-          headers: { cookie: uploaderCookie, ...deniedUpload.headers },
-          payload: deniedUpload.body,
+          url: `/chapters/${ownerChapterId}/uploads/initiate`,
+          headers: { cookie: uploaderCookie },
+          payload: {
+            filename: "chapter.zip",
+            contentType: "application/zip",
+            sizeBytes: 16,
+          },
         })
       ).statusCode,
     ).toBe(403);
@@ -512,22 +567,18 @@ describe("A1 identity, assignment and chapter sequencing", () => {
         })
       ).statusCode,
     ).toBe(200);
-    const assignedUpload = multipart();
     const uploadResponse = await app.inject({
       method: "POST",
-      url: `/chapters/${assignedChapterId}/upload`,
-      headers: { cookie: secondUploaderCookie, ...assignedUpload.headers },
-      payload: assignedUpload.body,
+      url: `/chapters/${assignedChapterId}/uploads/initiate`,
+      headers: { cookie: secondUploaderCookie },
+      payload: {
+        filename: "chapter.zip",
+        contentType: "application/zip",
+        sizeBytes: 16,
+      },
     });
     expect(uploadResponse.statusCode).toBe(201);
-    const [uploadRow] = await database.db
-      .select({ storageKey: uploads.storageKey })
-      .from(uploads)
-      .where(eq(uploads.chapterId, assignedChapterId));
-    if (uploadRow)
-      rmSync(join(process.cwd(), ".nodeprox-storage", uploadRow.storageKey), {
-        force: true,
-      });
+    const assignedUploadId = uploadResponse.json().uploadId as string;
     const deletableChapter = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
@@ -558,5 +609,98 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       headers: { cookie: secondUploaderCookie },
     });
     expect(deniedAfterRevocation.statusCode).toBe(403);
+    const completeAfterRevocation = await app.inject({
+      method: "POST",
+      url: `/chapters/${assignedChapterId}/uploads/${assignedUploadId}/complete`,
+      headers: { cookie: secondUploaderCookie },
+    });
+    expect(completeAfterRevocation.statusCode).toBe(403);
+    const abortAfterRevocation = await app.inject({
+      method: "POST",
+      url: `/chapters/${assignedChapterId}/uploads/${assignedUploadId}/abort`,
+      headers: { cookie: secondUploaderCookie },
+    });
+    expect(abortAfterRevocation.statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${assignedChapterId}/uploads/${assignedUploadId}/abort`,
+          headers: { cookie: adminCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+  });
+
+  it("keeps concurrent assignment and revocation in one valid row", async () => {
+    const ownerCookie = await login(emails.owner);
+    const adminCookie = await login(emails.admin);
+    const created = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: {
+        title: "Concurrent assignment",
+        slug: `a1-concurrent-${randomUUID()}`,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const seriesId = created.json().id as string;
+
+    const results = await Promise.all([
+      app.inject({
+        method: "PUT",
+        url: `/series/${seriesId}/uploader`,
+        headers: { cookie: adminCookie },
+        payload: { uploaderId },
+      }),
+      app.inject({
+        method: "PUT",
+        url: `/series/${seriesId}/uploader`,
+        headers: { cookie: adminCookie },
+        payload: { uploaderId: secondUploaderId },
+      }),
+      app.inject({
+        method: "DELETE",
+        url: `/series/${seriesId}/uploader`,
+        headers: { cookie: adminCookie },
+      }),
+    ]);
+    expect(results.map((response) => response.statusCode).sort()).toEqual([
+      200, 200, 204,
+    ]);
+    const rows = await database.db
+      .select({ uploaderId: seriesAssignments.uploaderId })
+      .from(seriesAssignments)
+      .where(eq(seriesAssignments.seriesId, seriesId));
+    expect(rows.length).toBeLessThanOrEqual(1);
+    if (rows[0])
+      expect([uploaderId, secondUploaderId]).toContain(rows[0].uploaderId);
+
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/series/${seriesId}/uploader`,
+          headers: { cookie: adminCookie },
+          payload: { uploaderId },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/series/${seriesId}/uploader`,
+          headers: { cookie: adminCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      await database.db
+        .select()
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, seriesId)),
+    ).toHaveLength(0);
   });
 });

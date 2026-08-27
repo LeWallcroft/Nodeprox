@@ -6,6 +6,7 @@ import {
   type NodeProxStorageConfig,
 } from "@nodeprox/config";
 import { B2Storage } from "../apps/api/src/modules/uploads/infrastructure/storage/b2.storage.js";
+import { B2UploadTransfer } from "../packages/storage/src/adapters.js";
 
 type SafeFailure = {
   name?: string;
@@ -15,7 +16,9 @@ type SafeFailure = {
 };
 
 const key = `smoke-tests/${randomUUID()}.txt`;
+const directKey = `smoke-tests/${randomUUID()}.zip`;
 let storage: B2Storage | undefined;
+let transfer: B2UploadTransfer | undefined;
 
 function safeFailure(error: unknown): SafeFailure {
   if (typeof error !== "object" || error === null)
@@ -90,6 +93,7 @@ try {
 
   try {
     storage = new B2Storage(config.b2);
+    transfer = new B2UploadTransfer(config.b2);
   } catch (error) {
     reportFailure("adapter", error);
   }
@@ -163,6 +167,41 @@ try {
     reportFailure("cleanup", error);
   }
 
+  const directBody = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+  try {
+    const grant = await transfer.initiate({
+      key: directKey,
+      contentType: "application/zip",
+      sizeBytes: directBody.byteLength,
+      expiresInSeconds: 60,
+    });
+    if (grant.mode !== "single")
+      throw new Error("unexpected direct upload mode");
+    const response = await fetch(grant.url, {
+      method: grant.method,
+      headers: grant.headers,
+      body: directBody,
+    });
+    if (!response.ok)
+      throw Object.assign(new Error("direct upload request failed"), {
+        $metadata: { httpStatusCode: response.status },
+      });
+    const verified = await transfer.verify({ key: directKey });
+    if (verified.sizeBytes !== directBody.byteLength)
+      throw new Error("direct upload size mismatch");
+    await transfer.abort({ key: directKey });
+    if (await storage.exists(directKey))
+      throw new Error("direct upload object still exists after abort");
+  } catch (error) {
+    let cleanup: SafeFailure | undefined;
+    try {
+      await storage.delete(directKey);
+    } catch (cleanupError) {
+      cleanup = safeFailure(cleanupError);
+    }
+    reportFailure("direct-transfer", error, cleanup);
+  }
+
   console.log("B2 smoke test: PASS");
   console.log("✓ configuration");
   console.log("✓ put");
@@ -170,6 +209,7 @@ try {
   console.log("✓ get");
   console.log("✓ delete");
   console.log("✓ cleanup");
+  console.log("✓ direct transfer grant/put/head/abort");
 } catch {
   // reportFailure already emitted a sanitized diagnostic.
 }

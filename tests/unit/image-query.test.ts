@@ -37,7 +37,13 @@ describe("ImageQueryService", () => {
         listByChapterId: async () => [image],
         findById: async () => image,
       },
-      { check: async () => ({ allowed: true, reason: "owner" }) },
+      {
+        check: async () => ({
+          allowed: true,
+          reason: "assigned",
+          seriesId: "series",
+        }),
+      },
       storageFake(),
     );
 
@@ -71,7 +77,13 @@ describe("ImageQueryService", () => {
 
     const authorized = new ImageQueryService(
       { listByChapterId: async () => [], findById: async () => image },
-      { check: async () => ({ allowed: true, reason: "owner" }) },
+      {
+        check: async () => ({
+          allowed: true,
+          reason: "assigned",
+          seriesId: "series",
+        }),
+      },
       storage,
     );
     const content = await authorized.getContent(

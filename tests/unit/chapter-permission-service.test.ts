@@ -38,11 +38,13 @@ function serviceFor(
   const audit: AuthorizationAuditRepository = { append: async () => undefined };
   const chapters: ChapterRepositoryPort = {
     findById: async () => chapter,
+    isAssigned: async (_seriesId, userId) => userId === "owner",
   };
   const users: ChapterUserPort = { existsById: async () => true };
   const permissions: ChapterPermissionRepositoryPort = {
     grant: async () => ({ outcome: "granted", count: 1 }),
     revoke: async () => ({ count: 1 }),
+    revokeIfAuthorized: async () => ({ outcome: "revoked", count: 1 }),
     hasActivePermission: async () => active,
     listActive: async () => [],
   };
@@ -62,14 +64,23 @@ function serviceFor(
 }
 
 describe("chapter permission service", () => {
-  it("allows the server-resolved owner", async () => {
+  it("allows an uploader only while server-side assignment is active", async () => {
     await expect(
       serviceFor("uploader").check({
         context,
         chapterId: "chapter",
         permission: "chapters.edit",
       }),
-    ).resolves.toMatchObject({ allowed: true, reason: "owner" });
+    ).resolves.toMatchObject({ allowed: true, reason: "assigned" });
+    await expect(
+      serviceFor("uploader", false, 7, {
+        chapters: { findById: async () => chapter },
+      }).check({
+        context,
+        chapterId: "chapter",
+        permission: "chapters.edit",
+      }),
+    ).resolves.toMatchObject({ allowed: false, reason: "denied" });
   });
 
   it("allows a helper only with an active delegated permission", async () => {
@@ -117,6 +128,7 @@ describe("chapter permission service", () => {
         throw new Error("permission repository unavailable");
       },
       revoke: async () => ({ count: 0 }),
+      revokeIfAuthorized: async () => ({ outcome: "revoked", count: 0 }),
       hasActivePermission: async () => false,
       listActive: async () => [],
     };
@@ -186,7 +198,10 @@ describe("chapter permission service", () => {
     const failingPermissionRepository: ChapterPermissionRepositoryPort = {
       grant: async () => ({ outcome: "granted", count: 1 }),
       revoke: async () => {
-        revokeCalls.push("revoke");
+        throw new Error("legacy revoke must not be called");
+      },
+      revokeIfAuthorized: async () => {
+        revokeCalls.push("revokeIfAuthorized");
         throw new Error("permission repository unavailable");
       },
       hasActivePermission: async () => true,
@@ -201,7 +216,7 @@ describe("chapter permission service", () => {
         helperUserId: "helper",
       }),
     ).rejects.toThrow("permission repository unavailable");
-    expect(revokeCalls).toEqual(["revoke"]);
+    expect(revokeCalls).toEqual(["revokeIfAuthorized"]);
 
     await expect(
       serviceFor("uploader", false, 7, {

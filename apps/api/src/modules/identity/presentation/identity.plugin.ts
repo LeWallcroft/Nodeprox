@@ -10,7 +10,10 @@ import { requireSession } from "../../authentication/presentation/session-guards
 import { validateMutationOrigin } from "../../authentication/presentation/origin-policy.js";
 import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
-import { IdentityService } from "../application/services/identity.service.js";
+import {
+  IdentityService,
+  IdentityStateConflictError,
+} from "../application/services/identity.service.js";
 
 const registrationSchema = z
   .object({
@@ -124,13 +127,18 @@ export function registerIdentityPlugin(
     { preHandler: session },
     async (request) => {
       const { userId } = parse(userIdSchema, request.params);
-      const result = await service.review(
-        context(),
-        userId,
-        parse(reviewSchema, request.body),
-      );
-      if (!result) throw notFound();
-      return result;
+      try {
+        const result = await service.review(
+          context(),
+          userId,
+          parse(reviewSchema, request.body),
+        );
+        if (!result) throw notFound();
+        return result;
+      } catch (error) {
+        if (error instanceof IdentityStateConflictError) throw conflict();
+        throw error;
+      }
     },
   );
 

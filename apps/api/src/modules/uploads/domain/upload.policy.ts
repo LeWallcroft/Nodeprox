@@ -4,7 +4,7 @@ const SUPPORTED_ZIP_MIME_TYPES = new Set([
 ]);
 
 export function isSupportedZipMimeType(mimeType: string): boolean {
-  return SUPPORTED_ZIP_MIME_TYPES.has(mimeType);
+  return SUPPORTED_ZIP_MIME_TYPES.has(mimeType.trim().toLowerCase());
 }
 
 export function validateUploadMetadata(input: {
@@ -12,8 +12,7 @@ export function validateUploadMetadata(input: {
   contentType: string;
   sizeBytes: number;
   maxSizeBytes: number;
-  magicBytes: Uint8Array;
-}): { filename: string } {
+}): { filename: string; contentType: "application/zip" } {
   const filename = input.filename.trim();
   if (
     !filename ||
@@ -30,16 +29,10 @@ export function validateUploadMetadata(input: {
     throw new InvalidUploadError("extension");
   if (!isSupportedZipMimeType(input.contentType))
     throw new InvalidUploadError("content-type");
-  if (!Number.isInteger(input.sizeBytes) || input.sizeBytes < 0)
+  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0)
     throw new InvalidUploadError("size");
   if (input.sizeBytes > input.maxSizeBytes) throw new UploadTooLargeError();
-  if (
-    input.magicBytes.length < 4 ||
-    input.magicBytes[0] !== 0x50 ||
-    input.magicBytes[1] !== 0x4b
-  )
-    throw new InvalidUploadError("magic-bytes");
-  return { filename };
+  return { filename, contentType: "application/zip" };
 }
 
 export class InvalidUploadError extends Error {
