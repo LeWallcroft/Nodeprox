@@ -132,14 +132,20 @@ async function createChapter(cookie: string, chapterNumber: number) {
   return createdChapter.json().id as string;
 }
 
-async function initiate(cookie: string, chapterId: string, sizeBytes = 4) {
+async function initiate(
+  cookie: string,
+  chapterId: string,
+  sizeBytes = 4,
+  contentType = "application/zip",
+  filename = "chapter.zip",
+) {
   return app.inject({
     method: "POST",
     url: `/chapters/${chapterId}/uploads/initiate`,
     headers: { cookie },
     payload: {
-      filename: "chapter.zip",
-      contentType: "application/zip",
+      filename,
+      contentType,
       sizeBytes,
     },
   });
@@ -263,6 +269,40 @@ describe("direct chapter upload transfer", () => {
     expect(
       (await initiate(await login(otherEmail), chapterId, 4)).statusCode,
     ).toBe(403);
+    for (const [index, contentType] of [
+      "image/jpeg",
+      "image/png",
+      "application/pdf",
+      "application/x-msdownload",
+    ].entries()) {
+      const rejectedChapterId = await createChapter(cookie, 20 + index);
+      expect(
+        (await initiate(cookie, rejectedChapterId, 4, contentType)).statusCode,
+      ).toBe(415);
+    }
+    const alternateMimeChapterId = await createChapter(cookie, 30);
+    const alternateMime = await initiate(
+      cookie,
+      alternateMimeChapterId,
+      4,
+      "  Application/X-Zip-Compressed  ",
+      "24.zip",
+    );
+    expect(alternateMime.statusCode).toBe(201);
+    expect(alternateMime.json().transfer.headers).toMatchObject({
+      "content-type": "application/zip",
+    });
+    const [alternateMimeUpload] = await database.db
+      .select({
+        contentType: uploads.contentType,
+        originalFilename: uploads.originalFilename,
+      })
+      .from(uploads)
+      .where(eq(uploads.id, alternateMime.json().uploadId as string));
+    expect(alternateMimeUpload).toEqual({
+      contentType: "application/zip",
+      originalFilename: "24.zip",
+    });
     const forged = await app.inject({
       method: "POST",
       url: `/chapters/${chapterId}/uploads/initiate`,

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   InvalidUploadError,
   UploadTooLargeError,
+  isSupportedZipMimeType,
   validateUploadMetadata,
 } from "../../apps/api/src/modules/uploads/domain/upload.policy.js";
 
@@ -13,8 +14,26 @@ const valid = {
 };
 
 describe("chapter upload policy", () => {
+  it("accepts only the supported ZIP transport MIME types", () => {
+    expect(isSupportedZipMimeType("application/zip")).toBe(true);
+    expect(isSupportedZipMimeType("application/x-zip-compressed")).toBe(true);
+    expect(isSupportedZipMimeType("  Application/X-Zip-Compressed  ")).toBe(
+      true,
+    );
+    expect(isSupportedZipMimeType("image/jpeg")).toBe(false);
+    expect(isSupportedZipMimeType("image/png")).toBe(false);
+    expect(isSupportedZipMimeType("application/pdf")).toBe(false);
+    expect(isSupportedZipMimeType("application/x-msdownload")).toBe(false);
+  });
+
   it("accepts a valid ZIP and rejects invalid metadata", () => {
     expect(validateUploadMetadata(valid).filename).toBe("chapter.zip");
+    expect(
+      validateUploadMetadata({
+        ...valid,
+        contentType: "application/x-zip-compressed",
+      }).filename,
+    ).toBe("chapter.zip");
     expect(() =>
       validateUploadMetadata({ ...valid, filename: "chapter.exe" }),
     ).toThrow(InvalidUploadError);

@@ -152,11 +152,12 @@ async function directUpload(
   chapterId: string,
   filename: string,
   bytes: Buffer,
+  contentType = "application/zip",
 ) {
   const initiated = await api.post(`/chapters/${chapterId}/uploads/initiate`, {
     data: {
       filename,
-      contentType: "application/zip",
+      contentType,
       sizeBytes: bytes.length,
     },
     headers: { origin: e2eApiOrigin },
@@ -210,8 +211,9 @@ test.describe("M4-B real upload processing", () => {
       const uploaded = await directUpload(
         api,
         chapterId,
-        "chapter.zip",
+        "24.zip",
         validZip,
+        "application/x-zip-compressed",
       );
       if (uploaded.status() !== 200)
         throw new Error(
