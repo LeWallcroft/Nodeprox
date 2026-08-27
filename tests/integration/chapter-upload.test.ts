@@ -90,8 +90,10 @@ const app = buildApp(
 const password = "m4-upload-password";
 const userId = randomUUID();
 const otherId = randomUUID();
+const replacementId = randomUUID();
 const email = `m4-upload-${userId}@example.com`;
 const otherEmail = `m4-upload-other-${otherId}@example.com`;
+const replacementEmail = `m4-upload-replacement-${replacementId}@example.com`;
 const hasher = new Argon2PasswordHasher();
 
 function cookieValue(header: string | string[] | undefined): string {
@@ -143,6 +145,69 @@ async function initiate(cookie: string, chapterId: string, sizeBytes = 4) {
   });
 }
 
+async function seriesIdForChapter(chapterId: string): Promise<string> {
+  const [chapter] = await database.db
+    .select({ seriesId: chapters.seriesId })
+    .from(chapters)
+    .where(eq(chapters.id, chapterId));
+  if (!chapter) throw new Error("Expected chapter series");
+  return chapter.seriesId;
+}
+
+async function assignUploader(
+  ownerCookie: string,
+  chapterId: string,
+  uploaderId: string,
+) {
+  const response = await app.inject({
+    method: "PUT",
+    url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
+    headers: { cookie: ownerCookie },
+    payload: { uploaderId },
+  });
+  expect(response.statusCode).toBe(200);
+}
+
+async function revokeUploader(ownerCookie: string, chapterId: string) {
+  return app.inject({
+    method: "DELETE",
+    url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
+    headers: { cookie: ownerCookie },
+  });
+}
+
+async function prepareAssignedUpload(chapterNumber: number) {
+  const ownerCookie = await login();
+  const uploaderCookie = await login(otherEmail);
+  const chapterId = await createChapter(ownerCookie, chapterNumber);
+  await assignUploader(ownerCookie, chapterId, otherId);
+  const initiated = await initiate(uploaderCookie, chapterId);
+  expect(initiated.statusCode).toBe(201);
+  const uploadId = initiated.json().uploadId as string;
+  const [upload] = await database.db
+    .select()
+    .from(uploads)
+    .where(eq(uploads.id, uploadId));
+  if (!upload) throw new Error("Expected pending upload");
+  transfer.objects.set(upload.storageKey, {
+    key: upload.storageKey,
+    sizeBytes: upload.sizeBytes,
+    contentType: upload.contentType,
+  });
+  return { ownerCookie, uploaderCookie, chapterId, uploadId, upload };
+}
+
+async function waitUntil(
+  predicate: () => Promise<boolean>,
+  timeoutMs = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for lock");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 beforeAll(async () => {
   const passwordHash = await hasher.hash(password);
   await database.db.insert(users).values([
@@ -154,17 +219,26 @@ beforeAll(async () => {
       status: "active",
       role: "uploader",
     },
+    {
+      id: replacementId,
+      email: replacementEmail,
+      passwordHash,
+      status: "active",
+      role: "uploader",
+    },
   ]);
 });
 
 afterAll(async () => {
   await database.db
     .delete(auditLogs)
-    .where(inArray(auditLogs.actorId, [userId, otherId]));
+    .where(inArray(auditLogs.actorId, [userId, otherId, replacementId]));
   await database.db.delete(uploads).where(eq(uploads.createdBy, userId));
   await database.db.delete(chapters).where(eq(chapters.createdBy, userId));
   await database.db.delete(series).where(eq(series.createdBy, userId));
-  await database.db.delete(users).where(inArray(users.id, [userId, otherId]));
+  await database.db
+    .delete(users)
+    .where(inArray(users.id, [userId, otherId, replacementId]));
   await app.close();
   await database.sql.end();
 });
@@ -331,5 +405,225 @@ describe("direct chapter upload transfer", () => {
     gate.release();
     expect((await completion).statusCode).toBe(200);
     expect(transfer.objects.has(pendingRow?.storageKey ?? "")).toBe(true);
+  });
+
+  it("lets a committed revocation win while B2 HEAD is in progress and keeps the orphan cleanable", async () => {
+    const prepared = await prepareAssignedUpload(6);
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await gate.started;
+    expect(
+      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
+        .statusCode,
+    ).toBe(204);
+    gate.release();
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    const [chapter] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, prepared.chapterId));
+    expect(upload?.status).toBe("pending");
+    expect(chapter?.status).toBe("uploading");
+    expect(transfer.objects.has(prepared.upload.storageKey)).toBe(true);
+
+    const cleanup = await app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/abort`,
+      headers: { cookie: prepared.ownerCookie },
+    });
+    expect(cleanup.statusCode).toBe(204);
+    expect(transfer.objects.has(prepared.upload.storageKey)).toBe(false);
+  });
+
+  it("treats uploader reassignment before finalization as revocation for the prior actor", async () => {
+    const prepared = await prepareAssignedUpload(7);
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await gate.started;
+    await assignUploader(
+      prepared.ownerCookie,
+      prepared.chapterId,
+      replacementId,
+    );
+    gate.release();
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("revalidates and locks an active helper permission before publishing uploaded", async () => {
+    const ownerCookie = await login();
+    const helperCookie = await login(replacementEmail);
+    const chapterId = await createChapter(ownerCookie, 10);
+    const grant = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/permissions`,
+      headers: { cookie: ownerCookie },
+      payload: { userId: replacementId, permissions: ["images.upload"] },
+    });
+    expect(grant.statusCode).toBe(204);
+    const initiated = await initiate(helperCookie, chapterId);
+    expect(initiated.statusCode).toBe(201);
+    const uploadId = initiated.json().uploadId as string;
+    const [pending] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (!pending) throw new Error("Expected helper upload");
+    transfer.objects.set(pending.storageKey, {
+      key: pending.storageKey,
+      sizeBytes: pending.sizeBytes,
+      contentType: pending.contentType,
+    });
+    const gate = transfer.blockVerification();
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+      headers: { cookie: helperCookie },
+    });
+    await gate.started;
+    const revoked = await app.inject({
+      method: "DELETE",
+      url: `/chapters/${chapterId}/permissions/${replacementId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(revoked.statusCode).toBe(204);
+    gate.release();
+    expect((await completion).statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("revalidates after revocation commits between preliminary authorization and claim", async () => {
+    const prepared = await prepareAssignedUpload(8);
+    let releaseLock!: () => void;
+    let lockReady!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      lockReady = resolve;
+    });
+    const blocker = database.sql.begin(async (tx) => {
+      await tx`select id from uploads where id = ${prepared.uploadId} for update`;
+      lockReady();
+      await held;
+    });
+    await ready;
+
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await waitUntil(async () => {
+      const [row] = await database.sql<{ waiting: boolean }[]>`
+        select exists (
+          select 1
+          from pg_stat_activity
+          where wait_event_type = 'Lock'
+            and query ilike '%update "uploads"%'
+        ) as waiting
+      `;
+      return row?.waiting === true;
+    });
+    expect(
+      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
+        .statusCode,
+    ).toBe(204);
+    releaseLock();
+    await blocker;
+
+    const denied = await completion;
+    expect(denied.statusCode).toBe(403);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("pending");
+  });
+
+  it("serializes a concurrent revocation after final authority locks and commit", async () => {
+    const prepared = await prepareAssignedUpload(9);
+    let releaseOutbox!: () => void;
+    let outboxLocked!: () => void;
+    const held = new Promise<void>((resolve) => {
+      releaseOutbox = resolve;
+    });
+    const ready = new Promise<void>((resolve) => {
+      outboxLocked = resolve;
+    });
+    const blocker = database.sql.begin(async (tx) => {
+      await tx`lock table processing_outbox in access exclusive mode`;
+      outboxLocked();
+      await held;
+    });
+    await ready;
+
+    const completion = app.inject({
+      method: "POST",
+      url: `/chapters/${prepared.chapterId}/uploads/${prepared.uploadId}/complete`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    await waitUntil(async () => {
+      const [row] = await database.sql<{ waiting: boolean }[]>`
+        select exists (
+          select 1
+          from pg_locks locks
+          join pg_class relation on relation.oid = locks.relation
+          where relation.relname = 'processing_outbox'
+            and locks.granted = false
+        ) as waiting
+      `;
+      return row?.waiting === true;
+    });
+
+    let revocationSettled = false;
+    const revocation = revokeUploader(
+      prepared.ownerCookie,
+      prepared.chapterId,
+    ).finally(() => {
+      revocationSettled = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(revocationSettled).toBe(false);
+    releaseOutbox();
+    await blocker;
+
+    expect((await completion).statusCode).toBe(200);
+    expect((await revocation).statusCode).toBe(204);
+    const [upload] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, prepared.uploadId));
+    expect(upload?.status).toBe("uploaded");
+    const noLongerVisible = await app.inject({
+      method: "GET",
+      url: `/series/${await seriesIdForChapter(prepared.chapterId)}`,
+      headers: { cookie: prepared.uploaderCookie },
+    });
+    expect(noLongerVisible.statusCode).toBe(403);
   });
 });
