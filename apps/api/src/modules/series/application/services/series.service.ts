@@ -5,6 +5,7 @@ import { isOwner } from "../../domain/series.policy.js";
 import type {
   ChapterCoreRepositoryPort,
   SeriesAssignmentRepositoryPort,
+  SeriesMutationBoundaryPort,
   SeriesRepositoryPort,
   SeriesUserPort,
 } from "../ports/series.ports.js";
@@ -16,6 +17,7 @@ export class SeriesService {
     private readonly authorization: AuthorizationService,
     private readonly assignments: SeriesAssignmentRepositoryPort,
     private readonly users: SeriesUserPort,
+    private readonly mutations: SeriesMutationBoundaryPort,
   ) {}
 
   async create(
@@ -67,7 +69,16 @@ export class SeriesService {
   ) {
     const owner = await this.findManaged(context, id, PERMISSIONS.SERIES_EDIT);
     if (!owner || "forbidden" in owner) return owner;
-    return this.series.update(id, input);
+    const result = await this.mutations.updateIfAuthorized({
+      actor: context,
+      seriesId: id,
+      mutation: input,
+    });
+    if (result.outcome === "denied") return { forbidden: true as const };
+    if (result.outcome === "not-found") return null;
+    if (result.outcome === "conflict") return { conflict: true as const };
+    if (result.outcome === "invalid-target") return { conflict: true as const };
+    return result.series;
   }
 
   async remove(context: AuthorizationContext, id: string) {
@@ -77,9 +88,13 @@ export class SeriesService {
       PERMISSIONS.SERIES_DELETE,
     );
     if (!owner || "forbidden" in owner) return owner;
-    if ((await this.series.countChapters(id)) > 0)
-      return { conflict: true as const };
-    await this.series.delete(id);
+    const result = await this.mutations.deleteIfAuthorized({
+      actor: context,
+      seriesId: id,
+    });
+    if (result.outcome === "denied") return { forbidden: true as const };
+    if (result.outcome === "not-found") return null;
+    if (result.outcome !== "deleted") return { conflict: true as const };
     return { deleted: true as const };
   }
 
@@ -121,11 +136,16 @@ export class SeriesService {
     const uploader = await this.users.findById(uploaderId);
     if (uploader?.status !== "active" || uploader?.role !== "uploader")
       return { invalidTarget: true as const };
-    await this.assignments.assign({
+    const result = await this.mutations.assignIfAuthorized({
+      actor: context,
       seriesId,
       uploaderId,
-      assignedBy: context.userId,
     });
+    if (result.outcome === "denied") return { forbidden: true as const };
+    if (result.outcome === "not-found") return null;
+    if (result.outcome === "invalid-target")
+      return { invalidTarget: true as const };
+    if (result.outcome === "conflict") return { conflict: true as const };
     return { assigned: true as const };
   }
 
@@ -136,7 +156,13 @@ export class SeriesService {
       PERMISSIONS.SERIES_EDIT,
     );
     if (!managed || "forbidden" in managed) return managed;
-    await this.assignments.clear(seriesId);
+    const result = await this.mutations.clearAssignmentIfAuthorized({
+      actor: context,
+      seriesId,
+    });
+    if (result.outcome === "denied") return { forbidden: true as const };
+    if (result.outcome === "not-found") return null;
+    if (result.outcome !== "cleared") return { conflict: true as const };
     return { cleared: true as const };
   }
 

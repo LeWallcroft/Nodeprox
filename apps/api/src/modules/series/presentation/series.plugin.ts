@@ -118,9 +118,18 @@ export function registerSeriesPlugin(
     authorization,
     repository,
     new UserRepository(db),
+    repository,
   );
-  const chapterCore = new ChapterCoreService(chapters, chapterPermissions);
-  const chapterDelete = new ChapterDeleteService(chapters, authorization);
+  const chapterCore = new ChapterCoreService(
+    chapters,
+    chapterPermissions,
+    chapters,
+  );
+  const chapterDelete = new ChapterDeleteService(
+    chapters,
+    authorization,
+    chapters,
+  );
 
   app.post("/series", { preHandler: session }, async (request, reply) => {
     try {
@@ -158,6 +167,7 @@ export function registerSeriesPlugin(
       );
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("conflict" in result) throw conflict;
       return result;
     } catch (cause) {
       if (isUnique(cause)) throw conflict;
@@ -192,6 +202,7 @@ export function registerSeriesPlugin(
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
       if ("invalidTarget" in result) throw invalid;
+      if ("conflict" in result) throw conflict;
       return { assigned: true };
     },
   );
@@ -204,6 +215,7 @@ export function registerSeriesPlugin(
       const result = await seriesService.clearUploader(context(), seriesId);
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("conflict" in result) throw conflict;
       return reply.code(204).send();
     },
   );
@@ -281,6 +293,7 @@ export function registerSeriesPlugin(
       if ("unauthenticated" in result) throw unauthorized;
       if ("notFound" in result) throw notFound;
       if ("denied" in result) throw forbidden;
+      if ("conflict" in result) throw conflict;
       return reply.code(204).send();
     },
   );
