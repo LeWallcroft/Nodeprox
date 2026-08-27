@@ -11,10 +11,10 @@ import { validateUploadMetadata } from "../../domain/upload.policy.js";
 import type {
   ChapterUploadResult,
   InitiatedChapterUpload,
-  UploadRecord,
 } from "../../domain/upload.types.js";
 import type {
   UploadAuditPort,
+  UploadLifecycleBoundaryPort,
   UploadRepositoryPort,
 } from "../ports/upload.ports.js";
 
@@ -24,6 +24,7 @@ export class ChapterUploadService {
   constructor(
     private readonly permissions: ChapterPermissionService,
     private readonly uploads: UploadRepositoryPort,
+    private readonly lifecycle: UploadLifecycleBoundaryPort,
     private readonly transfer: UploadTransferPort,
     private readonly audit: UploadAuditPort,
     private readonly maxSizeBytes: number,
@@ -126,15 +127,23 @@ export class ChapterUploadService {
       throw new UploadedObjectMismatchError();
     }
 
-    let completed: UploadRecord | null;
+    let finalization: Awaited<
+      ReturnType<UploadLifecycleBoundaryPort["finalizeIfAuthorized"]>
+    >;
     try {
-      completed = await this.uploads.markUploaded(input.uploadId, verified);
+      finalization = await this.lifecycle.finalizeIfAuthorized({
+        actor: input.context,
+        chapterId: input.chapterId,
+        uploadId: input.uploadId,
+        verifiedObject: verified,
+      });
     } catch (error) {
       await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
       throw error;
     }
-    if (!completed) {
+    if (finalization.outcome !== "uploaded") {
       await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      if (finalization.outcome === "denied") throw new UploadDeniedError();
       throw new UploadConflictError();
     }
     await this.safeAudit(
@@ -158,11 +167,14 @@ export class ChapterUploadService {
     uploadId: string;
   }): Promise<void> {
     await this.authorize(input.context, input.chapterId);
-    const upload = await this.uploads.claimForAbort(
-      input.uploadId,
-      input.chapterId,
-    );
-    if (!upload) throw new UploadConflictError();
+    const claim = await this.lifecycle.claimAbortIfAuthorized({
+      actor: input.context,
+      chapterId: input.chapterId,
+      uploadId: input.uploadId,
+    });
+    if (claim.outcome === "denied") throw new UploadDeniedError();
+    if (claim.outcome === "conflict") throw new UploadConflictError();
+    const upload = claim.upload;
     try {
       await this.transfer.abort({ key: upload.storageKey });
     } catch (error) {

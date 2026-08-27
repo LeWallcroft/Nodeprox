@@ -8,6 +8,7 @@ import {
 } from "../../apps/api/src/modules/uploads/application/services/chapter-upload.service.js";
 import type {
   UploadAuditPort,
+  UploadLifecycleBoundaryPort,
   UploadRepositoryPort,
 } from "../../apps/api/src/modules/uploads/application/ports/upload.ports.js";
 import { UploadTransferObjectNotFoundError } from "../../packages/storage/src/port.js";
@@ -42,11 +43,6 @@ function setup() {
       status: "verifying",
     }),
     releaseCompletion: vi.fn().mockResolvedValue(undefined),
-    markUploaded: vi.fn().mockResolvedValue({
-      ...pending,
-      status: "uploaded",
-      etag: "etag-1",
-    }),
     claimForAbort: vi.fn().mockResolvedValue({
       ...pending,
       status: "aborting",
@@ -58,6 +54,16 @@ function setup() {
     removeAborting: vi.fn().mockResolvedValue(true),
     recoverStaleClaims: vi.fn().mockResolvedValue(undefined),
     findStalePending: vi.fn().mockResolvedValue([]),
+  };
+  const lifecycle: UploadLifecycleBoundaryPort = {
+    finalizeIfAuthorized: vi.fn().mockResolvedValue({
+      outcome: "uploaded",
+      upload: { ...pending, status: "uploaded", etag: "etag-1" },
+    }),
+    claimAbortIfAuthorized: vi.fn().mockResolvedValue({
+      outcome: "claimed",
+      upload: { ...pending, status: "aborting" },
+    }),
   };
   const transfer: UploadTransferPort = {
     initiate: vi.fn().mockResolvedValue({
@@ -81,16 +87,17 @@ function setup() {
   const service = new ChapterUploadService(
     permission,
     uploads,
+    lifecycle,
     transfer,
     audit,
     512,
   );
-  return { service, uploads, transfer, audit };
+  return { service, uploads, lifecycle, transfer, audit };
 }
 
 describe("chapter upload transfer lifecycle", () => {
   it("initiates pending state without marking the upload as uploaded", async () => {
-    const { service, uploads, transfer } = setup();
+    const { service, lifecycle, transfer } = setup();
     await expect(
       service.initiate({
         context,
@@ -103,12 +110,12 @@ describe("chapter upload transfer lifecycle", () => {
     expect(transfer.initiate).toHaveBeenCalledWith(
       expect.objectContaining({ key: expect.stringContaining("chapter-1") }),
     );
-    expect(uploads.markUploaded).not.toHaveBeenCalled();
+    expect(lifecycle.finalizeIfAuthorized).not.toHaveBeenCalled();
   });
 
   it("does not report success when database finalization fails", async () => {
-    const { service, uploads } = setup();
-    vi.mocked(uploads.markUploaded).mockRejectedValueOnce(
+    const { service, lifecycle } = setup();
+    vi.mocked(lifecycle.finalizeIfAuthorized).mockRejectedValueOnce(
       new Error("db failed"),
     );
     await expect(
@@ -146,7 +153,7 @@ describe("chapter upload transfer lifecycle", () => {
         uploadId: "upload-1",
       }),
     ).rejects.toBeInstanceOf(UploadedObjectMismatchError);
-    expect(mismatch.uploads.markUploaded).not.toHaveBeenCalled();
+    expect(mismatch.lifecycle.finalizeIfAuthorized).not.toHaveBeenCalled();
   });
 
   it("aborts provider state before removing pending database state", async () => {

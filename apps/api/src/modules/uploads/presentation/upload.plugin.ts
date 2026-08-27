@@ -151,6 +151,7 @@ export function registerUploadPlugin(
   const service = new ChapterUploadService(
     chapterPermissions,
     repository,
+    repository,
     transfer,
     repository,
     storageConfig.uploadMaxSizeBytes,
