@@ -8,6 +8,24 @@ The normative ZIP path is:
 4. The browser calls `POST /chapters/:chapterId/uploads/:uploadId/complete`.
 5. The API uses `HEAD` against the server-side key and checks real size and Content-Type before atomically changing the upload and Chapter to `uploaded`.
 
+## Finalization authorization and serialization
+
+`initiate`, a presigned B2 URL and the preliminary authorization at the start of `complete` do not create an authorization lease. The B2 `HEAD` runs without an open PostgreSQL transaction. After `HEAD`, the persistence boundary opens one transaction that revalidates the current session, active Identity, RBAC capability and contextual Chapter authority before changing the upload, Chapter and processing outbox together.
+
+All transaction-aware authorization boundaries use the same global order. Rows that do not determine a particular operation are skipped:
+
+1. Session.
+2. User/Identity rows, sorted by UUID when more than one user is involved.
+3. Series.
+4. Series assignment.
+5. Chapter.
+6. Upload.
+7. Matching active helper permission.
+
+This order is shared by upload finalization, Chapter update/delete, Series update/delete, reassignment and helper revocation. Assignment/reassignment, Identity updates and helper revocation contend on the same authority rows without a `Series → Chapter` / `Chapter → Series` inversion. If revocation or reassignment commits first, the stale operation returns `403`. If the mutation acquires the authority locks and commits first, it is valid and revocation applies to later operations. Lifecycle races return `409`.
+
+A verified B2 object whose finalization is denied remains temporary. It must not be marked uploaded to preserve it. The user can abort only through a claim authorized with current authority; after that claim, provider deletion is internal cleanup. The stale-upload sweep and bucket lifecycle cleanup run with system authority and remain available after the original user's authority is revoked.
+
 `abort` and the stale-upload sweep remove incomplete objects. `UPLOAD_PENDING_TTL_SECONDS` defaults to 86400 seconds. Backblaze should additionally have a lifecycle rule for the temporary `uploads/` prefix as defense in depth.
 
 ## Credentials
