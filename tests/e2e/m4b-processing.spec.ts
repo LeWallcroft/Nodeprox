@@ -26,6 +26,7 @@ const webp = Buffer.from([
   0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50,
 ]);
 const gif = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const e2eApiOrigin = "http://127.0.0.1:3101";
 
 function crc32(data: Buffer): number {
   let crc = 0xffffffff;
@@ -130,14 +131,14 @@ async function login(
 ): Promise<APIRequestContext> {
   const response = await api.post("/auth/login", {
     data: credentials,
-    headers: { origin: "http://127.0.0.1:3001" },
+    headers: { origin: e2eApiOrigin },
   });
   expect(response.status()).toBe(204);
   const setCookie = response.headers()["set-cookie"];
   const token = /^nodeprox_session=([^;]+)/.exec(setCookie ?? "")?.[1];
   if (!token) throw new Error("authentication session cookie was not issued");
   const authenticated = await request.newContext({
-    baseURL: "http://127.0.0.1:3001",
+    baseURL: e2eApiOrigin,
     extraHTTPHeaders: { cookie: `nodeprox_session=${token}` },
   });
   await api.dispose();
@@ -146,9 +147,47 @@ async function login(
   return authenticated;
 }
 
+async function directUpload(
+  api: APIRequestContext,
+  chapterId: string,
+  filename: string,
+  bytes: Buffer,
+) {
+  const initiated = await api.post(`/chapters/${chapterId}/uploads/initiate`, {
+    data: {
+      filename,
+      contentType: "application/zip",
+      sizeBytes: bytes.length,
+    },
+    headers: { origin: e2eApiOrigin },
+  });
+  if (initiated.status() !== 201)
+    throw new Error(
+      `initiate failed: ${initiated.status()} ${await initiated.text()}`,
+    );
+  const payload = await initiated.json();
+  expect(payload.status).toBe("pending");
+  expect(payload.transfer.mode).toBe("single");
+  const direct = await request.newContext();
+  try {
+    const stored = await direct.put(payload.transfer.url, {
+      data: bytes,
+      headers: payload.transfer.headers,
+    });
+    expect(stored.status()).toBe(200);
+  } finally {
+    await direct.dispose();
+  }
+  return api.post(
+    `/chapters/${chapterId}/uploads/${payload.uploadId}/complete`,
+    { headers: { origin: e2eApiOrigin } },
+  );
+}
+
 test.describe("M4-B real upload processing", () => {
   test("processes a valid ZIP through API, outbox, BullMQ and Worker", async () => {
-    let api = await request.newContext({ baseURL: "http://127.0.0.1:3001" });
+    let api = await request.newContext({ baseURL: e2eApiOrigin });
+    let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
     const slug = `e2e-valid-${Date.now()}`;
     let seriesId = "";
@@ -157,28 +196,24 @@ test.describe("M4-B real upload processing", () => {
       api = await login(api, await createTestAdmin(database));
       const createdSeries = await api.post("/series", {
         data: { title: "M4-B E2E valid", slug },
-        headers: { origin: "http://127.0.0.1:3001" },
+        headers: { origin: e2eApiOrigin },
       });
       expect(createdSeries.status()).toBe(201);
       seriesId = (await createdSeries.json()).id;
       const createdChapter = await api.post(`/series/${seriesId}/chapters`, {
         data: { chapterNumber: 1, title: "Valid ZIP" },
-        headers: { origin: "http://127.0.0.1:3001" },
+        headers: { origin: e2eApiOrigin },
       });
       expect(createdChapter.status()).toBe(201);
       chapterId = (await createdChapter.json()).id;
 
-      const uploaded = await api.post(`/chapters/${chapterId}/upload`, {
-        multipart: {
-          file: {
-            name: "chapter.zip",
-            mimeType: "application/zip",
-            buffer: validZip,
-          },
-        },
-        headers: { origin: "http://127.0.0.1:3001" },
-      });
-      if (uploaded.status() !== 201)
+      const uploaded = await directUpload(
+        api,
+        chapterId,
+        "chapter.zip",
+        validZip,
+      );
+      if (uploaded.status() !== 200)
         throw new Error(
           `upload failed: ${uploaded.status()} ${await uploaded.text()}`,
         );
@@ -207,6 +242,64 @@ test.describe("M4-B real upload processing", () => {
       expect(
         rows.every((row) => row.sizeBytes > 0 && row.checksum.length === 64),
       ).toBe(true);
+
+      anonymous = await request.newContext({
+        baseURL: e2eApiOrigin,
+      });
+      const publicChapter = await anonymous.get(
+        `/public/chapters/${chapterId}`,
+      );
+      expect(publicChapter.status()).toBe(200);
+      const publicPayload = await publicChapter.json();
+      expect(publicPayload.id).toBe(chapterId);
+      expect(
+        publicPayload.images.map(
+          (image: { filename: string }) => image.filename,
+        ),
+      ).toEqual(["01.jpg", "02.png", "03.webp", "04.gif"]);
+      expect(
+        publicPayload.images.every((image: { url: string }) =>
+          image.url.startsWith(
+            `https://media.nodeprox.org/series/${seriesId}/chapters/${chapterId}/images/`,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        publicPayload.images.every(
+          (image: { storageKey?: string }) => !image.storageKey,
+        ),
+      ).toBe(true);
+
+      const listed = await api.get(`/chapters/${chapterId}/images`);
+      expect(listed.status()).toBe(200);
+      const listedImages = (await listed.json()).images as Array<{
+        id: string;
+        filename: string;
+        sortOrder: number;
+        storageKey?: string;
+      }>;
+      expect(listedImages.map((image) => image.filename)).toEqual([
+        "01.jpg",
+        "02.png",
+        "03.webp",
+        "04.gif",
+      ]);
+      expect(listedImages.map((image) => image.sortOrder)).toEqual([
+        1, 2, 3, 4,
+      ]);
+      expect(listedImages.every((image) => !image.storageKey)).toBe(true);
+
+      const first = listedImages[0];
+      if (!first) throw new Error("expected first image");
+      const metadata = await api.get(`/images/${first.id}`);
+      expect(metadata.status()).toBe(200);
+      expect((await metadata.json()).storageKey).toBeUndefined();
+
+      const content = await api.get(`/images/${first.id}/content`);
+      expect(content.status()).toBe(200);
+      expect(content.headers()["content-type"]).toContain("image/jpeg");
+      expect(Number(content.headers()["content-length"])).toBeGreaterThan(0);
+      expect((await content.body()).length).toBeGreaterThan(0);
     } finally {
       if (chapterId) {
         await database.db.delete(images).where(eq(images.chapterId, chapterId));
@@ -219,11 +312,13 @@ test.describe("M4-B real upload processing", () => {
         await database.db.delete(series).where(eq(series.id, seriesId));
       await database.sql.end();
       await api.dispose();
+      await anonymous?.dispose();
     }
   });
 
   test("marks an invalid ZIP failed and cleans partial processing state", async () => {
-    let api = await request.newContext({ baseURL: "http://127.0.0.1:3001" });
+    let api = await request.newContext({ baseURL: e2eApiOrigin });
+    let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
     const slug = `e2e-invalid-${Date.now()}`;
     let seriesId = "";
@@ -232,27 +327,28 @@ test.describe("M4-B real upload processing", () => {
       api = await login(api, await createTestAdmin(database));
       const createdSeries = await api.post("/series", {
         data: { title: "M4-B E2E invalid", slug },
-        headers: { origin: "http://127.0.0.1:3001" },
+        headers: { origin: e2eApiOrigin },
       });
       seriesId = (await createdSeries.json()).id;
       const createdChapter = await api.post(`/series/${seriesId}/chapters`, {
         data: { chapterNumber: 1 },
-        headers: { origin: "http://127.0.0.1:3001" },
+        headers: { origin: e2eApiOrigin },
       });
       chapterId = (await createdChapter.json()).id;
-      const uploaded = await api.post(`/chapters/${chapterId}/upload`, {
-        multipart: {
-          file: {
-            name: "invalid.zip",
-            mimeType: "application/zip",
-            buffer: Buffer.from([
-              0x50, 0x4b, 0x03, 0x04, 0x69, 0x6e, 0x76, 0x61, 0x6c, 0x69, 0x64,
-            ]),
-          },
-        },
-        headers: { origin: "http://127.0.0.1:3001" },
+      anonymous = await request.newContext({
+        baseURL: e2eApiOrigin,
       });
-      if (uploaded.status() !== 201)
+      const notReady = await anonymous.get(`/public/chapters/${chapterId}`);
+      expect(notReady.status()).toBe(404);
+      const uploaded = await directUpload(
+        api,
+        chapterId,
+        "invalid.zip",
+        Buffer.from([
+          0x50, 0x4b, 0x03, 0x04, 0x69, 0x6e, 0x76, 0x61, 0x6c, 0x69, 0x64,
+        ]),
+      );
+      if (uploaded.status() !== 200)
         throw new Error(
           `upload failed: ${uploaded.status()} ${await uploaded.text()}`,
         );
@@ -292,6 +388,7 @@ test.describe("M4-B real upload processing", () => {
       );
       await database.sql.end();
       await api.dispose();
+      await anonymous?.dispose();
     }
   });
 });

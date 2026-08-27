@@ -10,7 +10,6 @@ const valid = {
   contentType: "application/zip",
   sizeBytes: 10,
   maxSizeBytes: 100,
-  magicBytes: Uint8Array.from([0x50, 0x4b, 0x03, 0x04]),
 };
 
 describe("chapter upload policy", () => {
@@ -25,12 +24,9 @@ describe("chapter upload policy", () => {
         contentType: "application/octet-stream",
       }),
     ).toThrow(InvalidUploadError);
-    expect(() =>
-      validateUploadMetadata({
-        ...valid,
-        magicBytes: Uint8Array.from([0, 0, 0, 0]),
-      }),
-    ).toThrow(InvalidUploadError);
+    expect(() => validateUploadMetadata({ ...valid, sizeBytes: 0 })).toThrow(
+      InvalidUploadError,
+    );
     expect(() => validateUploadMetadata({ ...valid, sizeBytes: 101 })).toThrow(
       UploadTooLargeError,
     );

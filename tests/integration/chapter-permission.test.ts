@@ -91,7 +91,7 @@ beforeAll(async () => {
       email: ownerEmail,
       passwordHash,
       status: "active",
-      role: "uploader",
+      role: "gestor",
     },
     {
       id: helperId,

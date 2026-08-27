@@ -48,9 +48,10 @@ function NavigationLink({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ capabilities }: { capabilities: readonly string[] }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const capabilitySet = new Set(capabilities);
 
   useEffect(() => {
     const open = () => setMobileOpen(true);
@@ -79,18 +80,23 @@ export function Sidebar() {
           <span className={collapsed ? "hidden" : ""}>NodeProx</span>
         </div>
         <nav className="grid gap-1">
-          {navigationConfig.map((item) => (
-            <div key={item.id}>
-              <NavigationLink item={item} collapsed={collapsed} />
-              {item.children?.map((child) => (
-                <NavigationLink
-                  key={child.id}
-                  item={child}
-                  collapsed={collapsed}
-                />
-              ))}
-            </div>
-          ))}
+          {navigationConfig
+            .filter(
+              (item) =>
+                !item.capabilityKey || capabilitySet.has(item.capabilityKey),
+            )
+            .map((item) => (
+              <div key={item.id}>
+                <NavigationLink item={item} collapsed={collapsed} />
+                {item.children?.map((child) => (
+                  <NavigationLink
+                    key={child.id}
+                    item={child}
+                    collapsed={collapsed}
+                  />
+                ))}
+              </div>
+            ))}
         </nav>
         <button
           className="mt-auto min-h-control rounded-lg border border-[#354663] bg-transparent text-[#dce5f2] focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"

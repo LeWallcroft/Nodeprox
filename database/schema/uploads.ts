@@ -1,4 +1,5 @@
 import {
+  check,
   index,
   pgEnum,
   pgTable,
@@ -9,11 +10,14 @@ import {
   varchar,
   integer,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { users } from "./authentication.js";
 import { chapters } from "./chapters.js";
 
 export const uploadStatusEnum = pgEnum("upload_status", [
   "pending",
+  "verifying",
+  "aborting",
   "uploaded",
 ]);
 
@@ -41,6 +45,7 @@ export const uploads = pgTable(
       .defaultNow(),
   },
   (table) => [
+    check("uploads_size_positive", sql`${table.sizeBytes} > 0`),
     uniqueIndex("uploads_storage_key_unique").on(table.storageKey),
     uniqueIndex("uploads_active_chapter_unique").on(table.chapterId),
     index("uploads_chapter_id_idx").on(table.chapterId),

@@ -5,13 +5,38 @@ import {
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
 import { createReadStream, createWriteStream } from "node:fs";
 import { access, mkdir, rm } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import type { StoragePort, StoredObject } from "./port.js";
+import {
+  UploadTransferObjectNotFoundError,
+  UploadTransferProviderError,
+  type StoragePort,
+  type StoredObject,
+  type UploadTransferPort,
+  type VerifiedUploadedObject,
+} from "./port.js";
+
+function requirePositiveSize(sizeBytes: number): void {
+  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= 0)
+    throw new Error("storage-size-must-be-positive");
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "$metadata" in error &&
+    typeof error.$metadata === "object" &&
+    error.$metadata !== null &&
+    "httpStatusCode" in error.$metadata &&
+    error.$metadata.httpStatusCode === 404
+  );
+}
 
 export class B2Storage implements StoragePort {
   private readonly client: S3Client;
@@ -37,6 +62,7 @@ export class B2Storage implements StoragePort {
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
+    requirePositiveSize(input.sizeBytes);
     const result = await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -79,16 +105,7 @@ export class B2Storage implements StoragePort {
       );
       return true;
     } catch (error) {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "$metadata" in error &&
-        typeof error.$metadata === "object" &&
-        error.$metadata !== null &&
-        "httpStatusCode" in error.$metadata &&
-        error.$metadata.httpStatusCode === 404
-      )
-        return false;
+      if (isNotFound(error)) return false;
       throw error;
     }
   }
@@ -107,6 +124,7 @@ export class FilesystemStorage implements StoragePort {
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
+    requirePositiveSize(input.sizeBytes);
     const target = this.safePath(input.key);
     await mkdir(dirname(target), { recursive: true });
     let sizeBytes = 0;
@@ -121,6 +139,10 @@ export class FilesystemStorage implements StoragePort {
       counter,
       createWriteStream(target, { flags: "wx" }),
     );
+    if (sizeBytes !== input.sizeBytes) {
+      await rm(target, { force: true });
+      throw new Error("storage-size-mismatch");
+    }
     return { key: input.key, sizeBytes, contentType: input.contentType };
   }
 
@@ -152,5 +174,89 @@ export class FilesystemStorage implements StoragePort {
     if (target !== this.root && !target.startsWith(`${this.root}${sep}`))
       throw new Error("Invalid storage key");
     return target;
+  }
+}
+
+export class B2UploadTransfer implements UploadTransferPort {
+  private readonly client: S3Client;
+  private readonly bucket: string;
+
+  constructor(
+    config: Extract<NodeProxStorageConfig, { provider: "b2" }>["b2"],
+  ) {
+    this.client = new S3Client({
+      endpoint: config.B2_ENDPOINT,
+      region: config.B2_REGION,
+      credentials: {
+        accessKeyId: config.B2_KEY_ID,
+        secretAccessKey: config.B2_APPLICATION_KEY,
+      },
+      requestChecksumCalculation: "WHEN_REQUIRED",
+    });
+    this.bucket = config.B2_BUCKET;
+  }
+
+  async initiate(input: {
+    key: string;
+    contentType: string;
+    sizeBytes: number;
+    expiresInSeconds: number;
+  }) {
+    requirePositiveSize(input.sizeBytes);
+    try {
+      const url = await getSignedUrl(
+        this.client,
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key: input.key,
+          ContentType: input.contentType,
+          ContentLength: input.sizeBytes,
+        }),
+        { expiresIn: input.expiresInSeconds },
+      );
+      return {
+        mode: "single" as const,
+        method: "PUT" as const,
+        url,
+        headers: { "content-type": input.contentType },
+        expiresAt: new Date(
+          Date.now() + input.expiresInSeconds * 1000,
+        ).toISOString(),
+      };
+    } catch (cause) {
+      throw new UploadTransferProviderError({ cause });
+    }
+  }
+
+  async verify(input: { key: string }): Promise<VerifiedUploadedObject> {
+    try {
+      const result = await this.client.send(
+        new HeadObjectCommand({ Bucket: this.bucket, Key: input.key }),
+      );
+      const sizeBytes = result.ContentLength;
+      if (!Number.isSafeInteger(sizeBytes) || sizeBytes === undefined)
+        throw new UploadTransferProviderError();
+      const etag = result.ETag?.replaceAll('"', "");
+      return {
+        key: input.key,
+        sizeBytes,
+        ...(result.ContentType ? { contentType: result.ContentType } : {}),
+        ...(etag ? { etag } : {}),
+      };
+    } catch (cause) {
+      if (cause instanceof UploadTransferProviderError) throw cause;
+      if (isNotFound(cause)) throw new UploadTransferObjectNotFoundError();
+      throw new UploadTransferProviderError({ cause });
+    }
+  }
+
+  async abort(input: { key: string }): Promise<void> {
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: input.key }),
+      );
+    } catch (cause) {
+      throw new UploadTransferProviderError({ cause });
+    }
   }
 }

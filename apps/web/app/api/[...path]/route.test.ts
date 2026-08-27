@@ -75,7 +75,7 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
-  it("supports PATCH, DELETE and multipart request bodies", async () => {
+  it("supports PATCH, DELETE and upload metadata without proxying ZIP bytes", async () => {
     const backend = vi
       .fn()
       .mockResolvedValueOnce(
@@ -101,17 +101,20 @@ describe("same-origin API proxy", () => {
       }),
       context(["series", "series-1"]),
     );
-    const form = new FormData();
-    form.append(
-      "file",
-      new File(["PK\x03\x04"], "chapter.zip", { type: "application/zip" }),
-    );
     const uploadResponse = await POST(
-      new Request("http://localhost:3000/api/chapters/chapter-1/upload", {
-        method: "POST",
-        body: form,
-      }),
-      context(["chapters", "chapter-1", "upload"]),
+      new Request(
+        "http://localhost:3000/api/chapters/chapter-1/uploads/initiate",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            filename: "chapter.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          }),
+        },
+      ),
+      context(["chapters", "chapter-1", "uploads", "initiate"]),
     );
 
     expect(patchResponse.status).toBe(200);
@@ -122,8 +125,21 @@ describe("same-origin API proxy", () => {
     ).toEqual(["PATCH", "DELETE", "POST"]);
     expect(
       new Headers(backend.mock.calls[2]?.[1].headers).get("content-type"),
-    ).toContain("multipart/form-data; boundary=");
+    ).toBe("application/json");
+    expect(
+      new Headers(backend.mock.calls[2]?.[1].headers).get("content-length"),
+    ).toBeNull();
     expect(backend.mock.calls[2]?.[1].body).toBeTruthy();
+
+    const legacy = await POST(
+      new Request("http://localhost:3000/api/chapters/chapter-1/upload", {
+        method: "POST",
+        body: new Uint8Array([0x50, 0x4b]),
+      }),
+      context(["chapters", "chapter-1", "upload"]),
+    );
+    expect(legacy.status).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(3);
     vi.unstubAllGlobals();
   });
 

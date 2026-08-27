@@ -9,7 +9,7 @@ export const navigationConfig: NavigationItem[] = [
     id: "admin",
     label: "Administración",
     icon: "⚙",
-    capabilityKey: "admin.view",
+    capabilityKey: "admin.system.manage",
     children: [
       {
         id: "admin-settings",

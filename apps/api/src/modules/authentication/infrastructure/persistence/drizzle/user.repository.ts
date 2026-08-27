@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import { users } from "../../../../../../../../database/schema/index.js";
 import type { UserRecord } from "../../../domain/entities/authentication.types.js";
@@ -43,5 +43,54 @@ export class UserRepository implements UserRepositoryPort {
       .update(users)
       .set({ passwordHash, updatedAt: new Date() })
       .where(eq(users.id, id));
+  }
+
+  async list() {
+    const rows = await this.db.select().from(users);
+    return rows.map(toUserRecord);
+  }
+
+  async updateStatus(id: string, status: typeof users.$inferInsert.status) {
+    const [row] = await this.db
+      .update(users)
+      .set({ status, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return row ? toUserRecord(row) : null;
+  }
+
+  async updateRole(id: string, role: typeof users.$inferInsert.role) {
+    const [row] = await this.db
+      .update(users)
+      .set({ role, updatedAt: new Date() })
+      .where(eq(users.id, id))
+      .returning();
+    return row ? toUserRecord(row) : null;
+  }
+
+  async review(input: {
+    id: string;
+    expectedStatus: UserRecord["status"];
+    status: UserRecord["status"];
+    role?: UserRecord["role"] | undefined;
+  }): Promise<
+    | { outcome: "updated"; user: UserRecord }
+    | { outcome: "not-found" | "conflict" }
+  > {
+    const [row] = await this.db
+      .update(users)
+      .set({
+        status: input.status,
+        ...(input.role ? { role: input.role } : {}),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(eq(users.id, input.id), eq(users.status, input.expectedStatus)),
+      )
+      .returning();
+    if (row) return { outcome: "updated", user: toUserRecord(row) };
+    return (await this.findById(input.id))
+      ? { outcome: "conflict" }
+      : { outcome: "not-found" };
   }
 }

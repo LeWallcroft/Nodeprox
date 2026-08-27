@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const DEFAULT_PUBLIC_MEDIA_ORIGIN = "https://media.nodeprox.org";
+
 const configSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -11,7 +13,21 @@ const configSchema = z.object({
     .default("info"),
   DATABASE_URL: z.url(),
   REDIS_URL: z.url(),
+  PUBLIC_MEDIA_ORIGIN: z
+    .url()
+    .default(DEFAULT_PUBLIC_MEDIA_ORIGIN)
+    .refine((value) => {
+      const url = new URL(value);
+      return (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        (url.pathname === "/" || url.pathname === "") &&
+        !url.search &&
+        !url.hash
+      );
+    }, "PUBLIC_MEDIA_ORIGIN must be an absolute HTTP(S) origin without a path"),
   UPLOAD_MAX_SIZE_BYTES: z.coerce.number().int().positive().default(536870912),
+  UPLOAD_PENDING_TTL_SECONDS: z.coerce.number().int().positive().default(86400),
+  STORAGE_PROVIDER: z.enum(["filesystem", "b2"]).optional(),
   B2_ENDPOINT: z.url().optional(),
   B2_REGION: z.string().trim().min(1).optional(),
   B2_BUCKET: z.string().trim().min(1).optional(),
@@ -53,10 +69,15 @@ export type NodeProxAdminBootstrapConfig = z.infer<
   typeof adminBootstrapConfigSchema
 >;
 export type NodeProxStorageConfig =
-  | { provider: "filesystem"; uploadMaxSizeBytes: number }
+  | {
+      provider: "filesystem";
+      uploadMaxSizeBytes: number;
+      uploadPendingTtlSeconds?: number;
+    }
   | {
       provider: "b2";
       uploadMaxSizeBytes: number;
+      uploadPendingTtlSeconds?: number;
       b2: z.infer<typeof b2ConfigSchema>;
     };
 export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
@@ -97,16 +118,28 @@ export function loadStorageConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxStorageConfig {
   const parsed = configSchema
-    .pick({ NODE_ENV: true, UPLOAD_MAX_SIZE_BYTES: true })
+    .pick({
+      NODE_ENV: true,
+      UPLOAD_MAX_SIZE_BYTES: true,
+      UPLOAD_PENDING_TTL_SECONDS: true,
+      STORAGE_PROVIDER: true,
+    })
     .parse(env);
-  if (parsed.NODE_ENV !== "production")
+  const provider =
+    parsed.STORAGE_PROVIDER ??
+    (parsed.NODE_ENV === "production" ? "b2" : "filesystem");
+  if (parsed.NODE_ENV === "production" && provider !== "b2")
+    throw new Error("Production storage provider must be b2");
+  if (provider === "filesystem")
     return {
       provider: "filesystem",
       uploadMaxSizeBytes: parsed.UPLOAD_MAX_SIZE_BYTES,
+      uploadPendingTtlSeconds: parsed.UPLOAD_PENDING_TTL_SECONDS,
     };
   return {
     provider: "b2",
     uploadMaxSizeBytes: parsed.UPLOAD_MAX_SIZE_BYTES,
+    uploadPendingTtlSeconds: parsed.UPLOAD_PENDING_TTL_SECONDS,
     b2: b2ConfigSchema.parse(env),
   };
 }

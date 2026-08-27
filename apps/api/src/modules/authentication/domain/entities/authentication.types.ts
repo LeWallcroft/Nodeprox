@@ -1,10 +1,16 @@
-export type UserStatus = "active" | "suspended" | "disabled";
+export type UserStatus =
+  | "pending"
+  | "active"
+  | "rejected"
+  | "suspended"
+  | "disabled";
 
 export interface UserRecord {
   id: string;
   email: string;
   passwordHash: string;
   status: UserStatus;
+  role?: "admin" | "gestor" | "uploader";
   createdAt: Date;
   updatedAt: Date;
 }

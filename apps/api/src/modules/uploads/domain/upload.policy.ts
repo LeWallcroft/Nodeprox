@@ -3,8 +3,7 @@ export function validateUploadMetadata(input: {
   contentType: string;
   sizeBytes: number;
   maxSizeBytes: number;
-  magicBytes: Uint8Array;
-}): { filename: string } {
+}): { filename: string; contentType: "application/zip" } {
   const filename = input.filename.trim();
   if (
     !filename ||
@@ -19,18 +18,12 @@ export function validateUploadMetadata(input: {
     !filename.toLowerCase().endsWith(".zip")
   )
     throw new InvalidUploadError("extension");
-  if (input.contentType !== "application/zip")
+  if (input.contentType.trim().toLowerCase() !== "application/zip")
     throw new InvalidUploadError("content-type");
-  if (!Number.isInteger(input.sizeBytes) || input.sizeBytes < 0)
+  if (!Number.isSafeInteger(input.sizeBytes) || input.sizeBytes <= 0)
     throw new InvalidUploadError("size");
   if (input.sizeBytes > input.maxSizeBytes) throw new UploadTooLargeError();
-  if (
-    input.magicBytes.length < 4 ||
-    input.magicBytes[0] !== 0x50 ||
-    input.magicBytes[1] !== 0x4b
-  )
-    throw new InvalidUploadError("magic-bytes");
-  return { filename };
+  return { filename, contentType: "application/zip" };
 }
 
 export class InvalidUploadError extends Error {

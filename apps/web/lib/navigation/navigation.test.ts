@@ -13,7 +13,7 @@ describe("M1 navigation contract", () => {
     ]);
     expect(
       navigationConfig.find((item) => item.id === "admin")?.capabilityKey,
-    ).toBe("admin.view");
+    ).toBe("admin.system.manage");
   });
 
   it("resolves active routes without granting capabilities", () => {

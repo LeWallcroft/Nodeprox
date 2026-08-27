@@ -47,53 +47,129 @@ export class DrizzleUploadRepository
     storageKey: string;
     originalFilename: string;
     contentType: string;
+    sizeBytes: number;
     createdBy: string;
-  }): Promise<UploadRecord> {
-    return this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(uploads)
-        .values({ ...input, sizeBytes: 0 })
-        .returning();
-      if (!row) throw new Error("upload-create-failed");
-      await tx
-        .update(chapters)
-        .set({ status: "uploading", updatedAt: new Date() })
-        .where(eq(chapters.id, input.chapterId));
-      return toRecord(row);
-    });
+  }): Promise<UploadRecord | null> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${input.chapterId}, 0))`,
+        );
+        const [active] = await tx
+          .select({ id: uploads.id })
+          .from(uploads)
+          .where(eq(uploads.chapterId, input.chapterId))
+          .limit(1);
+        if (active) throw uploadStateConflict;
+        const [chapter] = await tx
+          .update(chapters)
+          .set({ status: "uploading", updatedAt: new Date() })
+          .where(
+            and(eq(chapters.id, input.chapterId), eq(chapters.status, "draft")),
+          )
+          .returning({ id: chapters.id });
+        if (!chapter) throw uploadStateConflict;
+        const [row] = await tx.insert(uploads).values(input).returning();
+        if (!row) throw new Error("upload-create-failed");
+        return toRecord(row);
+      });
+    } catch (error) {
+      if (error === uploadStateConflict || isUniqueViolation(error))
+        return null;
+      throw error;
+    }
   }
 
-  async markUploaded(id: string, stored: StoredObject): Promise<UploadRecord> {
-    return this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .update(uploads)
-        .set({
-          status: "uploaded",
-          sizeBytes: stored.sizeBytes,
-          ...(stored.etag ? { etag: stored.etag } : {}),
-          updatedAt: new Date(),
-        })
-        .where(and(eq(uploads.id, id), eq(uploads.status, "pending")))
-        .returning();
-      if (!row) throw new Error("upload-finalize-failed");
-      await tx
-        .update(chapters)
-        .set({ status: "uploaded", updatedAt: new Date() })
-        .where(eq(chapters.id, row.chapterId));
-      const [chapter] = await tx
-        .select({ seriesId: chapters.seriesId })
-        .from(chapters)
-        .where(eq(chapters.id, row.chapterId))
-        .limit(1);
-      if (!chapter) throw new Error("chapter-not-found-after-upload");
-      await tx.insert(processingOutbox).values({
-        uploadId: row.id,
-        chapterId: row.chapterId,
-        seriesId: chapter.seriesId,
-        storageKey: row.storageKey,
+  async markUploaded(
+    id: string,
+    stored: StoredObject,
+  ): Promise<UploadRecord | null> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .update(uploads)
+          .set({
+            status: "uploaded",
+            sizeBytes: stored.sizeBytes,
+            ...(stored.etag ? { etag: stored.etag } : {}),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(uploads.id, id), eq(uploads.status, "verifying")))
+          .returning();
+        if (!row) throw uploadStateConflict;
+        const [chapter] = await tx
+          .update(chapters)
+          .set({ status: "uploaded", updatedAt: new Date() })
+          .where(
+            and(
+              eq(chapters.id, row.chapterId),
+              eq(chapters.status, "uploading"),
+            ),
+          )
+          .returning({ seriesId: chapters.seriesId });
+        if (!chapter) throw uploadStateConflict;
+        await tx.insert(processingOutbox).values({
+          uploadId: row.id,
+          chapterId: row.chapterId,
+          seriesId: chapter.seriesId,
+          storageKey: row.storageKey,
+        });
+        return toRecord(row);
       });
-      return toRecord(row);
-    });
+    } catch (error) {
+      if (error === uploadStateConflict) return null;
+      throw error;
+    }
+  }
+
+  async claimForCompletion(
+    id: string,
+    chapterId: string,
+  ): Promise<UploadRecord | null> {
+    const [row] = await this.db
+      .update(uploads)
+      .set({ status: "verifying", updatedAt: new Date() })
+      .where(
+        and(
+          eq(uploads.id, id),
+          eq(uploads.chapterId, chapterId),
+          eq(uploads.status, "pending"),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
+  async releaseCompletion(id: string): Promise<void> {
+    await this.db
+      .update(uploads)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(and(eq(uploads.id, id), eq(uploads.status, "verifying")));
+  }
+
+  async claimForAbort(
+    id: string,
+    chapterId: string,
+  ): Promise<UploadRecord | null> {
+    const [row] = await this.db
+      .update(uploads)
+      .set({ status: "aborting", updatedAt: new Date() })
+      .where(
+        and(
+          eq(uploads.id, id),
+          eq(uploads.chapterId, chapterId),
+          eq(uploads.status, "pending"),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
+  async releaseAbort(id: string): Promise<void> {
+    await this.db
+      .update(uploads)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(and(eq(uploads.id, id), eq(uploads.status, "aborting")));
   }
 
   async findActiveByChapterId(chapterId: string): Promise<UploadRecord | null> {
@@ -105,18 +181,75 @@ export class DrizzleUploadRepository
     return row ? toRecord(row) : null;
   }
 
-  async removePending(id: string): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .delete(uploads)
-        .where(and(eq(uploads.id, id), eq(uploads.status, "pending")))
-        .returning({ chapterId: uploads.chapterId });
-      if (row)
-        await tx
+  async findByIdAndChapterId(
+    id: string,
+    chapterId: string,
+  ): Promise<UploadRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(uploads)
+      .where(and(eq(uploads.id, id), eq(uploads.chapterId, chapterId)))
+      .limit(1);
+    return row ? toRecord(row) : null;
+  }
+
+  async removePending(id: string): Promise<boolean> {
+    return this.removeWithStatus(id, "pending");
+  }
+
+  async removeAborting(id: string): Promise<boolean> {
+    return this.removeWithStatus(id, "aborting");
+  }
+
+  private async removeWithStatus(
+    id: string,
+    status: "pending" | "aborting",
+  ): Promise<boolean> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [row] = await tx
+          .delete(uploads)
+          .where(and(eq(uploads.id, id), eq(uploads.status, status)))
+          .returning({ chapterId: uploads.chapterId });
+        if (!row) return false;
+        const [chapter] = await tx
           .update(chapters)
           .set({ status: "draft", updatedAt: new Date() })
-          .where(eq(chapters.id, row.chapterId));
-    });
+          .where(
+            and(
+              eq(chapters.id, row.chapterId),
+              eq(chapters.status, "uploading"),
+            ),
+          )
+          .returning({ id: chapters.id });
+        if (!chapter) throw uploadStateConflict;
+        return true;
+      });
+    } catch (error) {
+      if (error === uploadStateConflict) return false;
+      throw error;
+    }
+  }
+
+  async recoverStaleClaims(cutoff: Date): Promise<void> {
+    await this.db
+      .update(uploads)
+      .set({ status: "pending", updatedAt: new Date() })
+      .where(
+        and(
+          sql`${uploads.status} in ('verifying', 'aborting')`,
+          lte(uploads.updatedAt, cutoff),
+        ),
+      );
+  }
+
+  async findStalePending(cutoff: Date, limit: number): Promise<UploadRecord[]> {
+    const rows = await this.db
+      .select()
+      .from(uploads)
+      .where(and(eq(uploads.status, "pending"), lte(uploads.updatedAt, cutoff)))
+      .limit(limit);
+    return rows.map(toRecord);
   }
 
   async findPending(limit: number) {
@@ -170,4 +303,12 @@ export class DrizzleUploadRepository
       metadata: sanitizeAuditMetadata(input.metadata),
     });
   }
+}
+
+const uploadStateConflict = new Error("upload-state-conflict");
+
+function isUniqueViolation(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  if ("code" in error && error.code === "23505") return true;
+  return "cause" in error && isUniqueViolation(error.cause);
 }

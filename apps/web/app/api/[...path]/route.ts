@@ -2,7 +2,6 @@ const BACKEND_API_ORIGIN =
   process.env.NODEPROX_API_URL ?? "http://localhost:3001";
 const FORWARDED_REQUEST_HEADERS = [
   "accept",
-  "content-length",
   "content-type",
   "cookie",
   "user-agent",
@@ -34,7 +33,10 @@ function isAllowedRoute(path: string[], method: string): boolean {
     return ["GET", "POST"].includes(method);
   if (/^chapters\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
-  if (/^chapters\/[^/]+\/upload$/.test(value)) return method === "POST";
+  if (/^chapters\/[^/]+\/uploads\/initiate$/.test(value))
+    return method === "POST";
+  if (/^chapters\/[^/]+\/uploads\/[^/]+\/(complete|abort)$/.test(value))
+    return method === "POST";
   if (/^chapters\/[^/]+\/images$/.test(value)) return method === "GET";
   if (/^images\/[^/]+$/.test(value)) return method === "GET";
   if (/^images\/[^/]+\/content$/.test(value)) return method === "GET";
@@ -94,13 +96,14 @@ async function forward(
   }
 
   try {
-    const response = await fetch(buildBackendUrl(request, path), {
+    const options: RequestInit & { duplex?: "half" } = {
       method,
       headers: requestHeaders,
       body: request.body,
-      duplex: request.body ? "half" : undefined,
       redirect: "manual",
-    } as RequestInit & { duplex?: "half" });
+    };
+    if (request.body) options.duplex = "half";
+    const response = await fetch(buildBackendUrl(request, path), options);
     const responseHeaders = new Headers();
     response.headers.forEach((value, name) => {
       if (name !== "set-cookie" && !HOP_BY_HOP_HEADERS.has(name)) {

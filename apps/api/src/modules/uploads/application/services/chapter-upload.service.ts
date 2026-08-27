@@ -1,134 +1,251 @@
-import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
-import type { ChapterPermissionService } from "../../../chapters/application/services/chapter-permission.service.js";
 import { randomUUID } from "node:crypto";
 import {
-  UploadTooLargeError,
-  validateUploadMetadata,
-} from "../../domain/upload.policy.js";
-import type { ChapterUploadResult } from "../../domain/upload.types.js";
-import type { StoragePort } from "../ports/storage.ports.js";
+  UploadTransferObjectNotFoundError,
+  UploadTransferProviderError,
+  type UploadTransferPort,
+  type VerifiedUploadedObject,
+} from "@nodeprox/storage/port";
+import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
+import type { ChapterPermissionService } from "../../../chapters/application/services/chapter-permission.service.js";
+import { validateUploadMetadata } from "../../domain/upload.policy.js";
+import type {
+  ChapterUploadResult,
+  InitiatedChapterUpload,
+  UploadRecord,
+} from "../../domain/upload.types.js";
 import type {
   UploadAuditPort,
   UploadRepositoryPort,
 } from "../ports/upload.ports.js";
 
+const GRANT_TTL_SECONDS = 15 * 60;
+
 export class ChapterUploadService {
   constructor(
     private readonly permissions: ChapterPermissionService,
     private readonly uploads: UploadRepositoryPort,
-    private readonly storage: StoragePort,
+    private readonly transfer: UploadTransferPort,
     private readonly audit: UploadAuditPort,
     private readonly maxSizeBytes: number,
   ) {}
 
-  async upload(input: {
+  async initiate(input: {
     context: AuthorizationContext;
     chapterId: string;
-    file: {
-      stream: NodeJS.ReadableStream;
-      filename: string;
-      contentType: string;
-      sizeBytes: number;
-      magicBytes: Uint8Array;
-      isTruncated?: () => boolean;
-    };
-  }): Promise<ChapterUploadResult> {
-    const decision = await this.permissions.check({
-      context: input.context,
-      chapterId: input.chapterId,
-      permission: "images.upload",
-    });
-    if (decision.reason === "not-found")
-      return Promise.reject(new UploadNotFoundError());
-    if (!decision.allowed) return Promise.reject(new UploadDeniedError());
+    filename: string;
+    contentType: string;
+    sizeBytes: number;
+  }): Promise<InitiatedChapterUpload> {
+    const decision = await this.authorize(input.context, input.chapterId);
     const metadata = validateUploadMetadata({
-      filename: input.file.filename,
-      contentType: input.file.contentType,
-      sizeBytes: input.file.sizeBytes,
+      filename: input.filename,
+      contentType: input.contentType,
+      sizeBytes: input.sizeBytes,
       maxSizeBytes: this.maxSizeBytes,
-      magicBytes: input.file.magicBytes,
     });
-    if (await this.uploads.findActiveByChapterId(input.chapterId))
-      throw new UploadConflictError();
-
     const uploadId = randomUUID();
     const storageKey = `uploads/${decision.seriesId}/${input.chapterId}/${uploadId}.zip`;
-    await this.uploads.createPending({
+    const pending = await this.uploads.createPending({
       id: uploadId,
       chapterId: input.chapterId,
       storageKey,
       originalFilename: metadata.filename,
-      contentType: input.file.contentType,
+      contentType: metadata.contentType,
+      sizeBytes: input.sizeBytes,
       createdBy: input.context.userId,
     });
-    await this.safeAudit(
-      input.context.userId,
-      "chapter.upload.started",
-      input.chapterId,
-    );
+    if (!pending) throw new UploadConflictError();
 
     try {
-      const stored = await this.storage.put({
+      const grant = await this.transfer.initiate({
         key: storageKey,
-        body: input.file.stream,
-        contentType: input.file.contentType,
-        sizeBytes: input.file.sizeBytes,
+        contentType: metadata.contentType,
+        sizeBytes: input.sizeBytes,
+        expiresInSeconds: GRANT_TTL_SECONDS,
       });
-      if (stored.sizeBytes > this.maxSizeBytes || input.file.isTruncated?.()) {
-        await this.storage.delete(storageKey);
-        await this.uploads.removePending(uploadId);
-        throw new UploadTooLargeError();
-      }
-      await this.uploads.markUploaded(uploadId, stored);
       await this.safeAudit(
         input.context.userId,
-        "chapter.upload.completed",
+        "chapter.upload.initiated",
         input.chapterId,
+        "pending",
       );
       return {
         chapterId: input.chapterId,
         uploadId,
-        status: "uploaded",
+        status: "pending",
         filename: metadata.filename,
-        sizeBytes: stored.sizeBytes,
+        sizeBytes: input.sizeBytes,
+        transfer: grant,
       };
     } catch (error) {
-      try {
-        await this.storage.delete(storageKey);
-        await this.uploads.removePending(uploadId);
-      } catch {
-        // Compensation is best-effort; the failure is recorded without sensitive data.
-      }
+      await this.uploads.removePending(uploadId).catch(() => false);
       await this.safeAudit(
         input.context.userId,
         "chapter.upload.failed",
         input.chapterId,
+        "failed",
       );
+      if (error instanceof UploadTransferProviderError)
+        throw new UploadProviderUnavailableError();
       throw error;
     }
   }
 
-  private async safeAudit(actorId: string, action: string, chapterId: string) {
+  async complete(input: {
+    context: AuthorizationContext;
+    chapterId: string;
+    uploadId: string;
+  }): Promise<ChapterUploadResult> {
+    await this.authorize(input.context, input.chapterId);
+    const upload = await this.uploads.claimForCompletion(
+      input.uploadId,
+      input.chapterId,
+    );
+    if (!upload) throw new UploadConflictError();
+
+    let verified: VerifiedUploadedObject;
+    try {
+      verified = await this.transfer.verify({ key: upload.storageKey });
+    } catch (error) {
+      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      if (error instanceof UploadTransferObjectNotFoundError)
+        throw new UploadedObjectNotFoundError();
+      if (error instanceof UploadTransferProviderError)
+        throw new UploadProviderUnavailableError();
+      throw error;
+    }
+    const mismatch =
+      verified.key !== upload.storageKey ||
+      verified.sizeBytes <= 0 ||
+      verified.sizeBytes !== upload.sizeBytes ||
+      (verified.contentType !== undefined &&
+        normalizeContentType(verified.contentType) !==
+          normalizeContentType(upload.contentType));
+    if (mismatch) {
+      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      throw new UploadedObjectMismatchError();
+    }
+
+    let completed: UploadRecord | null;
+    try {
+      completed = await this.uploads.markUploaded(input.uploadId, verified);
+    } catch (error) {
+      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      throw error;
+    }
+    if (!completed) {
+      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      throw new UploadConflictError();
+    }
+    await this.safeAudit(
+      input.context.userId,
+      "chapter.upload.completed",
+      input.chapterId,
+      "completed",
+    );
+    return {
+      chapterId: input.chapterId,
+      uploadId: upload.id,
+      status: "uploaded",
+      filename: upload.originalFilename,
+      sizeBytes: verified.sizeBytes,
+    };
+  }
+
+  async abort(input: {
+    context: AuthorizationContext;
+    chapterId: string;
+    uploadId: string;
+  }): Promise<void> {
+    await this.authorize(input.context, input.chapterId);
+    const upload = await this.uploads.claimForAbort(
+      input.uploadId,
+      input.chapterId,
+    );
+    if (!upload) throw new UploadConflictError();
+    try {
+      await this.transfer.abort({ key: upload.storageKey });
+    } catch (error) {
+      await this.uploads.releaseAbort(upload.id).catch(() => undefined);
+      if (error instanceof UploadTransferProviderError)
+        throw new UploadProviderUnavailableError();
+      throw error;
+    }
+    if (!(await this.uploads.removeAborting(upload.id)))
+      throw new UploadConflictError();
+    await this.safeAudit(
+      input.context.userId,
+      "chapter.upload.aborted",
+      input.chapterId,
+      "aborted",
+    );
+  }
+
+  async cleanupStale(cutoff: Date, limit = 20): Promise<number> {
+    await this.uploads.recoverStaleClaims(cutoff);
+    const stale = await this.uploads.findStalePending(cutoff, limit);
+    let cleaned = 0;
+    for (const candidate of stale) {
+      const upload = await this.uploads.claimForAbort(
+        candidate.id,
+        candidate.chapterId,
+      );
+      if (!upload) continue;
+      try {
+        await this.transfer.abort({ key: upload.storageKey });
+        if (!(await this.uploads.removeAborting(upload.id))) continue;
+        cleaned += 1;
+        await this.safeAudit(
+          upload.createdBy,
+          "chapter.upload.expired",
+          upload.chapterId,
+          "expired",
+        );
+      } catch {
+        await this.uploads.releaseAbort(upload.id).catch(() => undefined);
+      }
+    }
+    return cleaned;
+  }
+
+  private async authorize(context: AuthorizationContext, chapterId: string) {
+    const decision = await this.permissions.check({
+      context,
+      chapterId,
+      permission: "images.upload",
+    });
+    if (decision.reason === "not-found") throw new UploadNotFoundError();
+    if (!decision.allowed) throw new UploadDeniedError();
+    return decision;
+  }
+
+  private async safeAudit(
+    actorId: string,
+    action: string,
+    chapterId: string,
+    result: string,
+  ) {
     try {
       await this.audit.append({
         actorId,
         action,
         resourceType: "chapter",
         resourceId: chapterId,
-        metadata: {
-          result: action.endsWith("completed")
-            ? "completed"
-            : action.endsWith("started")
-              ? "started"
-              : "failed",
-        },
+        metadata: { result },
       });
     } catch {
-      // Audit failure must not expose storage or credential details.
+      // Audit persistence must not leak provider or credential details.
     }
   }
+}
+
+function normalizeContentType(value: string): string {
+  return value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
 }
 
 export class UploadDeniedError extends Error {}
 export class UploadNotFoundError extends Error {}
 export class UploadConflictError extends Error {}
+export class UploadedObjectNotFoundError extends Error {}
+export class UploadedObjectMismatchError extends Error {}
+export class UploadProviderUnavailableError extends Error {}

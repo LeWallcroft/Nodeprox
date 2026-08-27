@@ -38,6 +38,7 @@ function serviceFor(
   const audit: AuthorizationAuditRepository = { append: async () => undefined };
   const chapters: ChapterRepositoryPort = {
     findById: async () => chapter,
+    isAssigned: async (_seriesId, userId) => userId === "owner",
   };
   const users: ChapterUserPort = { existsById: async () => true };
   const permissions: ChapterPermissionRepositoryPort = {
@@ -62,14 +63,23 @@ function serviceFor(
 }
 
 describe("chapter permission service", () => {
-  it("allows the server-resolved owner", async () => {
+  it("allows an uploader only while server-side assignment is active", async () => {
     await expect(
       serviceFor("uploader").check({
         context,
         chapterId: "chapter",
         permission: "chapters.edit",
       }),
-    ).resolves.toMatchObject({ allowed: true, reason: "owner" });
+    ).resolves.toMatchObject({ allowed: true, reason: "assigned" });
+    await expect(
+      serviceFor("uploader", false, 7, {
+        chapters: { findById: async () => chapter },
+      }).check({
+        context,
+        chapterId: "chapter",
+        permission: "chapters.edit",
+      }),
+    ).resolves.toMatchObject({ allowed: false, reason: "denied" });
   });
 
   it("allows a helper only with an active delegated permission", async () => {

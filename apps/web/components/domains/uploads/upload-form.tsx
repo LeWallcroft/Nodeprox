@@ -63,7 +63,10 @@ export function UploadForm({
       ) : null}
       {mutation.isPending ? (
         <div className="grid gap-2" aria-live="polite">
-          <ProgressBar value={0} label="Transferencia en curso" />
+          <ProgressBar
+            value={mutation.progress}
+            label={`Transferencia en curso: ${mutation.progress}%`}
+          />
           <span className="text-sm text-muted">Subiendo archivo…</span>
         </div>
       ) : null}

@@ -1,22 +1,17 @@
 # NodeProx
 
-Bootstrap técnico del monolito modular NodeProx.
+Monolito modular con Fastify, Next.js App Router, Drizzle/PostgreSQL, BullMQ/Redis y almacenamiento Backblaze B2 compatible con S3.
 
 ## Alcance actual
 
-Esta fase prepara el workspace pnpm, TypeScript strict, Biome, Fastify, Next.js, Drizzle Kit, Vitest, PostgreSQL 17 y Redis 7. La API expone únicamente `GET /health`.
-
-No incluye autenticación, usuarios, roles, permisos, series, capítulos, uploads, procesamiento de imágenes, Backblaze, Cloudflare, Discord ni dashboard funcional.
-
-La autenticación futura utilizará sesiones server-side propias y Argon2id, sin JWT, Lucia Auth ni Better Auth.
+El repositorio incluye sesiones server-side con Argon2id, RBAC y autorización contextual de Chapters, Series/Chapters, transferencia directa de ZIP a B2, procesamiento asíncrono de imágenes, manifests públicos y un frontend operativo. Los ZIP grandes no atraviesan Next.js ni Fastify.
 
 ## Requisitos
 
 - Node.js 24 LTS
 - pnpm 11+
 - Docker Compose para PostgreSQL y Redis
-
-Las herramientas se consideran instaladas; este proyecto no las reinstala.
+- Backblaze B2 para probar uploads desde el navegador
 
 ## Desarrollo local
 
@@ -26,41 +21,35 @@ Copy-Item .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 pnpm db:migrate
 pnpm db:check
-pnpm test
 pnpm dev
 ```
 
-La API queda disponible en `http://127.0.0.1:3000`. Verifica el endpoint con:
+La API usa `http://127.0.0.1:3001` y el frontend Next.js `http://localhost:3000`. La transferencia directa local requiere `STORAGE_PROVIDER=b2`, las variables B2 server-side y la política bucket CORS descrita en [docs/architecture/b2-direct-upload.md](docs/architecture/b2-direct-upload.md).
+
+## Validación
 
 ```bash
-Invoke-RestMethod http://127.0.0.1:3000/health
+pnpm typecheck
+pnpm lint
+pnpm format:check
+pnpm build
+pnpm test
+pnpm test:integration
+pnpm test:e2e
+pnpm db:migrate
+pnpm db:check
+pnpm storage:smoke:b2
 ```
-
-Debe responder `{ "status": "ok" }`.
-
-## Comandos
-
-- `pnpm typecheck`: comprobación TypeScript strict.
-- `pnpm lint`: lint de Biome.
-- `pnpm format:check`: verificación de formato Biome.
-- `pnpm test`: tests unitarios con Vitest.
-- `pnpm db:generate`: genera migraciones Drizzle.
-- `pnpm db:migrate`: aplica migraciones a PostgreSQL.
-- `pnpm db:check`: comprueba la conexión PostgreSQL.
-
-Los directorios `tests/integration` y `tests/e2e` quedan preparados para Testcontainers y Playwright en fases posteriores.
 
 ## Estructura
 
 ```text
-apps/api       API Fastify
-apps/web       esqueleto Next.js + React
-apps/worker    entrypoint preparado para BullMQ
-apps/bot       entrypoint preparado para Discord
-packages/      schemas, types y config compartidos
-database/      schema, migraciones y seeds
-tests/         integración y E2E
-docker/        recursos Docker futuros
+apps/api       API Fastify y composition root
+apps/web       frontend Next.js y boundary same-origin
+apps/worker    procesamiento BullMQ de ZIP e imágenes
+apps/bot       integración Discord reservada
+packages/      configuración, contratos y storage adapters
+database/      schemas, migraciones y scripts
+tests/         unit, integration, security y E2E
+scripts/       smoke tests y soporte operativo
 ```
-
-Docker Compose levanta únicamente PostgreSQL y Redis durante esta fase. API, Web, Worker y Bot se ejecutan directamente con Node/pnpm.

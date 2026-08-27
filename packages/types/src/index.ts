@@ -1,4 +1,9 @@
 export type HealthStatus = "ok";
+export {
+  InvalidAuditMetadataError,
+  sanitizeAuditMetadata,
+} from "./audit-metadata.js";
+export type { AuditMetadata } from "./audit-metadata.js";
 
 export interface RequestContext {
   requestId: string;
