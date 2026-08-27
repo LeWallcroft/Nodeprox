@@ -2,6 +2,7 @@ import type {
   ChapterCoreRecord,
   SeriesRecord,
 } from "../../domain/series.types.js";
+import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 
 export interface SeriesRepositoryPort {
   create(input: {
@@ -42,6 +43,39 @@ export interface SeriesUserPort {
     status: string;
     role?: "admin" | "gestor" | "uploader";
   } | null>;
+}
+
+export type SeriesMutationFailure =
+  | { outcome: "denied" }
+  | { outcome: "not-found" }
+  | { outcome: "conflict" }
+  | { outcome: "invalid-target" };
+
+export interface SeriesMutationBoundaryPort {
+  updateIfAuthorized(input: {
+    actor: AuthorizationContext;
+    seriesId: string;
+    mutation: {
+      title?: string | undefined;
+      slug?: string | undefined;
+      description?: string | null | undefined;
+    };
+  }): Promise<
+    { outcome: "updated"; series: SeriesRecord } | SeriesMutationFailure
+  >;
+  deleteIfAuthorized(input: {
+    actor: AuthorizationContext;
+    seriesId: string;
+  }): Promise<{ outcome: "deleted" } | SeriesMutationFailure>;
+  assignIfAuthorized(input: {
+    actor: AuthorizationContext;
+    seriesId: string;
+    uploaderId: string;
+  }): Promise<{ outcome: "assigned" } | SeriesMutationFailure>;
+  clearAssignmentIfAuthorized(input: {
+    actor: AuthorizationContext;
+    seriesId: string;
+  }): Promise<{ outcome: "cleared" } | SeriesMutationFailure>;
 }
 
 export interface ChapterCoreRepositoryPort {

@@ -3,11 +3,13 @@ import type { AuthorizationContext } from "../../../authorization/domain/authori
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { evaluateChapterDelete } from "../../domain/chapter-delete.policy.js";
 import type { ChapterDeleteRepositoryPort } from "../ports/chapter-delete.ports.js";
+import type { ChapterMutationBoundaryPort } from "../ports/chapter-mutation.ports.js";
 
 export class ChapterDeleteService {
   constructor(
     private readonly chapters: ChapterDeleteRepositoryPort,
     private readonly authorization: AuthorizationService,
+    private readonly mutations: ChapterMutationBoundaryPort,
   ) {}
 
   async remove(context: AuthorizationContext, chapterId: string) {
@@ -35,7 +37,13 @@ export class ChapterDeleteService {
       seriesOwner,
     });
     if (!policy.allowed) return { denied: true as const };
-    await this.chapters.delete(chapterId);
+    const result = await this.mutations.deleteIfAuthorized({
+      actor: context,
+      chapterId,
+    });
+    if (result.outcome === "denied") return { denied: true as const };
+    if (result.outcome === "not-found") return { notFound: true as const };
+    if (result.outcome === "conflict") return { conflict: true as const };
     return { deleted: true as const };
   }
 }

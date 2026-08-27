@@ -44,6 +44,7 @@ function serviceFor(
   const permissions: ChapterPermissionRepositoryPort = {
     grant: async () => ({ outcome: "granted", count: 1 }),
     revoke: async () => ({ count: 1 }),
+    revokeIfAuthorized: async () => ({ outcome: "revoked", count: 1 }),
     hasActivePermission: async () => active,
     listActive: async () => [],
   };
@@ -127,6 +128,7 @@ describe("chapter permission service", () => {
         throw new Error("permission repository unavailable");
       },
       revoke: async () => ({ count: 0 }),
+      revokeIfAuthorized: async () => ({ outcome: "revoked", count: 0 }),
       hasActivePermission: async () => false,
       listActive: async () => [],
     };
@@ -196,7 +198,10 @@ describe("chapter permission service", () => {
     const failingPermissionRepository: ChapterPermissionRepositoryPort = {
       grant: async () => ({ outcome: "granted", count: 1 }),
       revoke: async () => {
-        revokeCalls.push("revoke");
+        throw new Error("legacy revoke must not be called");
+      },
+      revokeIfAuthorized: async () => {
+        revokeCalls.push("revokeIfAuthorized");
         throw new Error("permission repository unavailable");
       },
       hasActivePermission: async () => true,
@@ -211,7 +216,7 @@ describe("chapter permission service", () => {
         helperUserId: "helper",
       }),
     ).rejects.toThrow("permission repository unavailable");
-    expect(revokeCalls).toEqual(["revoke"]);
+    expect(revokeCalls).toEqual(["revokeIfAuthorized"]);
 
     await expect(
       serviceFor("uploader", false, 7, {

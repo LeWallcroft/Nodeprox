@@ -3,6 +3,7 @@ import type {
   ChapterRecord,
 } from "../../domain/chapter.types.js";
 import type { DelegableChapterPermission } from "../../domain/chapter-permission.policy.js";
+import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 
 export interface ChapterRepositoryPort {
   findById(id: string): Promise<ChapterRecord | null>;
@@ -32,6 +33,16 @@ export interface ChapterPermissionRepositoryPort {
     revokedBy: string;
     now: Date;
   }): Promise<{ count: number }>;
+  revokeIfAuthorized(input: {
+    actor: AuthorizationContext;
+    chapterId: string;
+    helperUserId: string;
+    now: Date;
+  }): Promise<
+    | { outcome: "revoked"; count: number }
+    | { outcome: "denied" }
+    | { outcome: "not-found" }
+  >;
   hasActivePermission(input: {
     chapterId: string;
     helperUserId: string;
