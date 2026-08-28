@@ -12,6 +12,7 @@ export type ChapterCoreRecord = {
   id: string;
   seriesId: string;
   chapterNumber: number;
+  publicKey: string;
   title: string | null;
   status:
     | "draft"
@@ -19,7 +20,8 @@ export type ChapterCoreRecord = {
     | "uploaded"
     | "processing"
     | "ready"
-    | "failed";
+    | "failed"
+    | "deleting";
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;

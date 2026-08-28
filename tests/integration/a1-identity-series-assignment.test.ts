@@ -11,6 +11,7 @@ import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
+  chapterDeletionOutbox,
   chapters,
   series,
   seriesAssignments,
@@ -122,6 +123,17 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await database.db
+    .delete(chapterDeletionOutbox)
+    .where(
+      inArray(chapterDeletionOutbox.requestedBy, [
+        adminId,
+        ownerId,
+        secondOwnerId,
+        uploaderId,
+        secondUploaderId,
+      ]),
+    );
+  await database.db
     .delete(seriesAssignments)
     .where(
       inArray(seriesAssignments.uploaderId, [uploaderId, secondUploaderId]),
@@ -176,7 +188,7 @@ afterAll(async () => {
   await database.sql.end();
 });
 
-describe("A1 identity, assignment and chapter sequencing", () => {
+describe("A1 identity, assignment and chapter numbering", () => {
   it("registers pending users and blocks operational login until admin approval", async () => {
     const email = `pending-${randomUUID()}@example.com`;
     const registration = await app.inject({
@@ -189,15 +201,13 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       status: "pending",
       role: "uploader",
     });
-    expect(
-      (
-        await app.inject({
-          method: "POST",
-          url: "/auth/login",
-          payload: { email, password },
-        })
-      ).statusCode,
-    ).toBe(401);
+    const pendingLogin = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { email, password },
+    });
+    expect(pendingLogin.statusCode).toBe(403);
+    expect(pendingLogin.json().code).toBe("account-pending");
     const adminCookie = await login(emails.admin);
     const pending = await database.db
       .select({ id: users.id })
@@ -205,6 +215,17 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       .where(eq(users.email, email));
     const pendingId = pending[0]?.id;
     expect(pendingId).toBeDefined();
+    const ownerCookie = await login(emails.owner);
+    const uploaderCookie = await login(emails.uploader);
+    for (const cookie of [ownerCookie, uploaderCookie]) {
+      const denied = await app.inject({
+        method: "PATCH",
+        url: `/admin/users/${pendingId}`,
+        headers: { cookie },
+        payload: { status: "active", role: "admin" },
+      });
+      expect(denied.statusCode).toBe(403);
+    }
     expect(
       (
         await app.inject({
@@ -226,6 +247,16 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       status: "active",
       role: "uploader",
     });
+    for (const role of ["admin", "gestor", "uploader"] as const) {
+      const assignment = await app.inject({
+        method: "PATCH",
+        url: `/admin/users/${pendingId}`,
+        headers: { cookie: adminCookie },
+        payload: { status: "active", role },
+      });
+      expect(assignment.statusCode).toBe(200);
+      expect(assignment.json().role).toBe(role);
+    }
     const activeCookie = await login(email);
     const suspended = await app.inject({
       method: "PATCH",
@@ -411,22 +442,52 @@ describe("A1 identity, assignment and chapter sequencing", () => {
           headers: { cookie: ownerCookie },
         })
       ).json(),
-    ).toEqual(
+    ).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: otherSeriesId })]),
     );
     const ownerChapter = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie: ownerCookie },
-      payload: { chapterNumber: 1, title: "Owner chapter" },
+      payload: { chapterNumber: 25, title: "Owner chapter" },
     });
     expect(ownerChapter.statusCode).toBe(201);
     const ownerChapterId = ownerChapter.json().id as string;
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/series/${seriesId}`,
+          headers: { cookie: ownerCookie },
+          payload: { description: "Owner remains authoritative" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const ownerUpload = await app.inject({
+      method: "POST",
+      url: `/chapters/${ownerChapterId}/uploads/initiate`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        filename: "owner.zip",
+        contentType: "application/zip",
+        sizeBytes: 16,
+      },
+    });
+    expect(ownerUpload.statusCode).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${ownerChapterId}/uploads/${ownerUpload.json().uploadId}/abort`,
+          headers: { cookie: ownerCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
     const first = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie: uploaderCookie },
-      payload: { chapterNumber: 2, title: "Two" },
+      payload: { chapterNumber: 26, title: "Twenty six" },
     });
     expect(first.statusCode).toBe(201);
     const firstChapterId = first.json().id as string;
@@ -434,16 +495,19 @@ describe("A1 identity, assignment and chapter sequencing", () => {
       method: "POST",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie: uploaderCookie },
-      payload: { chapterNumber: 4, title: "Skipped" },
+      payload: { chapterNumber: 30, title: "Thirty" },
     });
-    expect(skipped.statusCode).toBe(409);
-    const second = await app.inject({
-      method: "POST",
+    expect(skipped.statusCode).toBe(201);
+    const numbered = await app.inject({
+      method: "GET",
       url: `/series/${seriesId}/chapters`,
       headers: { cookie: uploaderCookie },
-      payload: { chapterNumber: 3, title: "Three" },
     });
-    expect(second.statusCode).toBe(201);
+    expect(
+      numbered
+        .json()
+        .map((chapter: { chapterNumber: number }) => chapter.chapterNumber),
+    ).toEqual([25, 26, 30]);
     expect(
       (
         await app.inject({
@@ -459,13 +523,13 @@ describe("A1 identity, assignment and chapter sequencing", () => {
         method: "POST",
         url: `/series/${seriesId}/chapters`,
         headers: { cookie: uploaderCookie },
-        payload: { chapterNumber: 4, title: "Four A" },
+        payload: { chapterNumber: 40, title: "Forty A" },
       }),
       app.inject({
         method: "POST",
         url: `/series/${seriesId}/chapters`,
         headers: { cookie: uploaderCookie },
-        payload: { chapterNumber: 4, title: "Four B" },
+        payload: { chapterNumber: 40, title: "Forty B" },
       }),
     ]);
     expect(concurrent.map((response) => response.statusCode).sort()).toEqual([

@@ -1,7 +1,8 @@
-import { and, count, eq, isNull, max, sql } from "drizzle-orm";
+import { and, asc, count, eq, isNull, ne, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterPermissions,
+  chapterDeletionOutbox,
   chapters,
   series,
   seriesAssignments,
@@ -42,6 +43,7 @@ const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
   id: row.id,
   seriesId: row.seriesId,
   chapterNumber: row.chapterNumber,
+  publicKey: row.publicKey,
   title: row.title,
   status: row.status,
   createdBy: row.createdBy,
@@ -329,14 +331,10 @@ export class DrizzleChapterCoreRepository
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${input.seriesId}, 0))`,
       );
-      const [latest] = await tx
-        .select({ chapterNumber: max(chapters.chapterNumber) })
-        .from(chapters)
-        .where(eq(chapters.seriesId, input.seriesId));
-      const nextChapterNumber = Number(latest?.chapterNumber ?? 0) + 1;
-      if (input.chapterNumber !== nextChapterNumber)
-        throw new ChapterSequenceError(nextChapterNumber);
-      const [row] = await tx.insert(chapters).values(input).returning();
+      const [row] = await tx
+        .insert(chapters)
+        .values({ ...input, publicKey: String(input.chapterNumber) })
+        .returning();
       if (!row) throw new Error("chapter-create-failed");
       return toChapter(row);
     });
@@ -346,7 +344,10 @@ export class DrizzleChapterCoreRepository
     const rows = await this.db
       .select()
       .from(chapters)
-      .where(eq(chapters.seriesId, seriesId));
+      .where(
+        and(eq(chapters.seriesId, seriesId), ne(chapters.status, "deleting")),
+      )
+      .orderBy(asc(chapters.chapterNumber));
     return rows.map(toChapter);
   }
 
@@ -389,6 +390,8 @@ export class DrizzleChapterCoreRepository
         allowHelper: true,
       });
       if (context.outcome !== "authorized") return context;
+      if (context.chapter.status === "deleting")
+        return { outcome: "conflict" as const };
       if (
         context.chapter.chapterNumber !== input.expectedChapterNumber ||
         (input.mutation.chapterNumber !== undefined &&
@@ -432,12 +435,47 @@ export class DrizzleChapterCoreRepository
         seriesOwner: context.isSeriesOwner,
       });
       if (!decision.allowed) return { outcome: "denied" as const };
-      const [deleted] = await tx
-        .delete(chapters)
+      if (context.chapter.status === "deleting") {
+        const [existing] = await tx
+          .select({ id: chapterDeletionOutbox.id })
+          .from(chapterDeletionOutbox)
+          .where(eq(chapterDeletionOutbox.chapterId, input.chapterId))
+          .limit(1);
+        return existing
+          ? {
+              outcome: "deletion-requested" as const,
+              deletionId: existing.id,
+            }
+          : { outcome: "conflict" as const };
+      }
+      const [marked] = await tx
+        .update(chapters)
+        .set({ status: "deleting", updatedAt: new Date() })
         .where(eq(chapters.id, input.chapterId))
         .returning({ id: chapters.id });
-      return deleted
-        ? { outcome: "deleted" as const }
+      if (!marked) return { outcome: "conflict" as const };
+      const [deletion] = await tx
+        .insert(chapterDeletionOutbox)
+        .values({
+          chapterId: input.chapterId,
+          requestedBy: input.actor.userId,
+        })
+        .onConflictDoNothing({
+          target: chapterDeletionOutbox.chapterId,
+        })
+        .returning({ id: chapterDeletionOutbox.id });
+      if (deletion)
+        return {
+          outcome: "deletion-requested" as const,
+          deletionId: deletion.id,
+        };
+      const [existing] = await tx
+        .select({ id: chapterDeletionOutbox.id })
+        .from(chapterDeletionOutbox)
+        .where(eq(chapterDeletionOutbox.chapterId, input.chapterId))
+        .limit(1);
+      return existing
+        ? { outcome: "deletion-requested" as const, deletionId: existing.id }
         : { outcome: "conflict" as const };
     });
   }
@@ -544,12 +582,5 @@ export class DrizzleChapterCoreRepository
       .where(and(eq(series.id, seriesId), eq(series.createdBy, userId)))
       .limit(1);
     return Boolean(row);
-  }
-}
-
-export class ChapterSequenceError extends Error {
-  constructor(readonly expected: number) {
-    super(`The next chapter number must be ${expected}`);
-    this.name = "ChapterSequenceError";
   }
 }

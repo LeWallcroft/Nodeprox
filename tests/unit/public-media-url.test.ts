@@ -2,17 +2,15 @@ import { describe, expect, it } from "vitest";
 import { PublicMediaUrl } from "../../apps/api/src/modules/images/domain/public-media-url.js";
 
 const image = {
-  id: "11111111-1111-4111-8111-111111111111",
-  seriesId: "22222222-2222-4222-8222-222222222222",
-  chapterId: "33333333-3333-4333-8333-333333333333",
-  extension: "png",
+  seriesPublicSlug: "raven",
+  chapterPublicKey: "25",
+  filename: "01.png",
   contentType: "image/png",
 };
 
 describe("PublicMediaUrl", () => {
   it("builds the canonical URL with or without a trailing slash", () => {
-    const expected =
-      "https://media.nodeprox.org/series/22222222-2222-4222-8222-222222222222/chapters/33333333-3333-4333-8333-333333333333/images/11111111-1111-4111-8111-111111111111.png";
+    const expected = "https://media.nodeprox.org/raven/25/01.png";
     expect(
       PublicMediaUrl.fromImage("https://media.nodeprox.org", image).toString(),
     ).toBe(expected);
@@ -25,13 +23,13 @@ describe("PublicMediaUrl", () => {
     expect(() =>
       PublicMediaUrl.fromImage("https://media.nodeprox.org", {
         ...image,
-        id: "not-a-uuid",
+        seriesPublicSlug: "Not Stable",
       }),
     ).toThrow();
     expect(() =>
       PublicMediaUrl.fromImage("https://media.nodeprox.org", {
         ...image,
-        extension: "exe",
+        filename: "01.exe",
       }),
     ).toThrow();
     expect(() =>
@@ -48,6 +46,7 @@ describe("PublicMediaUrl", () => {
       image,
     ).toString();
     expect(value).not.toContain("storageKey");
+    expect(value).not.toMatch(/[0-9a-f]{8}-[0-9a-f-]{27}/i);
     expect(value).not.toContain("backblazeb2.com");
     expect(value).not.toContain("B2");
   });

@@ -21,5 +21,8 @@ export interface ChapterMutationBoundaryPort {
   deleteIfAuthorized(input: {
     actor: AuthorizationContext;
     chapterId: string;
-  }): Promise<{ outcome: "deleted" } | ChapterMutationFailure>;
+  }): Promise<
+    | { outcome: "deletion-requested"; deletionId: string }
+    | ChapterMutationFailure
+  >;
 }

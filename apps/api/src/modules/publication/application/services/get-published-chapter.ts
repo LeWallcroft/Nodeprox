@@ -37,7 +37,7 @@ export class GetPublishedChapter {
         image.sizeBytes <= 0 ||
         !Number.isInteger(image.sizeBytes) ||
         !Number.isInteger(image.sortOrder) ||
-        image.sortOrder <= 0 ||
+        image.sortOrder < 0 ||
         sortOrders.has(image.sortOrder)
       )
         throw new PublishedChapterIntegrityError();
@@ -46,10 +46,9 @@ export class GetPublishedChapter {
       let url: string;
       try {
         url = PublicMediaUrl.fromImage(this.publicMediaOrigin, {
-          id: image.id,
-          seriesId: chapter.seriesId,
-          chapterId: chapter.id,
-          extension: image.extension,
+          seriesPublicSlug: chapter.seriesPublicSlug,
+          chapterPublicKey: chapter.chapterPublicKey,
+          filename: image.filename,
           contentType: image.contentType,
         }).toString();
       } catch {

@@ -80,10 +80,21 @@ describe("convergent migration sequence", () => {
         SELECT table_name
         FROM information_schema.tables
         WHERE table_schema = 'public'
-          AND table_name IN ('series_assignments', 'uploads')
+          AND table_name IN (
+            'chapter_deletion_outbox',
+            'chapter_import_batches',
+            'chapter_import_items',
+            'helper_series_cooldowns',
+            'series_assignments',
+            'uploads'
+          )
         ORDER BY table_name
       `;
       expect(tables.map((row) => row.table_name)).toEqual([
+        "chapter_deletion_outbox",
+        "chapter_import_batches",
+        "chapter_import_items",
+        "helper_series_cooldowns",
         "series_assignments",
         "uploads",
       ]);
@@ -100,6 +111,60 @@ describe("convergent migration sequence", () => {
         "aborting",
         "uploaded",
       ]);
+      const itemStatuses = await database.sql<{ enumlabel: string }[]>`
+        SELECT enumlabel
+        FROM pg_enum
+        JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+        WHERE pg_type.typname = 'chapter_import_item_status'
+        ORDER BY enumsortorder
+      `;
+      expect(itemStatuses.map((row) => row.enumlabel)).toEqual([
+        "pending",
+        "uploading",
+        "uploaded",
+        "processing",
+        "ready",
+        "failed",
+      ]);
+      const chapterStatuses = await database.sql<{ enumlabel: string }[]>`
+        SELECT enumlabel
+        FROM pg_enum
+        JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+        WHERE pg_type.typname = 'chapter_status'
+        ORDER BY enumsortorder
+      `;
+      expect(chapterStatuses.map((row) => row.enumlabel)).toContain("deleting");
+      const itemColumns = await database.sql<
+        {
+          column_name: string;
+          is_nullable: string;
+        }[]
+      >`
+        SELECT column_name, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'chapter_import_items'
+          AND column_name IN ('filename', 'status', 'upload_id', 'error_code')
+        ORDER BY column_name
+      `;
+      expect(itemColumns).toEqual([
+        { column_name: "error_code", is_nullable: "YES" },
+        { column_name: "filename", is_nullable: "NO" },
+        { column_name: "status", is_nullable: "NO" },
+        { column_name: "upload_id", is_nullable: "YES" },
+      ]);
+      const [activeUploadIndex] = await database.sql<
+        {
+          definition: string;
+        }[]
+      >`
+        SELECT indexdef AS definition
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = 'uploads_active_chapter_unique'
+      `;
+      expect(activeUploadIndex?.definition).toContain("WHERE");
+      expect(activeUploadIndex?.definition).toContain("uploaded");
     } finally {
       await database.sql.end();
     }

@@ -8,6 +8,7 @@ import { buildApp } from "./app.js";
 import { BullMQProcessingQueue } from "./modules/processing/infrastructure/queue/bullmq.processing.queue.js";
 import { ProcessingOutboxDispatcher } from "./modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { DrizzleUploadRepository } from "./modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
+import { DrizzleChapterDeletionOutboxRepository } from "./modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
 
 const config = loadConfig();
 const database = createDatabase(config.DATABASE_URL);
@@ -19,6 +20,7 @@ const queue = new BullMQProcessingQueue(
 const dispatcher = new ProcessingOutboxDispatcher(
   new DrizzleUploadRepository(database.db),
   queue,
+  new DrizzleChapterDeletionOutboxRepository(database.db),
 );
 const app = buildApp(
   { logger: { level: config.LOG_LEVEL } },

@@ -43,7 +43,6 @@ function serviceFor(
   const users: ChapterUserPort = { existsById: async () => true };
   const permissions: ChapterPermissionRepositoryPort = {
     grant: async () => ({ outcome: "granted", count: 1 }),
-    revoke: async () => ({ count: 1 }),
     revokeIfAuthorized: async () => ({ outcome: "revoked", count: 1 }),
     hasActivePermission: async () => active,
     listActive: async () => [],
@@ -127,7 +126,6 @@ describe("chapter permission service", () => {
         grantCalls.push("grant");
         throw new Error("permission repository unavailable");
       },
-      revoke: async () => ({ count: 0 }),
       revokeIfAuthorized: async () => ({ outcome: "revoked", count: 0 }),
       hasActivePermission: async () => false,
       listActive: async () => [],
@@ -197,9 +195,6 @@ describe("chapter permission service", () => {
     const revokeCalls: string[] = [];
     const failingPermissionRepository: ChapterPermissionRepositoryPort = {
       grant: async () => ({ outcome: "granted", count: 1 }),
-      revoke: async () => {
-        throw new Error("legacy revoke must not be called");
-      },
       revokeIfAuthorized: async () => {
         revokeCalls.push("revokeIfAuthorized");
         throw new Error("permission repository unavailable");

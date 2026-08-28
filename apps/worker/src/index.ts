@@ -11,6 +11,8 @@ import { createDatabase } from "../../../database/client.js";
 import { ChapterProcessingService } from "./processing/application/chapter-processing.service.js";
 import { UnzipperExtractor } from "./processing/infrastructure/zip/unzipper.extractor.js";
 import { DrizzleProcessingRepository } from "./processing/infrastructure/persistence/drizzle/processing.repository.js";
+import { ChapterDeletionService } from "./deletion/application/chapter-deletion.service.js";
+import { DrizzleChapterDeletionRepository } from "./deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 const config = loadConfig();
 const processing = loadProcessingConfig();
 const database = createDatabase(config.DATABASE_URL);
@@ -20,6 +22,10 @@ const storage =
     ? new B2Storage(storageConfig.b2)
     : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
 const repository = new DrizzleProcessingRepository(database.db);
+const deletion = new ChapterDeletionService(
+  new DrizzleChapterDeletionRepository(database.db),
+  storage,
+);
 const redisUrl = new URL(config.REDIS_URL);
 const connection = {
   host: redisUrl.hostname,
@@ -31,10 +37,17 @@ const connection = {
 const worker = new Worker(
   processing.PROCESSING_QUEUE_NAME,
   async (job) => {
+    if (job.name === "chapter.delete") {
+      await deletion.execute(job.data);
+      return;
+    }
     const extractor = new UnzipperExtractor({
       maxEntries: processing.PROCESSING_MAX_ENTRIES,
       maxTotalBytes: processing.PROCESSING_MAX_TOTAL_SIZE_BYTES,
       maxImageBytes: processing.PROCESSING_MAX_IMAGE_SIZE_BYTES,
+      warnImageBytes: processing.MEDIA_WARN_IMAGE_SIZE_BYTES,
+      warnWidthPx: processing.MEDIA_WARN_WIDTH_PX,
+      warnHeightPx: processing.MEDIA_WARN_HEIGHT_PX,
     });
     const finalAttempt = job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1);
     await new ChapterProcessingService(
@@ -46,12 +59,38 @@ const worker = new Worker(
   },
   { connection, concurrency: 1 },
 );
+
+function sanitizeDiagnosticText(value: string): string {
+  let sanitized = value;
+  const secrets = [
+    config.DATABASE_URL,
+    config.REDIS_URL,
+    ...(storageConfig.provider === "b2"
+      ? [storageConfig.b2.B2_KEY_ID, storageConfig.b2.B2_APPLICATION_KEY]
+      : []),
+  ];
+  for (const secret of secrets) {
+    if (secret) sanitized = sanitized.replaceAll(secret, "[REDACTED]");
+  }
+  return sanitized
+    .replace(/https?:\/\/\S+/gi, "[REDACTED_URL]")
+    .replace(/(?:postgres(?:ql)?|redis):\/\/\S+/gi, "[REDACTED_URL]")
+    .replace(
+      /\b(authorization|cookie|password|secret|token|x-amz-signature|x-amz-credential)\b\s*[:=]\s*[^\s,;]+/gi,
+      "$1=[REDACTED]",
+    )
+    .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[REDACTED_AWS_KEY]");
+}
+
 worker.on("failed", (job, error) => {
-  if (job)
-    console.error(
-      `chapter processing failed: ${job.id ?? "unknown"}`,
-      error.name,
-    );
+  console.error({
+    event: "worker-job-failed",
+    jobName: job?.name ?? "unknown",
+    jobId: job?.id ?? "unknown",
+    attemptsMade: job?.attemptsMade ?? 0,
+    errorName: error.name,
+    errorMessage: sanitizeDiagnosticText(error.message),
+  });
 });
 process.once("SIGTERM", async () => {
   await worker.close();

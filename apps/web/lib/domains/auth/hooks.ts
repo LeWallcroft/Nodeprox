@@ -2,8 +2,8 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../query-keys";
-import { login, logout } from "./api";
-import type { LoginInput } from "./types";
+import { login, logout, register } from "./api";
+import type { LoginInput, RegistrationInput } from "./types";
 
 export function useLogin() {
   const queryClient = useQueryClient();
@@ -23,5 +23,11 @@ export function useLogout() {
       queryClient.removeQueries({ queryKey: queryKeys.auth.session });
       queryClient.removeQueries({ queryKey: queryKeys.auth.capabilities });
     },
+  });
+}
+
+export function useRegister() {
+  return useMutation({
+    mutationFn: (input: RegistrationInput) => register(input),
   });
 }

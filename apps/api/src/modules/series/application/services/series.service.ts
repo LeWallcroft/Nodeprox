@@ -44,13 +44,13 @@ export class SeriesService {
       PERMISSIONS.SERIES_READ,
     );
     if (!decision.allowed) return [];
-    if (decision.role === "uploader") {
-      const ids = new Set(
-        await this.assignments.listAssignedSeriesIds(context.userId),
-      );
-      return (await this.series.listAll()).filter((item) => ids.has(item.id));
-    }
-    return this.series.listAll();
+    if (decision.role === "admin") return this.series.listAll();
+    if (decision.role === "gestor")
+      return this.series.listByOwner(context.userId);
+    const ids = new Set(
+      await this.assignments.listAssignedSeriesIds(context.userId),
+    );
+    return (await this.series.listAll()).filter((item) => ids.has(item.id));
   }
 
   async get(context: AuthorizationContext, id: string) {
@@ -63,7 +63,6 @@ export class SeriesService {
     id: string,
     input: {
       title?: string | undefined;
-      slug?: string | undefined;
       description?: string | null | undefined;
     },
   ) {
@@ -177,7 +176,7 @@ export class SeriesService {
     if (!decision.allowed) return { forbidden: true as const };
     if (
       decision.role === "admin" ||
-      decision.role === "gestor" ||
+      (decision.role === "gestor" && isOwner(context.userId, item.createdBy)) ||
       (await this.assignments.isAssigned(id, context.userId))
     )
       return item;

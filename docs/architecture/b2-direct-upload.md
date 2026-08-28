@@ -66,6 +66,24 @@ Verify the effective S3-compatible bucket CORS after deployment. A successful se
 
 Cloudflare CDN is the public read path for processed media. Direct upload grants must point to the Backblaze S3-compatible HTTPS endpoint. Do not proxy, cache or rewrite signed upload `PUT` requests through the media CDN. Temporary `uploads/` objects must not be publicly exposed.
 
+### Public media path resolution
+
+The canonical client URL is
+`https://media.nodeprox.org/{seriesPublicSlug}/{chapterPublicKey}/{filename}`.
+The exact B2 object identity is
+`Media/{seriesPublicSlug}/{chapterPublicKey}/{filename}`. `seriesPublicSlug`
+uses the immutable unique `Series.slug`; `chapterPublicKey` is initialized from
+the Chapter number and remains stable if that number is later edited.
+
+Cloudflare routes the canonical path directly to the B2 object by prefixing the
+bucket file path. For bucket `nodeprox`, the origin request path is:
+
+`/file/nodeprox/Media/{seriesPublicSlug}/{chapterPublicKey}/{filename}`
+
+The NodeProx API is not a resolver or image proxy. Never expose or rewrite
+temporary `uploads/*` objects through the public media route. Existing UUID-key
+objects are disposable development data and are not copied or migrated.
+
 ## Operational smoke test
 
 With production B2 variables configured, run:

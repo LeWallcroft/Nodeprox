@@ -21,7 +21,6 @@ import { B2Storage } from "./modules/uploads/infrastructure/storage/b2.storage.j
 import { FilesystemStorage } from "./modules/uploads/infrastructure/storage/filesystem.storage.js";
 import { join } from "node:path";
 import { DEFAULT_PUBLIC_MEDIA_ORIGIN } from "@nodeprox/config";
-import { DrizzleChapterCoreRepository } from "./modules/series/infrastructure/persistence/drizzle/series.repository.js";
 import { DrizzleImageRepository } from "./modules/images/infrastructure/persistence/drizzle/image.repository.js";
 import { DrizzlePublishedChapterRepository } from "./modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
 import { GetPublishedChapter } from "./modules/publication/application/services/get-published-chapter.js";
@@ -29,6 +28,7 @@ import { registerPublicationPlugin } from "./modules/publication/presentation/pu
 import { UnavailableUploadTransfer } from "./modules/uploads/infrastructure/storage/unavailable-upload-transfer.js";
 import { ImageQueryService } from "./modules/images/application/services/image-query.service.js";
 import { registerIdentityPlugin } from "./modules/identity/presentation/identity.plugin.js";
+import { registerImportBatchPlugin } from "./modules/ingestion/presentation/import-batch.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -70,7 +70,7 @@ export function buildApp(
       authentication,
       authorization,
     );
-    registerSeriesPlugin(
+    const seriesRuntime = registerSeriesPlugin(
       app,
       dependencies.database,
       authentication,
@@ -86,13 +86,20 @@ export function buildApp(
       (storageConfig.provider === "b2"
         ? new B2UploadTransfer(storageConfig.b2)
         : new UnavailableUploadTransfer());
-    registerUploadPlugin(
+    const uploadService = registerUploadPlugin(
       app,
       dependencies.database,
       authentication,
       chapterPermissions,
       storageConfig,
       uploadTransfer,
+    );
+    registerImportBatchPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      seriesRuntime.seriesService,
+      uploadService,
     );
     const imageStorage =
       storageConfig.provider === "b2"
@@ -110,8 +117,7 @@ export function buildApp(
       ),
     });
     const publishedRepository = new DrizzlePublishedChapterRepository(
-      new DrizzleChapterCoreRepository(dependencies.database),
-      new DrizzleImageRepository(dependencies.database),
+      dependencies.database,
     );
     registerPublicationPlugin(
       app,

@@ -10,6 +10,7 @@ import { mkdir, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
 import {
   loadConfig,
   loadProcessingConfig,
@@ -21,6 +22,7 @@ import { BullMQProcessingQueue } from "../apps/api/src/modules/processing/infras
 import { ProcessingOutboxDispatcher } from "../apps/api/src/modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { DrizzleUploadRepository } from "../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
 import { UploadTransferObjectNotFoundError } from "../packages/storage/src/port.js";
+import { DrizzleChapterDeletionOutboxRepository } from "../apps/api/src/modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
 
 const env = { ...process.env, NODE_ENV: "test", API_PORT: "3101" };
 Object.assign(process.env, env);
@@ -119,6 +121,7 @@ const objectServer = createServer(async (request, response) => {
 
 const config = loadConfig(process.env);
 const database = createDatabase(config.DATABASE_URL);
+await migrate(database.db, { migrationsFolder: "database/migrations" });
 const processing = loadProcessingConfig(process.env);
 const storage = loadStorageConfig(process.env);
 const queue = new BullMQProcessingQueue(
@@ -128,6 +131,7 @@ const queue = new BullMQProcessingQueue(
 const dispatcher = new ProcessingOutboxDispatcher(
   new DrizzleUploadRepository(database.db),
   queue,
+  new DrizzleChapterDeletionOutboxRepository(database.db),
 );
 const api = buildApp(
   { logger: { level: config.LOG_LEVEL } },

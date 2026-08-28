@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -8,6 +9,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import type { MediaWarning } from "../../packages/types/src/index.js";
 import { chapters } from "./chapters.js";
 export const images = pgTable(
   "images",
@@ -23,6 +25,10 @@ export const images = pgTable(
     sizeBytes: integer("size_bytes").notNull(),
     sortOrder: integer("sort_order").notNull(),
     checksum: text("checksum").notNull(),
+    warnings: jsonb("warnings")
+      .$type<readonly MediaWarning[]>()
+      .notNull()
+      .default([]),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

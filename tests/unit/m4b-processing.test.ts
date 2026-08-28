@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPermanentImageStorageKey,
   contentTypeForMagic,
-  permanentImageKey,
   validateImageName,
 } from "../../apps/worker/src/processing/domain/image-policy.js";
 
@@ -17,9 +17,13 @@ describe("M4-B image policy", () => {
         Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
       ),
     ).toBe("image/png");
-    expect(permanentImageKey("series", "chapter", "01.jpg")).toBe(
-      "Media/series/chapter/01.jpg",
-    );
+    expect(
+      buildPermanentImageStorageKey({
+        seriesPublicSlug: "prueba1",
+        chapterPublicKey: "6",
+        filename: "11.jpg",
+      }),
+    ).toBe("Media/prueba1/6/11.jpg");
     expect(() => validateImageName("../01.jpg")).toThrow(
       "invalid-image-filename",
     );
@@ -49,5 +53,9 @@ describe("M4-B image policy", () => {
     expect(() => validateImageName("001.jpg")).toThrow(
       "invalid-image-filename",
     );
+    expect(validateImageName("00.webp")).toEqual({
+      extension: "webp",
+      sortOrder: 0,
+    });
   });
 });

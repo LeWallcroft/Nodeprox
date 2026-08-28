@@ -124,7 +124,7 @@ function context() {
   return { userId: value.userId, sessionId: value.sessionId };
 }
 
-function mapUploadError(error: unknown): never {
+export function mapUploadError(error: unknown): never {
   if (error instanceof UploadDeniedError) throw forbidden;
   if (error instanceof UploadNotFoundError) throw notFound;
   if (error instanceof UploadConflictError) throw conflict;
@@ -146,7 +146,7 @@ export function registerUploadPlugin(
   chapterPermissions: ChapterPermissionService,
   storageConfig: NodeProxStorageConfig,
   transfer: UploadTransferPort,
-): void {
+) {
   const repository = new DrizzleUploadRepository(db);
   const service = new ChapterUploadService(
     chapterPermissions,
@@ -229,4 +229,5 @@ export function registerUploadPlugin(
   );
   sweep.unref();
   app.addHook("onClose", async () => clearInterval(sweep));
+  return service;
 }

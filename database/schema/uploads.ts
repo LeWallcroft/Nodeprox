@@ -47,7 +47,9 @@ export const uploads = pgTable(
   (table) => [
     check("uploads_size_positive", sql`${table.sizeBytes} > 0`),
     uniqueIndex("uploads_storage_key_unique").on(table.storageKey),
-    uniqueIndex("uploads_active_chapter_unique").on(table.chapterId),
+    uniqueIndex("uploads_active_chapter_unique")
+      .on(table.chapterId)
+      .where(sql`${table.status} <> 'uploaded'`),
     index("uploads_chapter_id_idx").on(table.chapterId),
   ],
 );

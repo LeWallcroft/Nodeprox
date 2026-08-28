@@ -14,6 +14,7 @@ const toImage = (row: typeof images.$inferSelect): ImageRecord => ({
   sizeBytes: row.sizeBytes,
   sortOrder: row.sortOrder,
   checksum: row.checksum,
+  warnings: row.warnings,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });

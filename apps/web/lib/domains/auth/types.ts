@@ -10,3 +10,17 @@ export interface LoginInput {
   email: string;
   password: string;
 }
+
+export interface RegistrationInput {
+  email: string;
+  password: string;
+}
+
+export interface RegisteredAccount {
+  id: string;
+  email: string;
+  status: "pending";
+  role: "uploader";
+  createdAt: string;
+  updatedAt: string;
+}

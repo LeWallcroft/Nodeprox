@@ -1,6 +1,6 @@
 import type { ProcessChapterInput } from "@nodeprox/types";
 import type { StoragePort } from "@nodeprox/storage/port";
-import { permanentImageKey } from "../domain/image-policy.js";
+import { buildPermanentImageStorageKey } from "../domain/image-policy.js";
 import type {
   ProcessingAuditPort,
   ProcessingRepositoryPort,
@@ -26,38 +26,60 @@ export class ChapterProcessingService {
       upload.status !== "uploaded"
     )
       return;
-    if (!(await this.repository.claimChapter(input.chapterId))) return;
+    if (upload.chapterStatus === "ready") {
+      await this.storage.delete(input.sourceStorageKey);
+      return;
+    }
+    if (!(await this.repository.claimChapter(input.chapterId, input.uploadId)))
+      return;
     const createdKeys: string[] = [];
+    let published = false;
     try {
-      const images = await this.extractor.inspect(
-        await this.storage.get(input.sourceStorageKey),
-      );
+      const source = await this.storage.get(input.sourceStorageKey);
+      const images = await this.extractor.inspect(source);
       const records = [];
       for (const image of images) {
-        const storageKey = permanentImageKey(
-          input.seriesId,
-          input.chapterId,
-          image.filename,
-        );
-        await this.storage.put({
+        const storageKey = buildPermanentImageStorageKey({
+          seriesPublicSlug: upload.seriesPublicSlug,
+          chapterPublicKey: upload.chapterPublicKey,
+          filename: image.filename,
+        });
+        const stored = await this.storage.put({
           key: storageKey,
           body: this.extractor.readImage(image),
           contentType: image.contentType,
           sizeBytes: image.sizeBytes,
         });
-        createdKeys.push(storageKey);
-        records.push({ ...image, storageKey });
+        if (
+          stored.key !== storageKey ||
+          stored.sizeBytes !== image.sizeBytes ||
+          stored.sizeBytes <= 0 ||
+          stored.contentType !== image.contentType
+        )
+          throw new Error("stored-image-metadata-mismatch");
+        createdKeys.push(stored.key);
+        records.push({ ...image, storageKey: stored.key });
       }
-      await this.repository.replaceImagesAndMarkReady(input.chapterId, records);
+      await this.repository.replaceImagesAndMarkReady(
+        input.chapterId,
+        input.uploadId,
+        records,
+      );
+      published = true;
       await this.storage.delete(input.sourceStorageKey);
-      await this.audit.append({
-        actorId: upload.createdBy,
-        action: "chapter.processing.completed",
-        resourceType: "chapter",
-        resourceId: input.chapterId,
-        metadata: { imageCount: records.length },
-      });
+      await this.audit
+        .append({
+          actorId: upload.createdBy,
+          action: "chapter.processing.completed",
+          resourceType: "chapter",
+          resourceId: input.chapterId,
+          metadata: {
+            imageCount: records.length,
+          },
+        })
+        .catch(() => undefined);
     } catch (error) {
+      if (published) throw error;
       await this.repository
         .deleteImages(input.chapterId)
         .catch(() => undefined);
@@ -70,7 +92,9 @@ export class ChapterProcessingService {
         await this.storage
           .delete(input.sourceStorageKey)
           .catch(() => undefined);
-      await this.repository.markFailed(input.chapterId).catch(() => undefined);
+      await this.repository
+        .markFailed(input.chapterId, input.uploadId, removeSourceOnFailure)
+        .catch(() => undefined);
       await this.audit
         .append({
           actorId: upload.createdBy,
