@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-const publicMediaId = z.uuid();
+const publicSlug = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+const publicFilename = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[^/\\]+\.(?:jpe?g|png|webp|gif)$/i);
+
 const extensionContentTypes = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
@@ -10,10 +16,9 @@ const extensionContentTypes = {
 } as const;
 
 export type PublicMediaImage = {
-  id: string;
-  seriesId: string;
-  chapterId: string;
-  extension: string;
+  seriesPublicSlug: string;
+  chapterPublicKey: string;
+  filename: string;
   contentType: string;
 };
 
@@ -22,17 +27,19 @@ export class PublicMediaUrl {
 
   static fromImage(origin: string, image: PublicMediaImage): PublicMediaUrl {
     const normalizedOrigin = normalizeOrigin(origin);
-    publicMediaId.parse(image.id);
-    publicMediaId.parse(image.seriesId);
-    publicMediaId.parse(image.chapterId);
+    const slug = publicSlug.parse(image.seriesPublicSlug);
+    const chapterPublicKey = publicSlug.parse(image.chapterPublicKey);
+    const filename = publicFilename.parse(image.filename);
 
-    const extension = image.extension.toLowerCase();
+    const extension = filename
+      .slice(filename.lastIndexOf(".") + 1)
+      .toLowerCase();
     const expectedContentType =
       extensionContentTypes[extension as keyof typeof extensionContentTypes];
     if (!expectedContentType || image.contentType !== expectedContentType)
       throw new Error("image-extension-metadata-mismatch");
 
-    const path = `/series/${image.seriesId}/chapters/${image.chapterId}/images/${image.id}.${extension}`;
+    const path = `/${encodeURIComponent(slug)}/${encodeURIComponent(chapterPublicKey)}/${encodeURIComponent(filename)}`;
     return new PublicMediaUrl(new URL(path, normalizedOrigin).toString());
   }
 

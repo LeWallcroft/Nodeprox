@@ -13,31 +13,33 @@ export interface ChapterRepositoryPort {
 
 export interface ChapterUserPort {
   existsById(id: string): Promise<boolean>;
+  findUserById?(id: string): Promise<{
+    id: string;
+    status: string;
+    role: "admin" | "gestor" | "uploader";
+  } | null>;
 }
 
 export interface ChapterPermissionRepositoryPort {
   grant(input: {
+    actor: AuthorizationContext;
     chapterId: string;
     helperUserId: string;
-    grantedBy: string;
     permissions: readonly DelegableChapterPermission[];
     cooldownDays: number;
     now: Date;
   }): Promise<
     | { outcome: "granted"; count: number }
     | { outcome: "conflict"; reason: "cooldown" | "already-granted" }
+    | { outcome: "denied" }
+    | { outcome: "not-found" }
   >;
-  revoke(input: {
-    chapterId: string;
-    helperUserId: string;
-    revokedBy: string;
-    now: Date;
-  }): Promise<{ count: number }>;
   revokeIfAuthorized(input: {
     actor: AuthorizationContext;
     chapterId: string;
     helperUserId: string;
     now: Date;
+    cooldownDays: number;
   }): Promise<
     | { outcome: "revoked"; count: number }
     | { outcome: "denied" }

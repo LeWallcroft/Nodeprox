@@ -19,8 +19,11 @@ function setup() {
   const repository: ProcessingRepositoryPort = {
     findUpload: vi.fn().mockResolvedValue({
       ...input,
+      seriesPublicSlug: "prueba1",
+      chapterPublicKey: "6",
       createdBy: "user-1",
       status: "uploaded",
+      chapterStatus: "uploaded",
       storageKey: input.sourceStorageKey,
     }),
     claimChapter: vi.fn().mockResolvedValue(true),
@@ -30,7 +33,7 @@ function setup() {
   };
   const storage: StoragePort = {
     put: vi.fn().mockResolvedValue({
-      key: "Media/series-1/chapter-1/01.jpg",
+      key: "Media/prueba1/6/01.jpg",
       sizeBytes: 3,
       contentType: "image/jpeg",
     }),
@@ -47,6 +50,7 @@ function setup() {
         sortOrder: 1,
         sizeBytes: 3,
         checksum: "checksum",
+        warnings: [],
         tempPath: "temporary",
       },
     ]),
@@ -68,7 +72,10 @@ describe("ChapterProcessingService lifecycle", () => {
       deps.extractor,
       deps.audit,
     ).process(input);
-    expect(deps.repository.claimChapter).toHaveBeenCalledWith("chapter-1");
+    expect(deps.repository.claimChapter).toHaveBeenCalledWith(
+      "chapter-1",
+      "upload-1",
+    );
     expect(deps.repository.replaceImagesAndMarkReady).toHaveBeenCalledOnce();
     expect(deps.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
     expect(deps.repository.markFailed).not.toHaveBeenCalled();
@@ -87,7 +94,11 @@ describe("ChapterProcessingService lifecycle", () => {
         retry.audit,
       ).process(input),
     ).rejects.toThrow("temporary");
-    expect(retry.repository.markFailed).toHaveBeenCalledOnce();
+    expect(retry.repository.markFailed).toHaveBeenCalledWith(
+      input.chapterId,
+      input.uploadId,
+      false,
+    );
     expect(retry.storage.delete).not.toHaveBeenCalledWith(
       input.sourceStorageKey,
     );
@@ -104,6 +115,90 @@ describe("ChapterProcessingService lifecycle", () => {
         final.audit,
       ).process(input, true),
     ).rejects.toThrow("permanent");
+    expect(final.repository.markFailed).toHaveBeenCalledWith(
+      input.chapterId,
+      input.uploadId,
+      true,
+    );
     expect(final.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
+  });
+
+  it("does not publish ready when storage returns inconsistent object metadata", async () => {
+    const deps = setup();
+    vi.mocked(deps.storage.put).mockResolvedValueOnce({
+      key: "Media/prueba1/6/wrong.jpg",
+      sizeBytes: 3,
+      contentType: "image/jpeg",
+    });
+    await expect(
+      new ChapterProcessingService(
+        deps.repository,
+        deps.storage,
+        deps.extractor,
+        deps.audit,
+      ).process(input),
+    ).rejects.toThrow("stored-image-metadata-mismatch");
+    expect(deps.repository.replaceImagesAndMarkReady).not.toHaveBeenCalled();
+    expect(deps.repository.markFailed).toHaveBeenCalledWith(
+      input.chapterId,
+      input.uploadId,
+      false,
+    );
+  });
+
+  it("does not undo a successful publication when completion audit logging fails", async () => {
+    const deps = setup();
+    vi.mocked(deps.audit.append).mockRejectedValueOnce(
+      new Error("audit-temporarily-unavailable"),
+    );
+    await expect(
+      new ChapterProcessingService(
+        deps.repository,
+        deps.storage,
+        deps.extractor,
+        deps.audit,
+      ).process(input),
+    ).resolves.toBeUndefined();
+    expect(deps.repository.replaceImagesAndMarkReady).toHaveBeenCalledOnce();
+    expect(deps.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
+    expect(deps.repository.markFailed).not.toHaveBeenCalled();
+  });
+
+  it("keeps ready publication intact and retries only source cleanup", async () => {
+    const first = setup();
+    vi.mocked(first.storage.delete).mockRejectedValueOnce(
+      new Error("temporary-source-delete-error"),
+    );
+    await expect(
+      new ChapterProcessingService(
+        first.repository,
+        first.storage,
+        first.extractor,
+        first.audit,
+      ).process(input),
+    ).rejects.toThrow("temporary-source-delete-error");
+    expect(first.repository.replaceImagesAndMarkReady).toHaveBeenCalledOnce();
+    expect(first.repository.deleteImages).not.toHaveBeenCalled();
+    expect(first.repository.markFailed).not.toHaveBeenCalled();
+
+    const retry = setup();
+    vi.mocked(retry.repository.findUpload).mockResolvedValueOnce({
+      ...input,
+      seriesPublicSlug: "prueba1",
+      chapterPublicKey: "6",
+      createdBy: "user-1",
+      status: "uploaded",
+      chapterStatus: "ready",
+      storageKey: input.sourceStorageKey,
+    });
+    await new ChapterProcessingService(
+      retry.repository,
+      retry.storage,
+      retry.extractor,
+      retry.audit,
+    ).process(input);
+    expect(retry.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
+    expect(retry.repository.claimChapter).not.toHaveBeenCalled();
+    expect(retry.extractor.inspect).not.toHaveBeenCalled();
   });
 });

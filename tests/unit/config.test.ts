@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   loadConfig,
   loadDatabaseConfig,
+  loadProcessingConfig,
 } from "../../packages/config/src/index.js";
 
 describe("NodeProx configuration", () => {
@@ -67,5 +68,15 @@ describe("NodeProx configuration", () => {
 
   it("rejects database configuration without DATABASE_URL", () => {
     expect(() => loadDatabaseConfig({})).toThrow();
+  });
+
+  it("loads non-rejecting media warning thresholds", () => {
+    expect(
+      loadProcessingConfig({ REDIS_URL: "redis://localhost:6379" }),
+    ).toMatchObject({
+      MEDIA_WARN_IMAGE_SIZE_BYTES: 8388608,
+      MEDIA_WARN_WIDTH_PX: 4000,
+      MEDIA_WARN_HEIGHT_PX: 12000,
+    });
   });
 });

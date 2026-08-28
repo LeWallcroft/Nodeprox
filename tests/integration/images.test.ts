@@ -30,7 +30,7 @@ const password = "m5-images-password";
 const ownerEmail = `m5-images-owner-${ownerId}@example.com`;
 const otherEmail = `m5-images-other-${otherId}@example.com`;
 const storage = new FilesystemStorage(`${process.cwd()}/.nodeprox-storage`);
-const storageKey = `Media/${seriesId}/${chapterId}/01.jpg`;
+const storageKey = `Media/m5-images-${seriesId}/1/01.jpg`;
 const content = Buffer.from("image-content");
 const hasher = new Argon2PasswordHasher();
 
@@ -78,6 +78,7 @@ beforeAll(async () => {
     id: chapterId,
     seriesId,
     chapterNumber: 1,
+    publicKey: "1",
     createdBy: ownerId,
     status: "ready",
   });
@@ -136,14 +137,13 @@ describe("M5-B Images HTTP contract", () => {
       REDIS_URL: infrastructure.redisUrl,
     });
     const publicUrl = PublicMediaUrl.fromImage(config.PUBLIC_MEDIA_ORIGIN, {
-      id: imageId,
-      seriesId,
-      chapterId,
-      extension: "jpg",
+      seriesPublicSlug: `m5-images-${seriesId}`,
+      chapterPublicKey: "1",
+      filename: "01.jpg",
       contentType: "image/jpeg",
     });
     expect(publicUrl.toString()).toBe(
-      `https://media.nodeprox.org/series/${seriesId}/chapters/${chapterId}/images/${imageId}.jpg`,
+      `https://media.nodeprox.org/m5-images-${seriesId}/1/01.jpg`,
     );
   });
 

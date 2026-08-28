@@ -12,7 +12,8 @@ export class ChapterCoreService {
 
   async get(context: AuthorizationContext, id: string) {
     const chapter = await this.chapters.findById(id);
-    if (!chapter) return { notFound: true as const };
+    if (!chapter || chapter.status === "deleting")
+      return { notFound: true as const };
     const decision = await this.permissions.check({
       context,
       chapterId: id,
@@ -31,7 +32,8 @@ export class ChapterCoreService {
     },
   ) {
     const chapter = await this.chapters.findById(id);
-    if (!chapter) return { notFound: true as const };
+    if (!chapter || chapter.status === "deleting")
+      return { notFound: true as const };
     const decision = await this.permissions.check({
       context,
       chapterId: id,

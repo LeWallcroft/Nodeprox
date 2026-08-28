@@ -3,6 +3,8 @@
 import { useState, type FormEvent } from "react";
 import { useLogin } from "../../../lib/domains/auth/hooks";
 import { errorMessage } from "../../../components/domains/feedback";
+import { ApiError } from "../../../lib/api/types";
+import Link from "next/link";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -17,6 +19,10 @@ export default function LoginPage() {
       await login.mutateAsync({ email, password });
       window.location.assign("/");
     } catch (cause) {
+      if (cause instanceof ApiError && cause.code === "account-pending") {
+        window.location.assign("/account-pending");
+        return;
+      }
       setError(
         errorMessage(
           cause,
@@ -83,6 +89,12 @@ export default function LoginPage() {
             {login.isPending ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
+        <p className="mt-5 text-center text-[13px] text-muted">
+          ¿Aún no tienes cuenta?{" "}
+          <Link className="font-semibold text-primary" href="/register">
+            Solicitar acceso
+          </Link>
+        </p>
       </section>
     </main>
   );

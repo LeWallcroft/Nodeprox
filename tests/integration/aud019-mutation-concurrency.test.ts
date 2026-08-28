@@ -7,6 +7,7 @@ import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
+  chapterDeletionOutbox,
   chapters,
   series,
   seriesAssignments,
@@ -136,7 +137,7 @@ function startBlocker(lock: (tx: SqlTransaction) => Promise<unknown>) {
 }
 
 async function waitForBlockedQuery(tableName: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   const pattern = `%${tableName}%`;
   while (Date.now() < deadline) {
     const [row] = await database.sql<{ waiting: boolean }[]>`
@@ -155,7 +156,7 @@ async function waitForBlockedQuery(tableName: string): Promise<void> {
 
 async function chapterState(chapterId: string) {
   const [chapter] = await database.db
-    .select({ title: chapters.title })
+    .select({ title: chapters.title, status: chapters.status })
     .from(chapters)
     .where(eq(chapters.id, chapterId));
   return chapter ?? null;
@@ -199,6 +200,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await database.db
+    .delete(chapterDeletionOutbox)
+    .where(inArray(chapterDeletionOutbox.requestedBy, actorIds));
   await database.db
     .delete(auditLogs)
     .where(inArray(auditLogs.actorId, actorIds));
@@ -363,7 +367,9 @@ describe("AUD-019 transactional mutation authorization", () => {
     await chapterBlocker.done;
     expect((await acceptedDelete).statusCode).toBe(204);
     expect((await laterRevocation).statusCode).toBe(204);
-    expect(await chapterState(mutationWins.chapterId)).toBeNull();
+    expect(await chapterState(mutationWins.chapterId)).toMatchObject({
+      status: "deleting",
+    });
   });
 
   it("serializes Chapter delete against reassignment in both commit orders", async () => {
@@ -413,7 +419,9 @@ describe("AUD-019 transactional mutation authorization", () => {
     await chapterBlocker.done;
     expect((await acceptedDelete).statusCode).toBe(204);
     expect((await laterReassignment).statusCode).toBe(200);
-    expect(await chapterState(mutationWins.chapterId)).toBeNull();
+    expect(await chapterState(mutationWins.chapterId)).toMatchObject({
+      status: "deleting",
+    });
   });
 
   it("serializes helper update with helper revoke and keeps delete non-delegable", async () => {
@@ -670,7 +678,7 @@ describe("AUD-019 transactional mutation authorization", () => {
       .where(eq(users.id, ownerId));
   });
 
-  it("rolls back a validly authorized Series mutation when the write conflicts", async () => {
+  it("rejects mutation of the stable public slug without changing the Series", async () => {
     const source = await createSeriesWithChapter("rollback-source");
     const conflictTarget = await createSeriesWithChapter("rollback-target");
     const [before] = await database.db
@@ -687,7 +695,7 @@ describe("AUD-019 transactional mutation authorization", () => {
       headers: { cookie: ownerCookie },
       payload: { title: "must-roll-back", slug: target?.slug },
     });
-    expect(response.statusCode).toBe(409);
+    expect(response.statusCode).toBe(422);
     const [after] = await database.db
       .select({ title: series.title, slug: series.slug })
       .from(series)

@@ -37,6 +37,7 @@ const image: ValidatedImage = {
   sortOrder: 1,
   sizeBytes: 3,
   checksum: "checksum-01",
+  warnings: [],
   tempPath: "temporary-image",
 };
 
@@ -60,6 +61,7 @@ async function createFixture() {
     id: chapterId,
     seriesId,
     chapterNumber: chapterIds.length,
+    publicKey: String(chapterIds.length),
     createdBy: userId,
     status: "uploaded",
   });
@@ -170,7 +172,7 @@ describe("M4-B processing integration", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       filename: "01.jpg",
-      storageKey: `Media/${seriesId}/${fixture.chapterId}/01.jpg`,
+      storageKey: `Media/m4b-${seriesId}/${chapterIds.indexOf(fixture.chapterId) + 1}/01.jpg`,
       sortOrder: 1,
       contentType: "image/jpeg",
     });

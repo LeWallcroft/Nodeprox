@@ -2,8 +2,10 @@ import { and, eq, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
   auditLogs,
+  chapterImportItems,
   chapters,
   images,
+  series,
   uploads,
 } from "../../../../../../../database/schema/index.js";
 import type {
@@ -22,31 +24,43 @@ export class DrizzleProcessingRepository
         uploadId: uploads.id,
         chapterId: uploads.chapterId,
         seriesId: chapters.seriesId,
+        seriesPublicSlug: series.slug,
+        chapterPublicKey: chapters.publicKey,
         createdBy: uploads.createdBy,
         storageKey: uploads.storageKey,
         status: uploads.status,
+        chapterStatus: chapters.status,
       })
       .from(uploads)
       .innerJoin(chapters, eq(chapters.id, uploads.chapterId))
+      .innerJoin(series, eq(series.id, chapters.seriesId))
       .where(eq(uploads.id, uploadId))
       .limit(1);
     return row ?? null;
   }
-  async claimChapter(chapterId: string): Promise<boolean> {
-    const [row] = await this.db
-      .update(chapters)
-      .set({ status: "processing", updatedAt: new Date() })
-      .where(
-        and(
-          eq(chapters.id, chapterId),
-          sql`${chapters.status} in ('uploaded', 'failed')`,
-        ),
-      )
-      .returning({ id: chapters.id });
-    return Boolean(row);
+  async claimChapter(chapterId: string, uploadId: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(chapters)
+        .set({ status: "processing", updatedAt: new Date() })
+        .where(
+          and(
+            eq(chapters.id, chapterId),
+            sql`${chapters.status} in ('uploaded', 'failed')`,
+          ),
+        )
+        .returning({ id: chapters.id });
+      if (!row) return false;
+      await tx
+        .update(chapterImportItems)
+        .set({ status: "processing", errorCode: null, updatedAt: new Date() })
+        .where(eq(chapterImportItems.uploadId, uploadId));
+      return true;
+    });
   }
   async replaceImagesAndMarkReady(
     chapterId: string,
+    uploadId: string,
     records: ImageRecordInput[],
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -61,6 +75,7 @@ export class DrizzleProcessingRepository
           sizeBytes: record.sizeBytes,
           sortOrder: record.sortOrder,
           checksum: record.checksum,
+          warnings: record.warnings,
         })),
       );
       const [chapter] = await tx
@@ -71,16 +86,35 @@ export class DrizzleProcessingRepository
         )
         .returning({ id: chapters.id });
       if (!chapter) throw new Error("chapter-ready-transition-conflict");
+      await tx
+        .update(chapterImportItems)
+        .set({ status: "ready", errorCode: null, updatedAt: new Date() })
+        .where(eq(chapterImportItems.uploadId, uploadId));
     });
   }
   async deleteImages(chapterId: string): Promise<void> {
     await this.db.delete(images).where(eq(images.chapterId, chapterId));
   }
-  async markFailed(chapterId: string): Promise<void> {
-    await this.db
-      .update(chapters)
-      .set({ status: "failed", updatedAt: new Date() })
-      .where(eq(chapters.id, chapterId));
+  async markFailed(
+    chapterId: string,
+    uploadId: string,
+    terminal: boolean,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(chapters)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(chapters.id, chapterId));
+      if (terminal)
+        await tx
+          .update(chapterImportItems)
+          .set({
+            status: "failed",
+            errorCode: "processing-failed",
+            updatedAt: new Date(),
+          })
+          .where(eq(chapterImportItems.uploadId, uploadId));
+    });
   }
   async append(input: {
     actorId: string;

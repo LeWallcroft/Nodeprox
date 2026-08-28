@@ -21,6 +21,20 @@ export interface ProcessingQueuePort {
   enqueueChapterProcessing(input: ProcessChapterInput): Promise<void>;
 }
 
+export type DeleteChapterStorageInput = {
+  deletionId: string;
+  chapterId: string;
+};
+
+export interface ChapterDeletionQueuePort {
+  enqueueChapterDeletion(input: DeleteChapterStorageInput): Promise<void>;
+}
+
+export type MediaWarning =
+  | { code: "large-file"; filename: string; sizeBytes: number }
+  | { code: "wide-image"; filename: string; width: number }
+  | { code: "tall-image"; filename: string; height: number };
+
 export interface ProblemDetails {
   type: string;
   title: string;

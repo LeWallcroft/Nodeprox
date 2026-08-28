@@ -13,6 +13,7 @@ import {
   auditLogs,
   chapterPermissions,
   chapters,
+  helperSeriesCooldowns,
   series,
   systemConfig,
   users,
@@ -34,6 +35,9 @@ const mixedChapterId = randomUUID();
 const idempotentChapterId = randomUUID();
 const cooldownChapterId = randomUUID();
 const ownershipChapterId = randomUUID();
+const sameSeriesChapterId = randomUUID();
+const sameSeriesExpiryChapterId = randomUUID();
+const differentSeriesChapterId = randomUUID();
 const ownerEmail = `chapter-owner-${ownerId}@example.com`;
 const helperEmail = `chapter-helper-${helperId}@example.com`;
 const otherEmail = `chapter-other-${otherId}@example.com`;
@@ -56,21 +60,29 @@ async function login(email: string): Promise<string> {
   return cookieValue(response.headers["set-cookie"]);
 }
 
-async function insertChapter(id: string): Promise<void> {
-  const seriesId = randomUUID();
-  legacySeriesIds.push(seriesId);
-  await database.db.insert(series).values({
-    id: seriesId,
-    title: `Legacy ${seriesId}`,
-    slug: `legacy-${seriesId}`,
-    createdBy: ownerId,
-  });
+async function insertChapter(
+  id: string,
+  existingSeriesId?: string,
+  chapterNumber = 1,
+): Promise<string> {
+  const seriesId = existingSeriesId ?? randomUUID();
+  if (!existingSeriesId) {
+    legacySeriesIds.push(seriesId);
+    await database.db.insert(series).values({
+      id: seriesId,
+      title: `Legacy ${seriesId}`,
+      slug: `legacy-${seriesId}`,
+      createdBy: ownerId,
+    });
+  }
   await database.db.insert(chapters).values({
     id,
     seriesId,
-    chapterNumber: 1,
+    chapterNumber,
+    publicKey: String(chapterNumber),
     createdBy: ownerId,
   });
+  return seriesId;
 }
 
 const permissions = [
@@ -108,12 +120,15 @@ beforeAll(async () => {
       role: "uploader",
     },
   ]);
-  await insertChapter(chapterId);
+  const permissionSeriesId = await insertChapter(chapterId);
+  await insertChapter(sameSeriesChapterId, permissionSeriesId, 2);
+  await insertChapter(sameSeriesExpiryChapterId, permissionSeriesId, 3);
   await insertChapter(concurrentChapterId);
   await insertChapter(mixedChapterId);
   await insertChapter(idempotentChapterId);
   await insertChapter(cooldownChapterId);
   await insertChapter(ownershipChapterId);
+  await insertChapter(differentSeriesChapterId);
 });
 
 afterAll(async () => {
@@ -136,6 +151,15 @@ afterAll(async () => {
     .where(eq(chapters.id, idempotentChapterId));
   await database.db.delete(chapters).where(eq(chapters.id, cooldownChapterId));
   await database.db.delete(chapters).where(eq(chapters.id, ownershipChapterId));
+  await database.db
+    .delete(chapters)
+    .where(eq(chapters.id, sameSeriesChapterId));
+  await database.db
+    .delete(chapters)
+    .where(eq(chapters.id, sameSeriesExpiryChapterId));
+  await database.db
+    .delete(chapters)
+    .where(eq(chapters.id, differentSeriesChapterId));
   await database.db.delete(series).where(inArray(series.id, legacySeriesIds));
   await database.db
     .delete(auditLogs)
@@ -282,7 +306,7 @@ describe("M2-B chapter permission authorization", () => {
     }
     const forged = await app.inject({
       method: "POST",
-      url: `/chapters/${chapterId}/permissions`,
+      url: `/chapters/${sameSeriesChapterId}/permissions`,
       headers: { cookie: ownerCookie },
       payload: {
         userId: helperId,
@@ -328,18 +352,38 @@ describe("M2-B chapter permission authorization", () => {
     const ownerCookie = await login(ownerEmail);
     const blocked = await app.inject({
       method: "POST",
-      url: `/chapters/${chapterId}/permissions`,
+      url: `/chapters/${sameSeriesChapterId}/permissions`,
       headers: { cookie: ownerCookie },
       payload: { userId: helperId, permissions: ["chapters.read"] },
     });
     expect(blocked.statusCode).toBe(409);
+    const otherSeries = await app.inject({
+      method: "POST",
+      url: `/chapters/${differentSeriesChapterId}/permissions`,
+      headers: { cookie: ownerCookie },
+      payload: { userId: helperId, permissions: ["chapters.read"] },
+    });
+    expect(otherSeries.statusCode).toBe(204);
+
+    await database.db
+      .update(helperSeriesCooldowns)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(helperSeriesCooldowns.helperUserId, helperId));
+    const expired = await app.inject({
+      method: "POST",
+      url: `/chapters/${sameSeriesExpiryChapterId}/permissions`,
+      headers: { cookie: ownerCookie },
+      payload: { userId: helperId, permissions: ["chapters.read"] },
+    });
+    expect(expired.statusCode).toBe(204);
+
     await database.db
       .update(systemConfig)
       .set({ value: 0 })
       .where(eq(systemConfig.key, "helper_cooldown_days"));
     const allowed = await app.inject({
       method: "POST",
-      url: `/chapters/${chapterId}/permissions`,
+      url: `/chapters/${sameSeriesChapterId}/permissions`,
       headers: { cookie: ownerCookie },
       payload: { userId: helperId, permissions: ["chapters.read"] },
     });
@@ -490,9 +534,15 @@ describe("M2-B chapter permission authorization", () => {
         headers: { cookie: ownerCookie },
       }),
     ]);
-    expect(responses.every((response) => response.statusCode === 204)).toBe(
-      true,
-    );
+    expect(
+      responses.every((response) => response.statusCode === 204),
+      JSON.stringify(
+        responses.map((response) => ({
+          statusCode: response.statusCode,
+          body: response.body,
+        })),
+      ),
+    ).toBe(true);
     const active = await database.db
       .select()
       .from(chapterPermissions)

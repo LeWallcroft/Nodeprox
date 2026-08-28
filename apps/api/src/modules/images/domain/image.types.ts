@@ -1,3 +1,5 @@
+import type { MediaWarning } from "@nodeprox/types";
+
 export type ImageRecord = {
   id: string;
   chapterId: string;
@@ -8,6 +10,7 @@ export type ImageRecord = {
   sizeBytes: number;
   sortOrder: number;
   checksum: string;
+  warnings: readonly MediaWarning[];
   createdAt: Date;
   updatedAt: Date;
 };

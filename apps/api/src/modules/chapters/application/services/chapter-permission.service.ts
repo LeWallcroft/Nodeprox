@@ -60,8 +60,18 @@ export class ChapterPermissionService {
         ? { notFound: true }
         : { denied: true };
     }
-    if (!(await this.users.existsById(input.helperUserId)))
-      return { notFound: true };
+    const helper = this.users.findUserById
+      ? await this.users.findUserById(input.helperUserId)
+      : (await this.users.existsById(input.helperUserId))
+        ? {
+            id: input.helperUserId,
+            status: "active",
+            role: "uploader" as const,
+          }
+        : null;
+    if (!helper) return { notFound: true };
+    if (helper.status !== "active" || helper.role !== "uploader")
+      return { denied: true };
     const delegable = input.permissions.map((permission) => {
       if (!isDelegableChapterPermission(permission))
         throw new InvalidChapterPermissionError();
@@ -79,14 +89,16 @@ export class ChapterPermissionService {
       return { denied: true };
     }
     const result = await this.permissions.grant({
+      actor: input.context,
       chapterId: input.chapterId,
       helperUserId: input.helperUserId,
-      grantedBy: input.context.userId,
       permissions: delegable,
       cooldownDays: cooldown.days,
       now: new Date(),
     });
     if (result.outcome === "granted") return { count: result.count };
+    if (result.outcome === "not-found") return { notFound: true };
+    if (result.outcome === "denied") return { denied: true };
     await this.recordDenied(
       input.context.userId,
       "chapter.permission.grant.denied",
@@ -115,11 +127,14 @@ export class ChapterPermissionService {
         ? { notFound: true }
         : { denied: true };
     }
+    const cooldown = await this.authorization.getHelperCooldownDecision();
+    if (!cooldown.allowed) return { denied: true };
     const result = await this.permissions.revokeIfAuthorized({
       actor: input.context,
       chapterId: input.chapterId,
       helperUserId: input.helperUserId,
       now: new Date(),
+      cooldownDays: cooldown.days,
     });
     if (result.outcome === "not-found") return { notFound: true };
     if (result.outcome === "denied") return { denied: true };
@@ -210,7 +225,8 @@ export class ChapterPermissionService {
     chapterId: string,
     permission: Permission,
   ): Promise<
-    { allowed: true } | { allowed: false; reason: "not-found" | "denied" }
+    | { allowed: true; seriesId: string }
+    | { allowed: false; reason: "not-found" | "denied" }
   > {
     if (!context.userId || !context.sessionId)
       return { allowed: false, reason: "denied" };
@@ -218,19 +234,20 @@ export class ChapterPermissionService {
     if (!chapter) return { allowed: false, reason: "not-found" };
     const decision = await this.authorization.authorize(context, permission);
     if (!decision.allowed) return { allowed: false, reason: "denied" };
-    if (decision.role === "admin") return { allowed: true };
+    if (decision.role === "admin")
+      return { allowed: true, seriesId: chapter.seriesId };
     if (
       decision.role === "gestor" &&
       this.chapters.isSeriesOwner &&
       (await this.chapters.isSeriesOwner(chapter.seriesId, context.userId))
     )
-      return { allowed: true };
+      return { allowed: true, seriesId: chapter.seriesId };
     if (
       decision.role === "uploader" &&
       this.chapters.isAssigned &&
       (await this.chapters.isAssigned(chapter.seriesId, context.userId))
     )
-      return { allowed: true };
+      return { allowed: true, seriesId: chapter.seriesId };
     return { allowed: false, reason: "denied" };
   }
 

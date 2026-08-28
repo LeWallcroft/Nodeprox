@@ -61,6 +61,13 @@ const processingConfigSchema = z.object({
     .int()
     .positive()
     .default(67108864),
+  MEDIA_WARN_IMAGE_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(8388608),
+  MEDIA_WARN_WIDTH_PX: z.coerce.number().int().positive().default(4000),
+  MEDIA_WARN_HEIGHT_PX: z.coerce.number().int().positive().default(12000),
 });
 
 export type NodeProxConfig = z.infer<typeof configSchema>;

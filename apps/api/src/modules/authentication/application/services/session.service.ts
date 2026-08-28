@@ -44,7 +44,18 @@ export class SessionService {
       throw new AppError(INVALID_CREDENTIALS);
     }
     if (user.status !== "active") {
-      await this.passwords.verify(user.passwordHash, input.password);
+      const valid = await this.passwords.verify(
+        user.passwordHash,
+        input.password,
+      );
+      if (valid && user.status === "pending")
+        throw new AppError({
+          code: "account-pending",
+          detail: "The account is pending administrative approval.",
+          statusCode: 403,
+          title: "Account pending",
+          type: "https://nodeprox.dev/problems/account-pending",
+        });
       throw new AppError(INVALID_CREDENTIALS);
     }
     const valid = await this.passwords.verify(

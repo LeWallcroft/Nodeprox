@@ -8,7 +8,6 @@ import {
 import type { GetPublishedChapter } from "../application/services/get-published-chapter.js";
 
 const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
-
 const notFound = new AppError({
   code: "resource-not-found",
   detail: "The requested public chapter was not found.",

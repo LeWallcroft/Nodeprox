@@ -21,7 +21,7 @@ export async function uploadChapter(
   );
 
   try {
-    await uploadDirect(file, initiated, onProgress);
+    await putDirectUpload(file, initiated.transfer, onProgress);
     return await apiRequestBrowser<UploadResult>(
       `/chapters/${chapterId}/uploads/${initiated.uploadId}/complete`,
       { method: "POST" },
@@ -35,12 +35,11 @@ export async function uploadChapter(
   }
 }
 
-function uploadDirect(
+export function putDirectUpload(
   file: File,
-  initiated: InitiatedUpload,
+  transfer: InitiatedUpload["transfer"],
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<void> {
-  const transfer = initiated.transfer;
   if (transfer.mode !== "single")
     throw new ApiError(500, "The negotiated upload mode is not supported.");
 

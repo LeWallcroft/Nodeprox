@@ -1,12 +1,14 @@
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { inject } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
+import { DrizzleChapterDeletionRepository } from "../../apps/worker/src/deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import {
   auditLogs,
+  chapterDeletionOutbox,
   chapters,
   series,
   users,
@@ -92,6 +94,17 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await database.db
+    .delete(chapterDeletionOutbox)
+    .where(
+      inArray(chapterDeletionOutbox.requestedBy, [
+        ownerId,
+        otherId,
+        helperId,
+        adminId,
+        gestorId,
+      ]),
+    );
+  await database.db
     .delete(auditLogs)
     .where(
       inArray(auditLogs.actorId, [
@@ -132,6 +145,50 @@ afterAll(async () => {
 });
 
 describe("M3 Series and Chapters Core", () => {
+  it("keeps public identities stable when editable labels or numbers change", async () => {
+    const ownerCookie = await login(emails.owner);
+    const slug = `stable-media-${ownerId}`;
+    const createdSeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: { title: "Stable Media", slug },
+    });
+    expect(createdSeries.statusCode).toBe(201);
+    const seriesId = createdSeries.json().id as string;
+    const createdChapter = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/chapters`,
+      headers: { cookie: ownerCookie },
+      payload: { chapterNumber: 6 },
+    });
+    expect(createdChapter.statusCode).toBe(201);
+    const chapterId = createdChapter.json().id as string;
+
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: `/series/${seriesId}`,
+      headers: { cookie: ownerCookie },
+      payload: { title: "Renamed Stable Media" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    const [storedSeries] = await database.db
+      .select({ slug: series.slug })
+      .from(series)
+      .where(eq(series.id, seriesId));
+    expect(storedSeries?.slug).toBe(slug);
+
+    await database.db
+      .update(chapters)
+      .set({ chapterNumber: 7 })
+      .where(eq(chapters.id, chapterId));
+    const [storedChapter] = await database.db
+      .select({ number: chapters.chapterNumber, publicKey: chapters.publicKey })
+      .from(chapters)
+      .where(eq(chapters.id, chapterId));
+    expect(storedChapter).toEqual({ number: 7, publicKey: "6" });
+  });
+
   it("implements the authenticated Series and Chapter CRUD contract", async () => {
     const ownerCookie = await login(emails.owner);
     const createdSeries = await app.inject({
@@ -236,6 +293,15 @@ describe("M3 Series and Chapters Core", () => {
         })
       ).statusCode,
     ).toBe(204);
+    const [deletion] = await database.db
+      .select({ id: chapterDeletionOutbox.id })
+      .from(chapterDeletionOutbox)
+      .where(eq(chapterDeletionOutbox.chapterId, chapterId));
+    if (!deletion) throw new Error("expected-chapter-deletion-request");
+    await new DrizzleChapterDeletionRepository(database.db).finalize(
+      deletion.id,
+      chapterId,
+    );
     expect(
       (
         await app.inject({
@@ -273,7 +339,7 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: otherCookie },
         })
       ).statusCode,
-    ).toBe(200);
+    ).toBe(403);
     expect(
       (
         await app.inject({

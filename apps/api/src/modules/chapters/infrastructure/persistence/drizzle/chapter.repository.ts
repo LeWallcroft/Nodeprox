@@ -1,14 +1,14 @@
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapterPermissions,
   chapters,
+  helperSeriesCooldowns,
   series,
   seriesAssignments,
   users,
 } from "../../../../../../../../database/schema/index.js";
-import { isCooldownActive } from "../../../domain/chapter-permission.policy.js";
 import type {
   ChapterPermissionRepositoryPort,
   ChapterRepositoryPort,
@@ -108,38 +108,79 @@ export class DrizzleChapterRepository
     return row !== null;
   }
 
+  async findUserById(id: string) {
+    const [row] = await this.db
+      .select({ id: users.id, status: users.status, role: users.role })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
   async grant(input: {
+    actor: Parameters<ChapterPermissionRepositoryPort["grant"]>[0]["actor"];
     chapterId: string;
     helperUserId: string;
-    grantedBy: string;
     permissions: readonly DelegableChapterPermission[];
     cooldownDays: number;
     now: Date;
   }): Promise<
     | { outcome: "granted"; count: number }
     | { outcome: "conflict"; reason: "cooldown" | "already-granted" }
+    | { outcome: "denied" }
+    | { outcome: "not-found" }
   > {
+    const snapshot = await this.findById(input.chapterId);
+    if (!snapshot) return { outcome: "not-found" };
     return this.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`${input.chapterId}:${input.helperUserId}`}, 0))`,
-      );
-      const latestRevocation =
-        (
-          await tx
-            .select({ revokedAt: chapterPermissions.revokedAt })
-            .from(chapterPermissions)
-            .where(
-              and(
-                eq(chapterPermissions.chapterId, input.chapterId),
-                eq(chapterPermissions.helperUserId, input.helperUserId),
-                sql`${chapterPermissions.revokedAt} is not null`,
-              ),
-            )
-            .orderBy(desc(chapterPermissions.revokedAt))
-            .limit(1)
-        )[0]?.revokedAt ?? null;
-      if (isCooldownActive(latestRevocation, input.cooldownDays, input.now))
-        return { outcome: "conflict", reason: "cooldown" };
+      const actor = await lockCurrentAuthorization({
+        tx,
+        actor: input.actor,
+        permission: PERMISSIONS.CHAPTERS_HELPER_GRANT,
+        additionalUserIds: [input.helperUserId],
+      });
+      if (!actor.allowed) return { outcome: "denied" as const };
+      const helper = actor.usersById.get(input.helperUserId);
+      if (!helper) return { outcome: "not-found" as const };
+      if (helper.status !== "active" || helper.role !== "uploader")
+        return { outcome: "denied" as const };
+
+      const [lockedSeries] = await tx
+        .select({ createdBy: series.createdBy })
+        .from(series)
+        .where(eq(series.id, snapshot.seriesId))
+        .limit(1)
+        .for("update");
+      if (!lockedSeries) return { outcome: "not-found" as const };
+      const isSeriesOwner =
+        actor.role === "gestor" &&
+        lockedSeries.createdBy === input.actor.userId;
+      let isAssigned = false;
+      if (actor.role !== "admin") {
+        const [assignment] = await tx
+          .select({ uploaderId: seriesAssignments.uploaderId })
+          .from(seriesAssignments)
+          .where(eq(seriesAssignments.seriesId, snapshot.seriesId))
+          .limit(1)
+          .for("update");
+        isAssigned = assignment?.uploaderId === input.actor.userId;
+      }
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, input.chapterId))
+        .limit(1)
+        .for("update");
+      if (!chapter) return { outcome: "not-found" as const };
+      if (chapter.seriesId !== snapshot.seriesId)
+        return { outcome: "denied" as const };
+      const reason = evaluateChapterContextualAuthorization({
+        role: actor.role,
+        isSeriesOwner,
+        isAssigned,
+        hasHelperPermission: false,
+      });
+      if (!reason) return { outcome: "denied" as const };
 
       const active = await tx
         .select({ permission: chapterPermissions.permission })
@@ -150,7 +191,8 @@ export class DrizzleChapterRepository
             eq(chapterPermissions.helperUserId, input.helperUserId),
             isNull(chapterPermissions.revokedAt),
           ),
-        );
+        )
+        .for("update");
       if (
         active.some((row) =>
           input.permissions.includes(
@@ -159,67 +201,39 @@ export class DrizzleChapterRepository
         )
       )
         return { outcome: "conflict", reason: "already-granted" };
+      if (input.cooldownDays > 0) {
+        const [cooldown] = await tx
+          .select({ id: helperSeriesCooldowns.id })
+          .from(helperSeriesCooldowns)
+          .where(
+            and(
+              eq(helperSeriesCooldowns.seriesId, snapshot.seriesId),
+              eq(helperSeriesCooldowns.helperUserId, input.helperUserId),
+              gt(helperSeriesCooldowns.expiresAt, input.now),
+            ),
+          )
+          .limit(1)
+          .for("update");
+        if (cooldown) return { outcome: "conflict", reason: "cooldown" };
+      }
 
       await tx.insert(chapterPermissions).values(
         input.permissions.map((permission) => ({
           chapterId: input.chapterId,
           helperUserId: input.helperUserId,
           permission,
-          grantedBy: input.grantedBy,
+          grantedBy: input.actor.userId,
           grantedAt: input.now,
         })),
       );
       await tx.insert(auditLogs).values({
-        actorId: input.grantedBy,
+        actorId: input.actor.userId,
         action: "chapter.permission.granted",
         resourceType: "chapter",
         resourceId: input.chapterId,
         metadata: sanitizeAuditMetadata({ result: "granted" }),
       });
       return { outcome: "granted", count: input.permissions.length };
-    });
-  }
-
-  async revoke(input: {
-    chapterId: string;
-    helperUserId: string;
-    revokedBy: string;
-    now: Date;
-  }): Promise<{ count: number }> {
-    return this.db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`${input.chapterId}:${input.helperUserId}`}, 0))`,
-      );
-      const active = await tx
-        .select({ id: chapterPermissions.id })
-        .from(chapterPermissions)
-        .where(
-          and(
-            eq(chapterPermissions.chapterId, input.chapterId),
-            eq(chapterPermissions.helperUserId, input.helperUserId),
-            isNull(chapterPermissions.revokedAt),
-          ),
-        );
-      await tx
-        .update(chapterPermissions)
-        .set({ revokedAt: input.now, revokedBy: input.revokedBy })
-        .where(
-          and(
-            eq(chapterPermissions.chapterId, input.chapterId),
-            eq(chapterPermissions.helperUserId, input.helperUserId),
-            isNull(chapterPermissions.revokedAt),
-          ),
-        );
-      await tx.insert(auditLogs).values({
-        actorId: input.revokedBy,
-        action: "chapter.permission.revoked",
-        resourceType: "chapter",
-        resourceId: input.chapterId,
-        metadata: sanitizeAuditMetadata({
-          result: active.length > 0 ? "revoked" : "none",
-        }),
-      });
-      return { count: active.length };
     });
   }
 
@@ -233,20 +247,22 @@ export class DrizzleChapterRepository
         tx,
         actor: input.actor,
         permission: PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+        additionalUserIds: [input.helperUserId],
       });
       if (!actor.allowed) return { outcome: "denied" as const };
 
-      let isSeriesOwner = false;
+      const [lockedSeries] = await tx
+        .select({ createdBy: series.createdBy })
+        .from(series)
+        .where(eq(series.id, snapshot.seriesId))
+        .limit(1)
+        .for("update");
+      if (!lockedSeries) return { outcome: "not-found" as const };
+      const isSeriesOwner =
+        actor.role === "gestor" &&
+        lockedSeries.createdBy === input.actor.userId;
       let isAssigned = false;
       if (actor.role !== "admin") {
-        const [lockedSeries] = await tx
-          .select({ createdBy: series.createdBy })
-          .from(series)
-          .where(eq(series.id, snapshot.seriesId))
-          .limit(1)
-          .for("update");
-        if (!lockedSeries) return { outcome: "not-found" as const };
-        isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
         const [assignment] = await tx
           .select({ uploaderId: seriesAssignments.uploaderId })
           .from(seriesAssignments)
@@ -294,6 +310,35 @@ export class DrizzleChapterRepository
             isNull(chapterPermissions.revokedAt),
           ),
         );
+      if (active.length > 0 && input.cooldownDays > 0) {
+        const expiresAt = new Date(
+          input.now.getTime() + input.cooldownDays * 86_400_000,
+        );
+        await tx
+          .insert(helperSeriesCooldowns)
+          .values({
+            seriesId: snapshot.seriesId,
+            helperUserId: input.helperUserId,
+            startsAt: input.now,
+            expiresAt,
+            reason: "chapter-permission-revoked",
+            sourceChapterId: input.chapterId,
+            updatedAt: input.now,
+          })
+          .onConflictDoUpdate({
+            target: [
+              helperSeriesCooldowns.seriesId,
+              helperSeriesCooldowns.helperUserId,
+            ],
+            set: {
+              startsAt: input.now,
+              expiresAt,
+              reason: "chapter-permission-revoked",
+              sourceChapterId: input.chapterId,
+              updatedAt: input.now,
+            },
+          });
+      }
       await tx.insert(auditLogs).values({
         actorId: input.actor.userId,
         action: "chapter.permission.revoked",

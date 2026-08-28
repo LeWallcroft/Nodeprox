@@ -1,4 +1,8 @@
-import type { ProcessingQueuePort } from "@nodeprox/types";
+import type {
+  ChapterDeletionQueuePort,
+  ProcessingQueuePort,
+} from "@nodeprox/types";
+import type { ChapterDeletionOutboxPort } from "../../../chapters/application/ports/chapter-deletion-outbox.ports.js";
 import type { ProcessingOutboxPort } from "../../application/ports.js";
 
 export class ProcessingOutboxDispatcher {
@@ -7,7 +11,9 @@ export class ProcessingOutboxDispatcher {
 
   constructor(
     private readonly outbox: ProcessingOutboxPort,
-    private readonly queue: ProcessingQueuePort,
+    private readonly queue: ProcessingQueuePort &
+      Partial<ChapterDeletionQueuePort>,
+    private readonly deletions?: ChapterDeletionOutboxPort,
     private readonly intervalMs = 1000,
   ) {}
 
@@ -22,6 +28,17 @@ export class ProcessingOutboxDispatcher {
           await this.outbox.markEnqueued(entry.id);
         } catch {
           // The outbox remains pending and will be retried on the next poll.
+        }
+      }
+      const deletions = await this.deletions?.findPending(20);
+      for (const deletion of deletions ?? []) {
+        try {
+          if (!this.queue.enqueueChapterDeletion)
+            throw new Error("chapter-deletion-queue-unavailable");
+          await this.queue.enqueueChapterDeletion(deletion);
+          await this.deletions?.markEnqueued(deletion.deletionId);
+        } catch {
+          // The durable request remains pending and is dispatched again.
         }
       }
     } finally {

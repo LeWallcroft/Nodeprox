@@ -11,7 +11,6 @@ import { ChapterDeleteService } from "../../chapters/application/services/chapte
 import { ChapterCoreService } from "../../chapters/application/services/chapter-core.service.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
 import {
-  ChapterSequenceError,
   DrizzleChapterCoreRepository,
   DrizzleSeriesRepository,
 } from "../infrastructure/persistence/drizzle/series.repository.js";
@@ -23,11 +22,21 @@ const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
 const seriesCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
-    slug: z.string().trim().min(1).max(220),
+    slug: z
+      .string()
+      .trim()
+      .min(1)
+      .max(220)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     description: z.string().max(5000).nullable().optional(),
   })
   .strict();
-const seriesPatchSchema = seriesCreateSchema.partial().strict();
+const seriesPatchSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    description: z.string().max(5000).nullable().optional(),
+  })
+  .strict();
 const chapterCreateSchema = z
   .object({
     chapterNumber: z.number().int().positive(),
@@ -235,8 +244,7 @@ export function registerSeriesPlugin(
         if ("forbidden" in result) throw forbidden;
         return reply.code(201).send(result);
       } catch (cause) {
-        if (isUnique(cause) || cause instanceof ChapterSequenceError)
-          throw conflict;
+        if (isUnique(cause)) throw conflict;
         throw cause;
       }
     },

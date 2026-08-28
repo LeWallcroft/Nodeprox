@@ -2,6 +2,7 @@ import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
+  chapterImportItems,
   chapterPermissions,
   chapters,
   processingOutbox,
@@ -66,14 +67,22 @@ export class DrizzleUploadRepository
         const [active] = await tx
           .select({ id: uploads.id })
           .from(uploads)
-          .where(eq(uploads.chapterId, input.chapterId))
+          .where(
+            and(
+              eq(uploads.chapterId, input.chapterId),
+              sql`${uploads.status} in ('pending', 'verifying', 'aborting')`,
+            ),
+          )
           .limit(1);
         if (active) throw uploadStateConflict;
         const [chapter] = await tx
           .update(chapters)
           .set({ status: "uploading", updatedAt: new Date() })
           .where(
-            and(eq(chapters.id, input.chapterId), eq(chapters.status, "draft")),
+            and(
+              eq(chapters.id, input.chapterId),
+              sql`${chapters.status} in ('draft', 'failed')`,
+            ),
           )
           .returning({ id: chapters.id });
         if (!chapter) throw uploadStateConflict;
@@ -140,6 +149,14 @@ export class DrizzleUploadRepository
           )
           .returning({ seriesId: chapters.seriesId });
         if (!updatedChapter) throw uploadStateConflict;
+        await tx
+          .update(chapterImportItems)
+          .set({
+            status: "uploaded",
+            errorCode: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(chapterImportItems.uploadId, completed.id));
         await tx.insert(processingOutbox).values({
           uploadId: completed.id,
           chapterId: completed.chapterId,
@@ -238,7 +255,12 @@ export class DrizzleUploadRepository
     const [row] = await this.db
       .select()
       .from(uploads)
-      .where(eq(uploads.chapterId, chapterId))
+      .where(
+        and(
+          eq(uploads.chapterId, chapterId),
+          sql`${uploads.status} in ('pending', 'verifying', 'aborting')`,
+        ),
+      )
       .limit(1);
     return row ? toRecord(row) : null;
   }
@@ -270,10 +292,26 @@ export class DrizzleUploadRepository
     try {
       return await this.db.transaction(async (tx) => {
         const [row] = await tx
+          .select({ chapterId: uploads.chapterId })
+          .from(uploads)
+          .where(and(eq(uploads.id, id), eq(uploads.status, status)))
+          .limit(1)
+          .for("update");
+        if (!row) return false;
+        await tx
+          .update(chapterImportItems)
+          .set({
+            uploadId: null,
+            status: "failed",
+            errorCode: "upload-aborted",
+            updatedAt: new Date(),
+          })
+          .where(eq(chapterImportItems.uploadId, id));
+        const [removed] = await tx
           .delete(uploads)
           .where(and(eq(uploads.id, id), eq(uploads.status, status)))
-          .returning({ chapterId: uploads.chapterId });
-        if (!row) return false;
+          .returning({ id: uploads.id });
+        if (!removed) throw uploadStateConflict;
         const [chapter] = await tx
           .update(chapters)
           .set({ status: "draft", updatedAt: new Date() })

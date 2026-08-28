@@ -6,16 +6,29 @@ import type { PublishedChapterRecord } from "../../apps/api/src/modules/publicat
 const chapter = {
   id: "33333333-3333-4333-8333-333333333333",
   seriesId: "22222222-2222-4222-8222-222222222222",
+  seriesPublicSlug: "raven",
   chapterNumber: 1,
+  chapterPublicKey: "1",
   title: "Chapter One",
   status: "ready" as const,
 };
 
 const images = [
   {
+    id: "55555555-5555-4555-8555-555555555555",
+    chapterId: chapter.id,
+    filename: "00.jpg",
+    storageKey: "Media/raven/1/00.jpg",
+    extension: "jpg",
+    contentType: "image/jpeg",
+    sizeBytes: 30,
+    sortOrder: 0,
+  },
+  {
     id: "11111111-1111-4111-8111-111111111111",
     chapterId: chapter.id,
     filename: "02.png",
+    storageKey: "Media/raven/1/02.png",
     extension: "png",
     contentType: "image/png",
     sizeBytes: 20,
@@ -25,6 +38,7 @@ const images = [
     id: "44444444-4444-4444-8444-444444444444",
     chapterId: chapter.id,
     filename: "01.jpg",
+    storageKey: "Media/raven/1/01.jpg",
     extension: "jpg",
     contentType: "image/jpeg",
     sizeBytes: 10,
@@ -56,22 +70,31 @@ describe("GetPublishedChapter", () => {
       title: "Chapter One",
       images: [
         {
-          id: images[1]?.id,
-          filename: images[1]?.filename,
-          extension: images[1]?.extension,
-          contentType: images[1]?.contentType,
-          sizeBytes: images[1]?.sizeBytes,
-          sortOrder: images[1]?.sortOrder,
-          url: `https://media.nodeprox.org/series/${chapter.seriesId}/chapters/${chapter.id}/images/${images[1]?.id}.jpg`,
-        },
-        {
           id: images[0]?.id,
           filename: images[0]?.filename,
           extension: images[0]?.extension,
           contentType: images[0]?.contentType,
           sizeBytes: images[0]?.sizeBytes,
           sortOrder: images[0]?.sortOrder,
-          url: `https://media.nodeprox.org/series/${chapter.seriesId}/chapters/${chapter.id}/images/${images[0]?.id}.png`,
+          url: `https://media.nodeprox.org/raven/1/00.jpg`,
+        },
+        {
+          id: images[2]?.id,
+          filename: images[2]?.filename,
+          extension: images[2]?.extension,
+          contentType: images[2]?.contentType,
+          sizeBytes: images[2]?.sizeBytes,
+          sortOrder: images[2]?.sortOrder,
+          url: `https://media.nodeprox.org/raven/1/01.jpg`,
+        },
+        {
+          id: images[1]?.id,
+          filename: images[1]?.filename,
+          extension: images[1]?.extension,
+          contentType: images[1]?.contentType,
+          sizeBytes: images[1]?.sizeBytes,
+          sortOrder: images[1]?.sortOrder,
+          url: `https://media.nodeprox.org/raven/1/02.png`,
         },
       ],
     });
@@ -109,4 +132,5 @@ describe("GetPublishedChapter", () => {
       ).execute(chapter.id),
     ).rejects.toMatchObject({ message: "published-chapter-integrity-error" });
   });
+
 });
