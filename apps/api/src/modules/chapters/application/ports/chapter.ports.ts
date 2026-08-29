@@ -50,5 +50,16 @@ export interface ChapterPermissionRepositoryPort {
     helperUserId: string;
     permission: DelegableChapterPermission;
   }): Promise<boolean>;
+  hasAnyActivePermission(input: {
+    chapterId: string;
+    helperUserId: string;
+  }): Promise<boolean>;
   listActive(chapterId: string): Promise<ChapterPermissionRecord[]>;
+  listActiveWithUsers(
+    chapterId: string,
+  ): Promise<Array<ChapterPermissionRecord & { email: string }>>;
+  listEligibleCandidates(
+    chapterId: string,
+    now: Date,
+  ): Promise<Array<{ id: string; email: string }>>;
 }

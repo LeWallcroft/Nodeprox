@@ -22,17 +22,40 @@ type RouteContext = { params: Promise<{ path: string[] }> };
 function isAllowedRoute(path: string[], method: string): boolean {
   const value = path.join("/");
   if (value === "health") return method === "GET";
+  if (value === "overview") return method === "GET";
   if (value === "auth/login" || value === "auth/logout")
     return method === "POST";
+  if (value === "auth/register") return method === "POST";
   if (value === "auth/session" || value === "auth/capabilities")
     return method === "GET";
+  if (value === "admin/users") return method === "GET";
+  if (value === "admin/audit") return method === "GET";
+  if (value === "admin/settings") return method === "GET" || method === "PATCH";
+  if (/^admin\/users\/[^/]+$/.test(value)) return method === "PATCH";
   if (value === "series") return method === "GET" || method === "POST";
   if (/^series\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
+  if (/^series\/[^/]+\/capabilities$/.test(value)) return method === "GET";
+  if (/^series\/[^/]+\/uploader-candidates$/.test(value))
+    return method === "GET";
+  if (/^series\/[^/]+\/uploader$/.test(value))
+    return method === "PUT" || method === "DELETE";
   if (/^series\/[^/]+\/chapters$/.test(value))
     return ["GET", "POST"].includes(method);
+  if (/^series\/[^/]+\/import-batches$/.test(value)) return method === "POST";
+  if (/^series\/[^/]+\/import-batches\/[^/]+\/items\/[^/]+\/retry$/.test(value))
+    return method === "POST";
+  if (value === "chapters") return method === "GET";
+  if (/^import-batches\/[^/]+$/.test(value)) return method === "GET";
   if (/^chapters\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
+  if (/^chapters\/[^/]+\/capabilities$/.test(value)) return method === "GET";
+  if (/^chapters\/[^/]+\/permissions$/.test(value))
+    return method === "GET" || method === "POST";
+  if (/^chapters\/[^/]+\/permissions\/[^/]+$/.test(value))
+    return method === "DELETE";
+  if (/^chapters\/[^/]+\/helper-candidates$/.test(value))
+    return method === "GET";
   if (/^chapters\/[^/]+\/uploads\/initiate$/.test(value))
     return method === "POST";
   if (/^chapters\/[^/]+\/uploads\/[^/]+\/(complete|abort)$/.test(value))
@@ -136,6 +159,10 @@ export async function POST(request: Request, context: RouteContext) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
+  return forward(request, context);
+}
+
+export async function PUT(request: Request, context: RouteContext) {
   return forward(request, context);
 }
 

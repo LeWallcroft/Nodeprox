@@ -45,7 +45,10 @@ function serviceFor(
     grant: async () => ({ outcome: "granted", count: 1 }),
     revokeIfAuthorized: async () => ({ outcome: "revoked", count: 1 }),
     hasActivePermission: async () => active,
+    hasAnyActivePermission: async () => active,
     listActive: async () => [],
+    listActiveWithUsers: async () => [],
+    listEligibleCandidates: async () => [],
   };
   const authorization = new AuthorizationService(
     new DefaultAuthorizationPolicy(),
@@ -63,6 +66,24 @@ function serviceFor(
 }
 
 describe("chapter permission service", () => {
+  it("projects helper-management capabilities for an admin through policy", async () => {
+    const admin = serviceFor("admin");
+    await expect(
+      admin.check({
+        context: { userId: "admin", sessionId: "session" },
+        chapterId: "chapter",
+        permission: "chapters.helper.grant",
+      }),
+    ).resolves.toMatchObject({ allowed: true, reason: "role" });
+    await expect(
+      admin.check({
+        context: { userId: "admin", sessionId: "session" },
+        chapterId: "chapter",
+        permission: "chapters.helper.revoke",
+      }),
+    ).resolves.toMatchObject({ allowed: true, reason: "role" });
+  });
+
   it("allows an uploader only while server-side assignment is active", async () => {
     await expect(
       serviceFor("uploader").check({
@@ -128,7 +149,10 @@ describe("chapter permission service", () => {
       },
       revokeIfAuthorized: async () => ({ outcome: "revoked", count: 0 }),
       hasActivePermission: async () => false,
+      hasAnyActivePermission: async () => false,
       listActive: async () => [],
+      listActiveWithUsers: async () => [],
+      listEligibleCandidates: async () => [],
     };
     await expect(
       serviceFor("uploader", false, 7, {
@@ -200,7 +224,10 @@ describe("chapter permission service", () => {
         throw new Error("permission repository unavailable");
       },
       hasActivePermission: async () => true,
+      hasAnyActivePermission: async () => true,
       listActive: async () => [],
+      listActiveWithUsers: async () => [],
+      listEligibleCandidates: async () => [],
     };
     await expect(
       serviceFor("uploader", false, 7, {

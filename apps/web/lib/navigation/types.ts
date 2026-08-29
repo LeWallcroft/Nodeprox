@@ -1,10 +1,10 @@
-export type IconReference = string;
+import type { LucideIcon } from "lucide-react";
 
 export interface NavigationItem {
   id: string;
   label: string;
   href?: string;
-  icon: IconReference;
+  icon: LucideIcon;
   children?: NavigationItem[];
   capabilityKey?: string;
 }

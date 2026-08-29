@@ -1,8 +1,8 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../query-keys";
-import { login, logout, register } from "./api";
+import { getCapabilities, login, logout, register } from "./api";
 import type { LoginInput, RegistrationInput } from "./types";
 
 export function useLogin() {
@@ -12,6 +12,14 @@ export function useLogin() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.auth.session });
     },
+  });
+}
+
+export function useCapabilities() {
+  return useQuery({
+    queryKey: queryKeys.auth.capabilities,
+    queryFn: getCapabilities,
+    retry: false,
   });
 }
 

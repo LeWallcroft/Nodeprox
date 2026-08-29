@@ -146,6 +146,30 @@ export function registerChapterPermissionPlugin(
     },
   );
 
+  app.get(
+    "/chapters/:chapterId/permissions",
+    { preHandler: session },
+    async (request) => {
+      const { chapterId } = parseParams(request);
+      const result = await service.list(requestContext(), chapterId);
+      if ("notFound" in result) throw notFound;
+      if ("denied" in result) throw forbidden;
+      return result.helpers;
+    },
+  );
+
+  app.get(
+    "/chapters/:chapterId/helper-candidates",
+    { preHandler: session },
+    async (request) => {
+      const { chapterId } = parseParams(request);
+      const result = await service.listCandidates(requestContext(), chapterId);
+      if ("notFound" in result) throw notFound;
+      if ("denied" in result) throw forbidden;
+      return result.candidates;
+    },
+  );
+
   app.delete(
     "/chapters/:chapterId/permissions/:userId",
     { preHandler: session },

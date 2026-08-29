@@ -5,6 +5,7 @@ export const PERMISSIONS = {
   SERIES_CREATE: "series.create",
   SERIES_EDIT: "series.edit",
   SERIES_DELETE: "series.delete",
+  SERIES_ASSIGNMENT_MANAGE: "series.assignment.manage",
   CHAPTERS_READ: "chapters.read",
   CHAPTERS_CREATE: "chapters.create",
   CHAPTERS_EDIT: "chapters.edit",

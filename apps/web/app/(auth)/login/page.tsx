@@ -5,6 +5,7 @@ import { useLogin } from "../../../lib/domains/auth/hooks";
 import { errorMessage } from "../../../components/domains/feedback";
 import { ApiError } from "../../../lib/api/types";
 import Link from "next/link";
+import Image from "next/image";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -23,28 +24,27 @@ export default function LoginPage() {
         window.location.assign("/account-pending");
         return;
       }
-      setError(
-        errorMessage(
-          cause,
-          "No se pudo iniciar sesión. Revisa tus credenciales.",
-        ),
-      );
+      setError(loginErrorMessage(cause));
     }
   }
 
   return (
     <main className="grid min-h-screen place-items-center p-page-mobile">
       <section
-        className="w-full max-w-[420px] rounded-2xl border border-border bg-surface p-8 shadow-[0_16px_40px_#16243a12]"
+        className="w-full max-w-[420px] rounded-2xl border border-border bg-surface p-8 shadow-panel"
         aria-labelledby="login-title"
       >
-        <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-          NodeProx
-        </span>
+        <Image
+          src="/branding/nodeprox-logo.png"
+          alt="NodeProx"
+          className="mb-5 h-10 w-auto"
+          width={160}
+          height={40}
+        />
         <h1 id="login-title" className="mb-2 mt-0 text-2xl font-semibold">
           Iniciar sesión
         </h1>
-        <p className="text-muted">Accede al workspace de operaciones.</p>
+        <p className="text-muted">Accede al panel de NodeProx.</p>
         <form className="mt-6 grid gap-3.5" onSubmit={handleSubmit}>
           <label
             className="grid gap-1.5 text-[13px] font-bold text-muted"
@@ -65,7 +65,7 @@ export default function LoginPage() {
             className="grid gap-1.5 text-[13px] font-bold text-muted"
             htmlFor="password"
           >
-            Password
+            Contraseña
             <input
               id="password"
               name="password"
@@ -77,7 +77,7 @@ export default function LoginPage() {
             />
           </label>
           {error ? (
-            <p className="text-[13px] text-[#a52f2f]" role="alert">
+            <p className="text-[13px] text-danger" role="alert">
               {error}
             </p>
           ) : null}
@@ -86,16 +86,28 @@ export default function LoginPage() {
             type="submit"
             disabled={login.isPending}
           >
-            {login.isPending ? "Ingresando..." : "Ingresar"}
+            {login.isPending ? "Ingresando..." : "Iniciar sesión"}
           </button>
         </form>
         <p className="mt-5 text-center text-[13px] text-muted">
-          ¿Aún no tienes cuenta?{" "}
+          ¿No tienes cuenta?{" "}
           <Link className="font-semibold text-primary" href="/register">
-            Solicitar acceso
+            Crear cuenta
           </Link>
         </p>
       </section>
     </main>
   );
+}
+
+function loginErrorMessage(cause: unknown): string {
+  if (cause instanceof ApiError) {
+    if (cause.code === "invalid-credentials" || cause.status === 401)
+      return "Email o contraseña incorrectos.";
+    if (cause.status === 400 || cause.status === 422)
+      return "Revisa el email y la contraseña ingresados.";
+    if (cause.status >= 500)
+      return "El servicio no está disponible temporalmente.";
+  }
+  return errorMessage(cause, "El servicio no está disponible temporalmente.");
 }

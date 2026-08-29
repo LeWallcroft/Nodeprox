@@ -1,0 +1,32 @@
+# Source control and local dependencies
+.git
+.gitignore
+node_modules
+**/node_modules
+.pnpm-store
+
+# Environment files and local secrets (the safe example is explicitly retained)
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Generated artifacts and caches
+**/.next
+**/dist
+**/coverage
+**/playwright-report
+**/test-results
+**/*.tsbuildinfo
+.turbo
+
+# Local runtime data and logs
+.nodeprox-storage
+*.log
+logs
+
+# Local editor and operating-system artifacts
+.vscode
+.idea
+*.swp
+Thumbs.db

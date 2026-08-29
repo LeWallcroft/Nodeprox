@@ -194,7 +194,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
     const registration = await app.inject({
       method: "POST",
       url: "/auth/register",
-      payload: { email, password },
+      payload: { email, discordUsername: "pending-user", password },
     });
     expect(registration.statusCode).toBe(201);
     expect(registration.json()).toMatchObject({
@@ -291,7 +291,11 @@ describe("A1 identity, assignment and chapter numbering", () => {
     await app.inject({
       method: "POST",
       url: "/auth/register",
-      payload: { email: rejectedEmail, password },
+      payload: {
+        email: rejectedEmail,
+        discordUsername: "rejected-user",
+        password,
+      },
     });
     const [rejectedUser] = await database.db
       .select({ id: users.id })

@@ -10,11 +10,13 @@ export function ChapterForm({
   onSubmit,
   submitLabel = "Crear Chapter",
   onCancel,
+  editableNumber = true,
 }: {
   initial?: Partial<ChapterInput>;
   onSubmit: (input: ChapterInput) => Promise<void>;
   submitLabel?: string;
   onCancel?: () => void;
+  editableNumber?: boolean;
 }) {
   const [chapterNumber, setChapterNumber] = useState(
     String(initial?.chapterNumber ?? ""),
@@ -41,23 +43,25 @@ export function ChapterForm({
 
   return (
     <form className="grid gap-3.5" onSubmit={handleSubmit}>
+      {editableNumber ? (
+        <label
+          className="grid gap-1.5 text-[13px] font-medium text-muted"
+          htmlFor="chapter-number"
+        >
+          Número
+          <input
+            id="chapter-number"
+            type="number"
+            min={1}
+            step={1}
+            required
+            value={chapterNumber}
+            onChange={(event) => setChapterNumber(event.target.value)}
+          />
+        </label>
+      ) : null}
       <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
-        htmlFor="chapter-number"
-      >
-        Número
-        <input
-          id="chapter-number"
-          type="number"
-          min={1}
-          step={1}
-          required
-          value={chapterNumber}
-          onChange={(event) => setChapterNumber(event.target.value)}
-        />
-      </label>
-      <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
+        className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="chapter-title"
       >
         Título
@@ -69,7 +73,7 @@ export function ChapterForm({
         />
       </label>
       {error ? (
-        <p className="text-[13px] text-[#a52f2f]" role="alert">
+        <p className="text-[13px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -79,8 +83,9 @@ export function ChapterForm({
         </Button>
         {onCancel ? (
           <button
-            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-semibold text-text"
+            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-medium text-text"
             type="button"
+            disabled={loading}
             onClick={onCancel}
           >
             Cancelar

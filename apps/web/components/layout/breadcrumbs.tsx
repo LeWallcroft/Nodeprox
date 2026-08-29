@@ -19,7 +19,7 @@ export function Breadcrumbs({ items }: { items: BreadcrumbItem[] }) {
             </span>
           )}
           {item !== items.at(-1) ? (
-            <span className="ml-2 text-[#a5b1bd]" aria-hidden="true">
+            <span className="ml-2 text-muted" aria-hidden="true">
               /
             </span>
           ) : null}

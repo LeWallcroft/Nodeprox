@@ -23,6 +23,7 @@ export const users = pgTable(
   {
     id: uuid("id").primaryKey(),
     email: varchar("email", { length: 320 }).notNull(),
+    discordUsername: varchar("discord_username", { length: 64 }),
     passwordHash: text("password_hash").notNull(),
     status: varchar("status", { length: 16 }).notNull(),
     role: userRoleEnum("role").notNull().default("uploader"),

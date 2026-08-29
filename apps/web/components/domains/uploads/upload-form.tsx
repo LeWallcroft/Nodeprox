@@ -1,22 +1,26 @@
 "use client";
 
-import { useState, type ChangeEvent, type FormEvent } from "react";
+import { useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { errorMessage } from "../feedback";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { useUploadChapter } from "../../../lib/domains/uploads/hooks";
 import { isZipFile } from "../../../lib/domains/uploads/utils";
+import { FileArchive, Upload } from "lucide-react";
 
 export function UploadForm({
   seriesId,
   chapterId,
+  onSuccess,
 }: {
   seriesId: string;
   chapterId: string;
+  onSuccess?: () => void;
 }) {
   const mutation = useUploadChapter(seriesId, chapterId);
   const [file, setFile] = useState<File | null>(null);
   const [validation, setValidation] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
@@ -35,29 +39,63 @@ export function UploadForm({
     event.preventDefault();
     if (!file || validation) return;
     await mutation.mutateAsync(file);
+    onSuccess?.();
   }
 
   return (
     <form className="grid gap-3.5" onSubmit={submit}>
-      <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
-        htmlFor="chapter-upload"
+      <input
+        ref={fileInput}
+        className="sr-only"
+        id="chapter-upload"
+        type="file"
+        accept=".zip,application/zip,application/x-zip-compressed"
+        onChange={handleFile}
+      />
+      <button
+        className="grid min-h-36 place-items-center rounded-panel border border-dashed border-border bg-surface-elevated p-5 text-center text-sm text-secondary hover:border-primary hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        type="button"
+        onClick={() => fileInput.current?.click()}
       >
-        Archivo ZIP
-        <input
-          id="chapter-upload"
-          type="file"
-          accept=".zip,application/zip"
-          onChange={handleFile}
-        />
-      </label>
+        {file ? (
+          <span>
+            <FileArchive aria-hidden="true" className="mx-auto mb-2 size-5" />
+            <strong className="block font-medium text-text">{file.name}</strong>
+            <span>
+              {(file.size / 1024 / 1024).toFixed(2)} MB · Haz clic para
+              reemplazar
+            </span>
+          </span>
+        ) : (
+          <span>
+            <Upload aria-hidden="true" className="mx-auto mb-2 size-5" />
+            <strong className="block font-medium text-text">
+              Arrastra tu ZIP aquí
+            </strong>
+            <span>o haz clic para seleccionarlo</span>
+          </span>
+        )}
+      </button>
+      {file ? (
+        <Button
+          variant="secondary"
+          type="button"
+          onClick={() => {
+            setFile(null);
+            setValidation(null);
+            if (fileInput.current) fileInput.current.value = "";
+          }}
+        >
+          Quitar archivo
+        </Button>
+      ) : null}
       {validation ? (
-        <p className="text-[13px] text-[#a52f2f]" role="alert">
+        <p className="text-[13px] text-danger" role="alert">
           {validation}
         </p>
       ) : null}
       {mutation.isError ? (
-        <p className="text-[13px] text-[#a52f2f]" role="alert">
+        <p className="text-[13px] text-danger" role="alert">
           {errorMessage(mutation.error)}
         </p>
       ) : null}
@@ -71,7 +109,7 @@ export function UploadForm({
         </div>
       ) : null}
       {mutation.isSuccess ? (
-        <p className="text-[13px] text-[#187344]" role="status">
+        <p className="text-[13px] text-success" role="status">
           Upload recibido. El procesamiento continuará en segundo plano.
         </p>
       ) : null}

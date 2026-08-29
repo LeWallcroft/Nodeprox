@@ -1,15 +1,22 @@
 import Link from "next/link";
-import { ACCOUNT_PENDING_MESSAGE } from "../../../lib/domains/auth/registration";
+import Image from "next/image";
 
 export default function AccountPendingPage() {
   return (
     <main className="grid min-h-screen place-items-center p-page-mobile">
-      <section className="w-full max-w-[520px] rounded-2xl border border-border bg-surface p-8 text-center shadow-[0_16px_40px_#16243a12]">
-        <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
-          NodeProx
-        </span>
+      <section className="w-full max-w-[520px] rounded-2xl border border-border bg-surface p-8 text-center shadow-panel">
+        <Image
+          src="/branding/nodeprox-logo.png"
+          alt="NodeProx"
+          className="mx-auto mb-5 h-10 w-auto"
+          width={160}
+          height={40}
+        />
         <h1 className="mb-2 mt-2 text-2xl font-semibold">Cuenta pendiente</h1>
-        <p className="text-muted">{ACCOUNT_PENDING_MESSAGE}</p>
+        <p className="text-muted">
+          Tu registro se completó correctamente. Un administrador debe aprobar
+          tu cuenta antes de que puedas acceder a NodeProx.
+        </p>
         <Link
           className="mt-6 inline-flex min-h-control items-center justify-center rounded-lg bg-primary px-4 font-semibold text-white"
           href="/login"

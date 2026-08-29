@@ -7,6 +7,7 @@ import {
   isDelegableChapterPermission,
   type DelegableChapterPermission,
 } from "../../domain/chapter-permission.policy.js";
+import { evaluateChapterDelete } from "../../domain/chapter-delete.policy.js";
 import type { Permission } from "../../../authorization/domain/permissions.js";
 import type {
   ChapterPermissionRepositoryPort,
@@ -151,6 +152,19 @@ export class ChapterPermissionService {
     try {
       const chapter = await this.chapters.findById(input.chapterId);
       if (!chapter) return { allowed: false, reason: "not-found" };
+      if (
+        input.permission === PERMISSIONS.CHAPTERS_HELPER_GRANT ||
+        input.permission === PERMISSIONS.CHAPTERS_HELPER_REVOKE
+      ) {
+        const manager = await this.resolveManager(
+          input.context,
+          input.chapterId,
+          input.permission,
+        );
+        return manager.allowed
+          ? { allowed: true, reason: "role", seriesId: manager.seriesId }
+          : { allowed: false, reason: manager.reason };
+      }
       if (!isDelegableChapterPermission(input.permission))
         return { allowed: false, reason: "denied" };
       const roleDecision = await this.authorization.authorize(
@@ -212,12 +226,141 @@ export class ChapterPermissionService {
     }
   }
 
+  async projectCapabilities(context: AuthorizationContext, chapterId: string) {
+    const capabilities: string[] = [];
+    for (const permission of [
+      PERMISSIONS.CHAPTERS_READ,
+      PERMISSIONS.CHAPTERS_EDIT,
+      PERMISSIONS.CHAPTERS_REPLACE,
+      PERMISSIONS.IMAGES_UPLOAD,
+      PERMISSIONS.IMAGES_REPLACE,
+      PERMISSIONS.IMAGES_REORDER,
+      PERMISSIONS.IMAGES_DELETE,
+      PERMISSIONS.CHAPTERS_HELPER_GRANT,
+      PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+    ]) {
+      const result = await this.check({ context, chapterId, permission });
+      if (result.allowed) capabilities.push(permission);
+    }
+
+    const chapter = await this.chapters.findById(chapterId);
+    if (chapter) {
+      const decision = await this.authorization.authorize(
+        context,
+        PERMISSIONS.CHAPTERS_DELETE,
+      );
+      if (decision.allowed) {
+        const isOwner = Boolean(
+          decision.role === "gestor" &&
+            this.chapters.isSeriesOwner &&
+            (await this.chapters.isSeriesOwner(
+              chapter.seriesId,
+              context.userId,
+            )),
+        );
+        const isAssigned = Boolean(
+          decision.role === "uploader" &&
+            this.chapters.isAssigned &&
+            (await this.chapters.isAssigned(chapter.seriesId, context.userId)),
+        );
+        const deletePolicy = evaluateChapterDelete({
+          actorRole: decision.role,
+          permission: PERMISSIONS.CHAPTERS_DELETE,
+          assigned: isAssigned,
+          seriesOwner: isOwner,
+        });
+        if (deletePolicy.allowed)
+          capabilities.push(PERMISSIONS.CHAPTERS_DELETE);
+      }
+    }
+    return { capabilities };
+  }
+
+  async canReadContext(context: AuthorizationContext, chapterId: string) {
+    const read = await this.check({
+      context,
+      chapterId,
+      permission: PERMISSIONS.CHAPTERS_READ,
+    });
+    if (read.allowed) return read;
+    if (!context.userId || !context.sessionId) return read;
+    const chapter = await this.chapters.findById(chapterId);
+    if (!chapter)
+      return { allowed: false as const, reason: "not-found" as const };
+    const hasOperationalPermission =
+      await this.permissions.hasAnyActivePermission({
+        chapterId,
+        helperUserId: context.userId,
+      });
+    return hasOperationalPermission
+      ? {
+          allowed: true as const,
+          reason: "helper" as const,
+          seriesId: chapter.seriesId,
+        }
+      : read;
+  }
+
   async list(
+    context: AuthorizationContext,
     chapterId: string,
   ): Promise<
-    Awaited<ReturnType<ChapterPermissionRepositoryPort["listActive"]>>
+    | {
+        helpers: Array<{
+          userId: string;
+          email: string;
+          permissions: string[];
+          grantedAt: Date;
+        }>;
+      }
+    | { denied: true }
+    | { notFound: true }
   > {
-    return this.permissions.listActive(chapterId);
+    const grant = await this.check({
+      context,
+      chapterId,
+      permission: PERMISSIONS.CHAPTERS_HELPER_GRANT,
+    });
+    const revoke = await this.check({
+      context,
+      chapterId,
+      permission: PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+    });
+    if (grant.reason === "not-found" && revoke.reason === "not-found")
+      return { notFound: true };
+    if (!grant.allowed && !revoke.allowed) return { denied: true };
+    const records = await this.permissions.listActiveWithUsers(chapterId);
+    const grouped = new Map<
+      string,
+      { userId: string; email: string; permissions: string[]; grantedAt: Date }
+    >();
+    for (const record of records) {
+      const helper = grouped.get(record.helperUserId) ?? {
+        userId: record.helperUserId,
+        email: record.email,
+        permissions: [],
+        grantedAt: record.grantedAt,
+      };
+      helper.permissions.push(record.permission);
+      grouped.set(record.helperUserId, helper);
+    }
+    return { helpers: [...grouped.values()] };
+  }
+
+  async listCandidates(context: AuthorizationContext, chapterId: string) {
+    const grant = await this.check({
+      context,
+      chapterId,
+      permission: PERMISSIONS.CHAPTERS_HELPER_GRANT,
+    });
+    if (grant.reason === "not-found") return { notFound: true as const };
+    if (!grant.allowed) return { denied: true as const };
+    return {
+      candidates: await this.permissions.listEligibleCandidates(
+        chapterId,
+        new Date(),
+      ),
+    };
   }
 
   private async resolveManager(

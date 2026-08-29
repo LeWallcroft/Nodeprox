@@ -1,0 +1,6 @@
+app.nodeprox.org {
+	encode zstd gzip
+
+	# Next.js remains the same-origin API boundary and proxies /api/* to api.
+	reverse_proxy web:3000
+}

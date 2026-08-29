@@ -16,6 +16,7 @@ export const series = pgTable(
     title: varchar("title", { length: 200 }).notNull(),
     slug: varchar("slug", { length: 220 }).notNull(),
     description: text("description"),
+    coverUrl: varchar("cover_url", { length: 2048 }),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),
