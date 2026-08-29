@@ -1,116 +1,222 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
-import { PageHeader } from "../../../components/layout/page-header";
-import { SeriesForm } from "../../../components/domains/series/series-form";
+import { useMemo, useState } from "react";
 import { errorMessage } from "../../../components/domains/feedback";
+import { SeriesDetailPanel } from "../../../components/domains/series/series-detail-panel";
+import { SeriesForm } from "../../../components/domains/series/series-form";
+import { SeriesList } from "../../../components/domains/series/series-list";
+import { PageHeader } from "../../../components/layout/page-header";
 import { Button } from "../../../components/ui/button";
-import { DataTable } from "../../../components/ui/data-table";
+import { Card } from "../../../components/ui/card";
 import { EmptyState } from "../../../components/ui/empty-state";
 import { ErrorState } from "../../../components/ui/error-state";
-import { Skeleton } from "../../../components/ui/skeleton";
+import { LoadingState } from "../../../components/ui/loading-state";
+import { PageSection } from "../../../components/ui/page-section";
+import { SearchInput } from "../../../components/ui/search-input";
+import { hasCapability } from "../../../lib/auth/visibility";
+import { useCapabilities } from "../../../lib/domains/auth/hooks";
 import {
   useCreateSeries,
+  useAssignSeriesUploader,
+  useClearSeriesUploader,
+  useDeleteSeries,
+  useSeries,
+  useSeriesCapabilities,
   useSeriesList,
+  useSeriesUploaderCandidates,
+  useUpdateSeries,
 } from "../../../lib/domains/series/hooks";
 import type { SeriesInput } from "../../../lib/domains/series/types";
+import {
+  filterSeries,
+  toSeriesListItem,
+} from "../../../lib/domains/series/view-model";
 
 export default function SeriesPage() {
-  const query = useSeriesList();
+  const listQuery = useSeriesList();
+  const globalCapabilities = useCapabilities();
   const create = useCreateSeries();
+  const remove = useDeleteSeries();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
   const [creating, setCreating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const selectedQuery = useSeries(selectedId ?? "");
+  const selectedCapabilities = useSeriesCapabilities(selectedId ?? "");
+  const update = useUpdateSeries(selectedId ?? "");
+  const canManageAssignment = hasCapability(
+    selectedCapabilities.data?.capabilities,
+    "series.assignment.manage",
+  );
+  const uploaderCandidates = useSeriesUploaderCandidates(
+    selectedId ?? "",
+    canManageAssignment,
+  );
+  const assignUploader = useAssignSeriesUploader(selectedId ?? "");
+  const clearUploader = useClearSeriesUploader(selectedId ?? "");
+
+  const items = useMemo(
+    () => filterSeries(listQuery.data ?? [], query).map(toSeriesListItem),
+    [listQuery.data, query],
+  );
+  const canCreate = hasCapability(
+    globalCapabilities.data?.capabilities,
+    "series.create",
+  );
 
   async function handleCreate(input: SeriesInput) {
     await create.mutateAsync(input);
     setCreating(false);
   }
 
+  async function handleDelete() {
+    if (!selectedId) return;
+    setActionError(null);
+    try {
+      await remove.mutateAsync(selectedId);
+      setSelectedId(null);
+    } catch (cause) {
+      setActionError(errorMessage(cause));
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Series"
-        description="Administra las series disponibles para tu workspace."
+        description="Gestiona las series de la plataforma."
         breadcrumbs={[
           { label: "Dashboard", href: "/" },
           { label: "Series", current: true },
         ]}
         actions={
-          <Button type="button" onClick={() => setCreating((value) => !value)}>
-            {creating ? "Cerrar" : "Nueva Series"}
-          </Button>
+          canCreate ? (
+            <Button
+              type="button"
+              onClick={() => setCreating((value) => !value)}
+            >
+              {creating ? "Cerrar" : "Nueva serie"}
+            </Button>
+          ) : undefined
         }
       />
       {creating ? (
-        <section
-          className="mb-section rounded-xl border border-border bg-surface p-5"
-          aria-labelledby="create-series-title"
-        >
-          <h2
-            id="create-series-title"
-            className="mb-4 mt-0 text-xl font-semibold"
-          >
-            Crear Series
-          </h2>
-          <SeriesForm
-            onSubmit={handleCreate}
-            onCancel={() => setCreating(false)}
+        <PageSection>
+          <Card aria-labelledby="create-series-title">
+            <h2
+              id="create-series-title"
+              className="mb-4 mt-0 text-xl font-semibold"
+            >
+              Nueva serie
+            </h2>
+            <SeriesForm
+              onSubmit={handleCreate}
+              onCancel={() => setCreating(false)}
+            />
+          </Card>
+        </PageSection>
+      ) : null}
+      <PageSection>
+        <Card className="p-3">
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="Buscar por nombre o slug"
           />
-        </section>
+        </Card>
+      </PageSection>
+      {actionError ? (
+        <p className="mb-section text-sm text-danger" role="alert">
+          {actionError}
+        </p>
       ) : null}
-      {query.isPending ? (
-        <section className="grid gap-3 rounded-xl border border-border bg-surface p-5">
-          <Skeleton />
-          <Skeleton />
-          <Skeleton />
-        </section>
-      ) : null}
-      {query.isError ? (
+      {listQuery.isPending ? <LoadingState label="Cargando Series" /> : null}
+      {listQuery.isError ? (
         <ErrorState
           title="No se pudieron cargar las Series"
-          description={errorMessage(query.error)}
+          description={errorMessage(listQuery.error)}
           action={
-            <Button type="button" onClick={() => void query.refetch()}>
+            <Button type="button" onClick={() => void listQuery.refetch()}>
               Reintentar
             </Button>
           }
         />
       ) : null}
-      {query.isSuccess && query.data.length === 0 ? (
+      {listQuery.isSuccess && listQuery.data.length === 0 ? (
         <EmptyState
           title="No hay Series todavía"
-          description="Crea la primera Series para comenzar."
+          description="Crea la primera Series cuando tengas autorización para hacerlo."
         />
       ) : null}
-      {query.isSuccess && query.data.length > 0 ? (
-        <DataTable label="Series">
-          <thead>
-            <tr className="border-b border-border text-left text-sm text-muted">
-              <th className="p-3">Título</th>
-              <th className="p-3">Slug</th>
-              <th className="p-3">Descripción</th>
-            </tr>
-          </thead>
-          <tbody>
-            {query.data.map((series) => (
-              <tr
-                className="border-b border-border last:border-0"
-                key={series.id}
-              >
-                <td className="p-3 font-semibold">
-                  <Link
-                    className="text-primary underline-offset-4 hover:underline"
-                    href={`/series/${series.id}`}
+      {listQuery.isSuccess && listQuery.data.length > 0 ? (
+        <section className="grid items-start gap-card xl:grid-cols-[minmax(0,3fr)_minmax(320px,1fr)]">
+          <div>
+            {items.length ? (
+              <SeriesList
+                items={items}
+                selectedId={selectedId}
+                onSelect={(seriesId) => {
+                  setActionError(null);
+                  setSelectedId(seriesId);
+                }}
+              />
+            ) : (
+              <EmptyState
+                title="Sin coincidencias"
+                description="No hay Series que coincidan con la búsqueda actual."
+              />
+            )}
+          </div>
+          <aside aria-label="Detalle de la Series">
+            {selectedId && selectedQuery.isPending ? (
+              <LoadingState label="Cargando detalle de la Series" />
+            ) : null}
+            {selectedId && selectedQuery.isError ? (
+              <ErrorState
+                title="No se pudo cargar el detalle"
+                description={errorMessage(selectedQuery.error)}
+                action={
+                  <Button
+                    type="button"
+                    onClick={() => void selectedQuery.refetch()}
                   >
-                    {series.title}
-                  </Link>
-                </td>
-                <td className="p-3 text-muted">{series.slug}</td>
-                <td className="p-3 text-muted">{series.description || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </DataTable>
+                    Reintentar
+                  </Button>
+                }
+              />
+            ) : null}
+            {!selectedId || selectedQuery.isSuccess ? (
+              <SeriesDetailPanel
+                series={selectedQuery.data ?? null}
+                capabilities={selectedCapabilities.data?.capabilities}
+                onClose={() => setSelectedId(null)}
+                onUpdate={async (input) => {
+                  if (!selectedId) return;
+                  await update.mutateAsync(input);
+                }}
+                onDelete={handleDelete}
+                candidates={uploaderCandidates.data}
+                candidatesLoading={uploaderCandidates.isPending}
+                candidatesError={
+                  uploaderCandidates.error instanceof Error
+                    ? uploaderCandidates.error
+                    : null
+                }
+                assignmentPending={
+                  assignUploader.isPending || clearUploader.isPending
+                }
+                updatePending={update.isPending}
+                deletePending={remove.isPending}
+                onAssignUploader={async (uploaderId) => {
+                  await assignUploader.mutateAsync(uploaderId);
+                }}
+                onClearUploader={async () => {
+                  await clearUploader.mutateAsync();
+                }}
+              />
+            ) : null}
+          </aside>
+        </section>
       ) : null}
     </>
   );

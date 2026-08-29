@@ -1,4 +1,15 @@
-import { and, asc, count, eq, isNull, ne, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterPermissions,
@@ -6,6 +17,7 @@ import {
   chapters,
   series,
   seriesAssignments,
+  users,
 } from "../../../../../../../../database/schema/index.js";
 import {
   lockCurrentAuthorization,
@@ -34,6 +46,8 @@ const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   title: row.title,
   slug: row.slug,
   description: row.description,
+  coverUrl: row.coverUrl,
+  principalUploader: null,
   createdBy: row.createdBy,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -60,6 +74,7 @@ export class DrizzleSeriesRepository
     title: string;
     slug: string;
     description?: string | null | undefined;
+    coverUrl?: string | null | undefined;
     createdBy: string;
   }) {
     const [row] = await this.db.insert(series).values(input).returning();
@@ -78,6 +93,45 @@ export class DrizzleSeriesRepository
   async listAll() {
     const rows = await this.db.select().from(series);
     return rows.map(toSeries);
+  }
+
+  async listWithHelperAccess(userId: string) {
+    const rows = await this.db
+      .selectDistinct({ series })
+      .from(series)
+      .innerJoin(chapters, eq(chapters.seriesId, series.id))
+      .innerJoin(
+        chapterPermissions,
+        eq(chapterPermissions.chapterId, chapters.id),
+      )
+      .where(
+        and(
+          eq(chapterPermissions.helperUserId, userId),
+          isNull(chapterPermissions.revokedAt),
+          ne(chapters.status, "deleting"),
+        ),
+      );
+    return rows.map((row) => toSeries(row.series));
+  }
+
+  async hasHelperAccess(seriesId: string, userId: string) {
+    const [row] = await this.db
+      .select({ id: chapters.id })
+      .from(chapters)
+      .innerJoin(
+        chapterPermissions,
+        eq(chapterPermissions.chapterId, chapters.id),
+      )
+      .where(
+        and(
+          eq(chapters.seriesId, seriesId),
+          eq(chapterPermissions.helperUserId, userId),
+          isNull(chapterPermissions.revokedAt),
+          ne(chapters.status, "deleting"),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
   }
 
   async listAssignedSeriesIds(uploaderId: string) {
@@ -124,6 +178,39 @@ export class DrizzleSeriesRepository
     await this.db
       .delete(seriesAssignments)
       .where(eq(seriesAssignments.seriesId, seriesId));
+  }
+
+  async listPrincipalUploaders(seriesIds: readonly string[]) {
+    if (!seriesIds.length) return new Map();
+    const rows = await this.db
+      .select({
+        seriesId: seriesAssignments.seriesId,
+        id: users.id,
+        email: users.email,
+        discordUsername: users.discordUsername,
+      })
+      .from(seriesAssignments)
+      .innerJoin(users, eq(users.id, seriesAssignments.uploaderId))
+      .where(inArray(seriesAssignments.seriesId, [...seriesIds]));
+    return new Map(
+      rows.map((row) => [
+        row.seriesId,
+        { id: row.id, email: row.email, discordUsername: row.discordUsername },
+      ]),
+    );
+  }
+
+  async listActiveUploaderCandidates() {
+    const rows = await this.db
+      .select({
+        id: users.id,
+        email: users.email,
+        discordUsername: users.discordUsername,
+      })
+      .from(users)
+      .where(and(eq(users.status, "active"), eq(users.role, "uploader")))
+      .orderBy(asc(users.email));
+    return rows;
   }
 
   async updateIfAuthorized(
@@ -183,7 +270,7 @@ export class DrizzleSeriesRepository
         tx,
         actor: input.actor,
         seriesId: input.seriesId,
-        permission: PERMISSIONS.SERIES_EDIT,
+        permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
         additionalUserIds: [input.uploaderId],
       });
       if (context.outcome !== "authorized") return context;
@@ -219,7 +306,7 @@ export class DrizzleSeriesRepository
         tx,
         actor: input.actor,
         seriesId: input.seriesId,
-        permission: PERMISSIONS.SERIES_EDIT,
+        permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
       });
       if (context.outcome !== "authorized") return context;
       await tx
@@ -293,6 +380,7 @@ export class DrizzleSeriesRepository
       title?: string | undefined;
       slug?: string | undefined;
       description?: string | null | undefined;
+      coverUrl?: string | null | undefined;
     },
   ) {
     const [row] = await this.db
@@ -349,6 +437,96 @@ export class DrizzleChapterCoreRepository
       )
       .orderBy(asc(chapters.chapterNumber));
     return rows.map(toChapter);
+  }
+
+  async listBySeriesVisibleForActor(input: {
+    seriesId: string;
+    userId: string;
+    role: "admin" | "gestor" | "uploader";
+  }) {
+    if (
+      input.role !== "uploader" ||
+      (await this.isAssigned(input.seriesId, input.userId))
+    )
+      return this.listBySeries(input.seriesId);
+    const rows = await this.db
+      .selectDistinct({ chapter: chapters })
+      .from(chapters)
+      .innerJoin(
+        chapterPermissions,
+        eq(chapterPermissions.chapterId, chapters.id),
+      )
+      .where(
+        and(
+          eq(chapters.seriesId, input.seriesId),
+          eq(chapterPermissions.helperUserId, input.userId),
+          isNull(chapterPermissions.revokedAt),
+          ne(chapters.status, "deleting"),
+        ),
+      )
+      .orderBy(asc(chapters.chapterNumber));
+    return rows.map((row) => toChapter(row.chapter));
+  }
+
+  async listVisibleForActor(input: {
+    userId: string;
+    role: "admin" | "gestor" | "uploader";
+  }) {
+    const base = ne(chapters.status, "deleting");
+    let where = base;
+    if (input.role === "gestor") {
+      const ownerCondition = and(base, eq(series.createdBy, input.userId));
+      if (!ownerCondition) return [];
+      where = ownerCondition;
+    } else if (input.role === "uploader") {
+      const assigned = await this.db
+        .select({ seriesId: seriesAssignments.seriesId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.uploaderId, input.userId));
+      const delegated = await this.db
+        .select({ chapterId: chapterPermissions.chapterId })
+        .from(chapterPermissions)
+        .where(
+          and(
+            eq(chapterPermissions.helperUserId, input.userId),
+            isNull(chapterPermissions.revokedAt),
+          ),
+        );
+      const conditions = [];
+      if (assigned.length)
+        conditions.push(
+          inArray(
+            chapters.seriesId,
+            assigned.map((row) => row.seriesId),
+          ),
+        );
+      if (delegated.length)
+        conditions.push(
+          inArray(
+            chapters.id,
+            delegated.map((row) => row.chapterId),
+          ),
+        );
+      if (!conditions.length) return [];
+      const visibilityCondition = and(base, or(...conditions));
+      if (!visibilityCondition) return [];
+      where = visibilityCondition;
+    }
+    const rows = await this.db
+      .select({ chapter: chapters, series: series })
+      .from(chapters)
+      .innerJoin(series, eq(series.id, chapters.seriesId))
+      .where(where)
+      .orderBy(desc(chapters.updatedAt));
+    return rows.map((row) => ({
+      ...toChapter(row.chapter),
+      series: {
+        id: row.series.id,
+        title: row.series.title,
+        slug: row.series.slug,
+        coverUrl: row.series.coverUrl,
+      },
+    }));
   }
 
   async findById(id: string) {

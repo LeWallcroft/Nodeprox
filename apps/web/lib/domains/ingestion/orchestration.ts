@@ -2,6 +2,12 @@ import type { MediaWarning } from "@nodeprox/types";
 
 export const MAX_DIRECT_UPLOAD_CONCURRENCY = 3;
 
+export function safeBulkUploadConcurrency(value?: number): number {
+  if (value === undefined || !Number.isInteger(value))
+    return MAX_DIRECT_UPLOAD_CONCURRENCY;
+  return Math.min(5, Math.max(1, value));
+}
+
 export async function runPool(
   jobs: readonly (() => Promise<void>)[],
   concurrency = MAX_DIRECT_UPLOAD_CONCURRENCY,

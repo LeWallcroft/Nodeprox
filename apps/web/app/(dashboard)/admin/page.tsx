@@ -6,7 +6,7 @@ export default function AdminPlaceholderPage() {
     <>
       <PageHeader
         title="Administración"
-        description="Placeholder visual sin autorización funcional."
+        description="Las operaciones administrativas permanecen protegidas por el backend."
         breadcrumbs={[
           { label: "Dashboard", href: "/" },
           { label: "Administración", current: true },
@@ -14,7 +14,7 @@ export default function AdminPlaceholderPage() {
       />
       <EmptyState
         title="Administración aún no disponible"
-        description="RBAC y permisos están fuera del alcance de M1."
+        description="No tienes operaciones administrativas disponibles en esta vista."
       />
     </>
   );

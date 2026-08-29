@@ -8,6 +8,7 @@ export type UserStatus =
 export interface UserRecord {
   id: string;
   email: string;
+  discordUsername?: string | null;
   passwordHash: string;
   status: UserStatus;
   role?: "admin" | "gestor" | "uploader";

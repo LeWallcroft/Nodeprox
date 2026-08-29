@@ -375,6 +375,24 @@ export class DrizzleChapterRepository
     return row !== null;
   }
 
+  async hasAnyActivePermission(input: {
+    chapterId: string;
+    helperUserId: string;
+  }): Promise<boolean> {
+    const [row] = await this.db
+      .select({ id: chapterPermissions.id })
+      .from(chapterPermissions)
+      .where(
+        and(
+          eq(chapterPermissions.chapterId, input.chapterId),
+          eq(chapterPermissions.helperUserId, input.helperUserId),
+          isNull(chapterPermissions.revokedAt),
+        ),
+      )
+      .limit(1);
+    return Boolean(row);
+  }
+
   async listActive(chapterId: string): Promise<ChapterPermissionRecord[]> {
     const rows = await this.db
       .select()
@@ -386,6 +404,64 @@ export class DrizzleChapterRepository
         ),
       );
     return rows.map(toPermission);
+  }
+
+  async listActiveWithUsers(chapterId: string) {
+    const rows = await this.db
+      .select({
+        permission: chapterPermissions,
+        email: users.email,
+        discordUsername: users.discordUsername,
+      })
+      .from(chapterPermissions)
+      .innerJoin(users, eq(users.id, chapterPermissions.helperUserId))
+      .where(
+        and(
+          eq(chapterPermissions.chapterId, chapterId),
+          isNull(chapterPermissions.revokedAt),
+        ),
+      );
+    return rows.map((row) => ({
+      ...toPermission(row.permission),
+      email: row.email,
+      discordUsername: row.discordUsername,
+    }));
+  }
+
+  async listEligibleCandidates(chapterId: string, now: Date) {
+    const chapter = await this.findById(chapterId);
+    if (!chapter) return [];
+    const active = await this.db
+      .select({
+        id: users.id,
+        email: users.email,
+        discordUsername: users.discordUsername,
+      })
+      .from(users)
+      .where(and(eq(users.status, "active"), eq(users.role, "uploader")));
+    const granted = await this.db
+      .select({ helperUserId: chapterPermissions.helperUserId })
+      .from(chapterPermissions)
+      .where(
+        and(
+          eq(chapterPermissions.chapterId, chapterId),
+          isNull(chapterPermissions.revokedAt),
+        ),
+      );
+    const cooldowns = await this.db
+      .select({ helperUserId: helperSeriesCooldowns.helperUserId })
+      .from(helperSeriesCooldowns)
+      .where(
+        and(
+          eq(helperSeriesCooldowns.seriesId, chapter.seriesId),
+          gt(helperSeriesCooldowns.expiresAt, now),
+        ),
+      );
+    const unavailable = new Set([
+      ...granted.map((row) => row.helperUserId),
+      ...cooldowns.map((row) => row.helperUserId),
+    ]);
+    return active.filter((user) => !unavailable.has(user.id));
   }
 
   async append(input: {

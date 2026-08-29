@@ -8,7 +8,7 @@ export function ProgressBar({
   const boundedValue = Math.min(100, Math.max(0, value));
   return (
     <div
-      className="h-2 overflow-hidden rounded-full bg-[#e7ebf0]"
+      className="h-2 overflow-hidden rounded-full bg-surface-elevated"
       role="progressbar"
       aria-label={label}
       aria-valuemin={0}

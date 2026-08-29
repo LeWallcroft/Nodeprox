@@ -40,7 +40,7 @@ function CopyUrlButton({ url }: { url: string }) {
         {copied ? "Copiado" : "Copiar URL"}
       </Button>
       {failed ? (
-        <span className="text-xs text-[#a52f2f]" role="alert">
+        <span className="text-xs text-danger" role="alert">
           No se pudo copiar la URL.
         </span>
       ) : null}
@@ -194,7 +194,7 @@ export function ChapterPublicationSection({
             Copiar todas las URLs
           </Button>
           {copyFailed ? (
-            <span className="text-xs text-[#a52f2f]" role="alert">
+            <span className="text-xs text-danger" role="alert">
               No se pudieron copiar las URLs.
             </span>
           ) : null}

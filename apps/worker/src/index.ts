@@ -8,6 +8,8 @@ import {
 } from "@nodeprox/config";
 import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
 import { createDatabase } from "../../../database/client.js";
+import { systemConfig } from "../../../database/schema/index.js";
+import { inArray } from "drizzle-orm";
 import { ChapterProcessingService } from "./processing/application/chapter-processing.service.js";
 import { UnzipperExtractor } from "./processing/infrastructure/zip/unzipper.extractor.js";
 import { DrizzleProcessingRepository } from "./processing/infrastructure/persistence/drizzle/processing.repository.js";
@@ -41,13 +43,29 @@ const worker = new Worker(
       await deletion.execute(job.data);
       return;
     }
+    const warningRows = await database.db
+      .select({ key: systemConfig.key, value: systemConfig.value })
+      .from(systemConfig)
+      .where(
+        inArray(systemConfig.key, [
+          "upload_warning_image_size_mb",
+          "upload_warning_width_px",
+          "upload_warning_height_px",
+        ]),
+      );
+    const warnings = new Map(
+      warningRows.flatMap((row) =>
+        typeof row.value === "number" ? [[row.key, row.value] as const] : [],
+      ),
+    );
     const extractor = new UnzipperExtractor({
       maxEntries: processing.PROCESSING_MAX_ENTRIES,
       maxTotalBytes: processing.PROCESSING_MAX_TOTAL_SIZE_BYTES,
       maxImageBytes: processing.PROCESSING_MAX_IMAGE_SIZE_BYTES,
-      warnImageBytes: processing.MEDIA_WARN_IMAGE_SIZE_BYTES,
-      warnWidthPx: processing.MEDIA_WARN_WIDTH_PX,
-      warnHeightPx: processing.MEDIA_WARN_HEIGHT_PX,
+      warnImageBytes:
+        (warnings.get("upload_warning_image_size_mb") ?? 8) * 1024 * 1024,
+      warnWidthPx: warnings.get("upload_warning_width_px") ?? 4000,
+      warnHeightPx: warnings.get("upload_warning_height_px") ?? 12000,
     });
     const finalAttempt = job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1);
     await new ChapterProcessingService(

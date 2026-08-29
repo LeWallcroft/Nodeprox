@@ -9,6 +9,7 @@ export interface IdentityUserRepositoryPort {
   create(input: {
     id: string;
     email: string;
+    discordUsername?: string | null;
     passwordHash: string;
     status: UserStatus;
     role: IdentityRole;

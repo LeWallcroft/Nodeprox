@@ -25,13 +25,20 @@ const unauthorized = () =>
 
 export type PublicUserRecord = Pick<
   UserRecord,
-  "id" | "email" | "status" | "role" | "createdAt" | "updatedAt"
+  | "id"
+  | "email"
+  | "discordUsername"
+  | "status"
+  | "role"
+  | "createdAt"
+  | "updatedAt"
 >;
 
 function publicUser(user: UserRecord): PublicUserRecord {
   return {
     id: user.id,
     email: user.email,
+    discordUsername: user.discordUsername ?? null,
     status: user.status,
     ...(user.role ? { role: user.role } : {}),
     createdAt: user.createdAt,
@@ -48,11 +55,13 @@ export class IdentityService {
 
   async register(input: {
     email: string;
+    discordUsername?: string;
     password: string;
   }): Promise<PublicUserRecord> {
     const user = await this.users.create({
       id: randomUUID(),
       email: normalizeEmail(input.email),
+      discordUsername: input.discordUsername?.trim() || null,
       passwordHash: await this.passwords.hash(input.password),
       status: "pending",
       role: "uploader",

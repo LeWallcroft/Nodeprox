@@ -13,12 +13,14 @@ export function AppShell({
   capabilities: readonly string[];
 }) {
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-dvh overflow-hidden bg-background">
       <Sidebar capabilities={capabilities} />
-      <div className="min-w-0 flex-1">
+      <div className="flex h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <Topbar user={user} />
-        <main className="mx-auto w-full max-w-content p-page max-[640px]:p-page-mobile">
-          {children}
+        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+          <div className="mx-auto w-full max-w-content p-page max-[767px]:p-page-mobile">
+            {children}
+          </div>
         </main>
       </div>
     </div>

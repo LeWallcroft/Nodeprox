@@ -15,15 +15,18 @@ import { Skeleton } from "../../../../components/ui/skeleton";
 import { StatusBadge } from "../../../../components/ui/status-badge";
 import {
   useChapter,
+  useChapterCapabilities,
   useDeleteChapter,
   useUpdateChapter,
 } from "../../../../lib/domains/chapters/hooks";
+import { hasCapability } from "../../../../lib/auth/visibility";
 
 export default function ChapterDetailPage() {
   const params = useParams<{ chapterId: string }>();
   const router = useRouter();
   const chapterId = params.chapterId;
   const query = useChapter(chapterId);
+  const capabilitiesQuery = useChapterCapabilities(chapterId);
   const [editing, setEditing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const chapter = query.data;
@@ -58,6 +61,18 @@ export default function ChapterDetailPage() {
       />
     );
   const currentChapter = chapter;
+  const canEdit = hasCapability(
+    capabilitiesQuery.data?.capabilities,
+    "chapters.edit",
+  );
+  const canDelete = hasCapability(
+    capabilitiesQuery.data?.capabilities,
+    "chapters.delete",
+  );
+  const canUpload = hasCapability(
+    capabilitiesQuery.data?.capabilities,
+    "images.upload",
+  );
 
   async function deleteCurrent() {
     if (!window.confirm("¿Eliminar este Chapter?")) return;
@@ -84,23 +99,34 @@ export default function ChapterDetailPage() {
           },
           { label: `Chapter ${currentChapter.chapterNumber}`, current: true },
         ]}
+        back={{
+          label: "Volver a Chapters",
+          href: `/series/${currentChapter.seriesId}/chapters`,
+        }}
         actions={
           <div className="flex gap-2">
-            <Button type="button" onClick={() => setEditing((value) => !value)}>
-              {editing ? "Cerrar edición" : "Editar"}
-            </Button>
-            <button
-              className="inline-flex min-h-control items-center justify-center rounded-lg border border-[#a52f2f] bg-surface px-3.5 font-semibold text-[#a52f2f]"
-              type="button"
-              onClick={() => void deleteCurrent()}
-            >
-              Eliminar
-            </button>
+            {canEdit ? (
+              <Button
+                type="button"
+                onClick={() => setEditing((value) => !value)}
+              >
+                {editing ? "Cerrar edición" : "Editar"}
+              </Button>
+            ) : null}
+            {canDelete ? (
+              <button
+                className="inline-flex min-h-control items-center justify-center rounded-control border border-danger/50 bg-danger-soft px-3.5 font-semibold text-danger"
+                type="button"
+                onClick={() => void deleteCurrent()}
+              >
+                Eliminar
+              </button>
+            ) : null}
           </div>
         }
       />
       {actionError ? (
-        <p className="mb-section text-[13px] text-[#a52f2f]" role="alert">
+        <p className="mb-section text-[13px] text-danger" role="alert">
           {actionError}
         </p>
       ) : null}
@@ -109,6 +135,7 @@ export default function ChapterDetailPage() {
           <h2 className="mb-4 mt-0 text-xl font-semibold">Editar Chapter</h2>
           <ChapterForm
             initial={currentChapter}
+            editableNumber={false}
             submitLabel="Guardar cambios"
             onSubmit={async (input) => {
               await update.mutateAsync(input);
@@ -181,18 +208,20 @@ export default function ChapterDetailPage() {
         chapterId={currentChapter.id}
         chapterStatus={currentChapter.status}
       />
-      <section
-        className="rounded-xl border border-border bg-surface p-5"
-        aria-labelledby="upload-title"
-      >
-        <h2 id="upload-title" className="mb-4 mt-0 text-xl font-semibold">
-          Upload ZIP
-        </h2>
-        <UploadForm
-          seriesId={currentChapter.seriesId}
-          chapterId={currentChapter.id}
-        />
-      </section>
+      {canUpload ? (
+        <section
+          className="rounded-xl border border-border bg-surface p-5"
+          aria-labelledby="upload-title"
+        >
+          <h2 id="upload-title" className="mb-4 mt-0 text-xl font-semibold">
+            Upload ZIP
+          </h2>
+          <UploadForm
+            seriesId={currentChapter.seriesId}
+            chapterId={currentChapter.id}
+          />
+        </section>
+      ) : null}
     </>
   );
 }

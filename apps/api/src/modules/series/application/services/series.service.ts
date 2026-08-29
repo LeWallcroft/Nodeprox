@@ -26,6 +26,7 @@ export class SeriesService {
       title: string;
       slug: string;
       description?: string | null | undefined;
+      coverUrl?: string | null | undefined;
     },
   ) {
     this.requireSession(context);
@@ -44,18 +45,56 @@ export class SeriesService {
       PERMISSIONS.SERIES_READ,
     );
     if (!decision.allowed) return [];
-    if (decision.role === "admin") return this.series.listAll();
+    if (decision.role === "admin")
+      return this.withPrincipalUploaders(await this.series.listAll());
     if (decision.role === "gestor")
-      return this.series.listByOwner(context.userId);
+      return this.withPrincipalUploaders(
+        await this.series.listByOwner(context.userId),
+      );
     const ids = new Set(
       await this.assignments.listAssignedSeriesIds(context.userId),
     );
-    return (await this.series.listAll()).filter((item) => ids.has(item.id));
+    const helperSeries = await this.series.listWithHelperAccess(context.userId);
+    return this.withPrincipalUploaders(
+      [
+        ...(await this.series.listAll()).filter((item) => ids.has(item.id)),
+        ...helperSeries,
+      ].filter(
+        (item, index, values) =>
+          values.findIndex((value) => value.id === item.id) === index,
+      ),
+    );
   }
 
   async get(context: AuthorizationContext, id: string) {
     const item = await this.findVisible(context, id);
-    return item;
+    if (!item || "forbidden" in item) return item;
+    return this.withPrincipalUploader(item);
+  }
+
+  async projectCapabilities(context: AuthorizationContext, id: string) {
+    const item = await this.findVisible(context, id);
+    if (!item || "forbidden" in item) return item;
+
+    const capabilities: string[] = [PERMISSIONS.SERIES_READ];
+    for (const permission of [
+      PERMISSIONS.SERIES_EDIT,
+      PERMISSIONS.SERIES_DELETE,
+      PERMISSIONS.CHAPTERS_CREATE,
+      PERMISSIONS.CHAPTERS_HELPER_GRANT,
+      PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+    ] as const) {
+      const managed = await this.findManaged(context, id, permission);
+      if (managed && !("forbidden" in managed)) capabilities.push(permission);
+    }
+    const assignment = await this.findManaged(
+      context,
+      id,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+    );
+    if (assignment && !("forbidden" in assignment))
+      capabilities.push(PERMISSIONS.SERIES_ASSIGNMENT_MANAGE);
+    return { capabilities };
   }
 
   async update(
@@ -64,6 +103,7 @@ export class SeriesService {
     input: {
       title?: string | undefined;
       description?: string | null | undefined;
+      coverUrl?: string | null | undefined;
     },
   ) {
     const owner = await this.findManaged(context, id, PERMISSIONS.SERIES_EDIT);
@@ -118,7 +158,29 @@ export class SeriesService {
   async listChapters(context: AuthorizationContext, seriesId: string) {
     const owner = await this.findVisible(context, seriesId);
     if (!owner || "forbidden" in owner) return owner;
-    return this.chapters.listBySeries(seriesId);
+    const decision = await this.authorization.authorize(
+      context,
+      PERMISSIONS.CHAPTERS_READ,
+    );
+    if (!decision.allowed) return { forbidden: true as const };
+    return this.chapters.listBySeriesVisibleForActor({
+      seriesId,
+      userId: context.userId,
+      role: decision.role,
+    });
+  }
+
+  async listGlobalChapters(context: AuthorizationContext) {
+    this.requireSession(context);
+    const decision = await this.authorization.authorize(
+      context,
+      PERMISSIONS.CHAPTERS_READ,
+    );
+    if (!decision.allowed) return [];
+    return this.chapters.listVisibleForActor({
+      userId: context.userId,
+      role: decision.role,
+    });
   }
 
   async assignUploader(
@@ -129,7 +191,7 @@ export class SeriesService {
     const managed = await this.findManaged(
       context,
       seriesId,
-      PERMISSIONS.SERIES_EDIT,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
     );
     if (!managed || "forbidden" in managed) return managed;
     const uploader = await this.users.findById(uploaderId);
@@ -152,7 +214,7 @@ export class SeriesService {
     const managed = await this.findManaged(
       context,
       seriesId,
-      PERMISSIONS.SERIES_EDIT,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
     );
     if (!managed || "forbidden" in managed) return managed;
     const result = await this.mutations.clearAssignmentIfAuthorized({
@@ -163,6 +225,37 @@ export class SeriesService {
     if (result.outcome === "not-found") return null;
     if (result.outcome !== "cleared") return { conflict: true as const };
     return { cleared: true as const };
+  }
+
+  async listUploaderCandidates(
+    context: AuthorizationContext,
+    seriesId: string,
+  ) {
+    const managed = await this.findManaged(
+      context,
+      seriesId,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+    );
+    if (!managed || "forbidden" in managed) return managed;
+    return this.assignments.listActiveUploaderCandidates();
+  }
+
+  private async withPrincipalUploader(item: {
+    id: string;
+    principalUploader: { id: string; email: string } | null;
+  }) {
+    const uploaders = await this.assignments.listPrincipalUploaders([item.id]);
+    return { ...item, principalUploader: uploaders.get(item.id) ?? null };
+  }
+
+  private async withPrincipalUploaders<T extends { id: string }>(items: T[]) {
+    const uploaders = await this.assignments.listPrincipalUploaders(
+      items.map((item) => item.id),
+    );
+    return items.map((item) => ({
+      ...item,
+      principalUploader: uploaders.get(item.id) ?? null,
+    }));
   }
 
   private async findVisible(context: AuthorizationContext, id: string) {
@@ -180,6 +273,7 @@ export class SeriesService {
       (await this.assignments.isAssigned(id, context.userId))
     )
       return item;
+    if (await this.series.hasHelperAccess(id, context.userId)) return item;
     return { forbidden: true as const };
   }
 

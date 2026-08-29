@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
@@ -8,6 +8,7 @@ import {
 import type {
   AuthorizationAuditRepository,
   AuthorizationConfigRepository,
+  ProductSettingsRepository,
   AuthorizationRoleRepository,
 } from "../../../application/ports/authorization.ports.js";
 import { sanitizeAuditMetadata } from "../../audit/audit-metadata.js";
@@ -16,7 +17,8 @@ export class DrizzleAuthorizationRepository
   implements
     AuthorizationRoleRepository,
     AuthorizationAuditRepository,
-    AuthorizationConfigRepository
+    AuthorizationConfigRepository,
+    ProductSettingsRepository
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
@@ -62,5 +64,40 @@ export class DrizzleAuthorizationRepository
     if (!Number.isInteger(row.value) || row.value < 0)
       throw new Error("helper_cooldown_days configuration is invalid");
     return row.value;
+  }
+
+  async read(
+    keys: readonly string[],
+  ): Promise<Map<string, number | boolean | string>> {
+    const rows = await this.db
+      .select({ key: systemConfig.key, value: systemConfig.value })
+      .from(systemConfig)
+      .where(inArray(systemConfig.key, [...keys]));
+    return new Map(
+      rows.flatMap((row) =>
+        typeof row.value === "number" ||
+        typeof row.value === "boolean" ||
+        typeof row.value === "string"
+          ? [[row.key, row.value] as const]
+          : [],
+      ),
+    );
+  }
+
+  async write(
+    changes: Array<[string, number | boolean | string]>,
+    actorId: string,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const [key, value] of changes) {
+        await tx
+          .insert(systemConfig)
+          .values({ key, value, updatedBy: actorId })
+          .onConflictDoUpdate({
+            target: systemConfig.key,
+            set: { value, updatedBy: actorId, updatedAt: new Date() },
+          });
+      }
+    });
   }
 }

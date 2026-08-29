@@ -13,15 +13,17 @@ import {
   retryImportItem,
 } from "../../../lib/domains/ingestion/api";
 import {
-  MAX_DIRECT_UPLOAD_CONCURRENCY,
   mediaWarningLabel,
   runPool,
+  safeBulkUploadConcurrency,
 } from "../../../lib/domains/ingestion/orchestration";
+import { useProductSettings } from "../../../lib/domains/settings/hooks";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
 import { putDirectUpload } from "../../../lib/domains/uploads/api";
 
 export default function BulkUploadPage() {
   const series = useSeriesList();
+  const settings = useProductSettings();
   const [seriesId, setSeriesId] = useState("");
   const [items, setItems] = useState<ImportCandidate[]>([]);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -137,7 +139,15 @@ export default function BulkUploadPage() {
         if (failed.chapterId) mutation.chapterId = failed.chapterId;
         update(failed.clientId, mutation);
       }
-      await runPool(jobs, MAX_DIRECT_UPLOAD_CONCURRENCY);
+      const configured = settings.data?.sections
+        .flatMap((section) => section.fields)
+        .find((field) => field.key === "bulk_upload_concurrency")?.value;
+      await runPool(
+        jobs,
+        safeBulkUploadConcurrency(
+          typeof configured === "number" ? configured : undefined,
+        ),
+      );
     } catch (cause) {
       setError(errorMessage(cause, "No se pudo iniciar la carga masiva."));
     } finally {
@@ -275,12 +285,10 @@ export default function BulkUploadPage() {
               </Button>
             ) : null}
             {item.error ? (
-              <p className="text-sm text-[#a52f2f] md:col-span-4">
-                {item.error}
-              </p>
+              <p className="text-sm text-danger md:col-span-4">{item.error}</p>
             ) : null}
             {item.warnings?.length ? (
-              <ul className="text-sm text-[#7a5a00] md:col-span-4">
+              <ul className="text-sm text-warning md:col-span-4">
                 {item.warnings.map((warning) => (
                   <li key={`${warning.code}-${warning.filename}`}>
                     {mediaWarningLabel(warning)}
@@ -290,7 +298,7 @@ export default function BulkUploadPage() {
             ) : null}
           </div>
         ))}
-        {error ? <p className="text-sm text-[#a52f2f]">{error}</p> : null}
+        {error ? <p className="text-sm text-danger">{error}</p> : null}
         <Button
           type="button"
           disabled={!seriesId || !valid || running}

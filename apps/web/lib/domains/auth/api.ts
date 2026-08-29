@@ -1,5 +1,14 @@
 import { apiRequestBrowser } from "../../api/browser";
-import type { LoginInput, RegisteredAccount, RegistrationInput } from "./types";
+import type {
+  CapabilityProjection,
+  LoginInput,
+  RegisteredAccount,
+  RegistrationInput,
+} from "./types";
+
+export function getCapabilities() {
+  return apiRequestBrowser<CapabilityProjection>("/auth/capabilities");
+}
 
 export function login(input: LoginInput) {
   return apiRequestBrowser<void>("/auth/login", {

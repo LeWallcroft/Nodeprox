@@ -19,6 +19,15 @@ import { UserRepository } from "../../authentication/infrastructure/persistence/
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
 const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
+const externalCoverUrlSchema = z
+  .string()
+  .trim()
+  .max(2048)
+  .url()
+  .refine((value) => {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  });
 const seriesCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -29,12 +38,14 @@ const seriesCreateSchema = z
       .max(220)
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
     description: z.string().max(5000).nullable().optional(),
+    coverUrl: externalCoverUrlSchema.nullable().optional(),
   })
   .strict();
 const seriesPatchSchema = z
   .object({
     title: z.string().trim().min(1).max(200).optional(),
     description: z.string().max(5000).nullable().optional(),
+    coverUrl: externalCoverUrlSchema.nullable().optional(),
   })
   .strict();
 const chapterCreateSchema = z
@@ -158,6 +169,10 @@ export function registerSeriesPlugin(
     seriesService.list(context()),
   );
 
+  app.get("/chapters", { preHandler: session }, async () =>
+    seriesService.listGlobalChapters(context()),
+  );
+
   app.get("/series/:seriesId", { preHandler: session }, async (request) => {
     const { seriesId } = parse(idSchema, request.params);
     const result = await seriesService.get(context(), seriesId);
@@ -165,6 +180,36 @@ export function registerSeriesPlugin(
     if ("forbidden" in result) throw forbidden;
     return result;
   });
+
+  app.get(
+    "/series/:seriesId/capabilities",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const result = await seriesService.projectCapabilities(
+        context(),
+        seriesId,
+      );
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      return result;
+    },
+  );
+
+  app.get(
+    "/series/:seriesId/uploader-candidates",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const result = await seriesService.listUploaderCandidates(
+        context(),
+        seriesId,
+      );
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      return result;
+    },
+  );
 
   app.patch("/series/:seriesId", { preHandler: session }, async (request) => {
     const { seriesId } = parse(idSchema, request.params);
@@ -269,6 +314,24 @@ export function registerSeriesPlugin(
     if ("denied" in result) throw forbidden;
     return result.chapter;
   });
+
+  app.get(
+    "/chapters/:chapterId/capabilities",
+    { preHandler: session },
+    async (request) => {
+      const { chapterId } = parse(chapterIdSchema, request.params);
+      const result = await chapterPermissions.projectCapabilities(
+        context(),
+        chapterId,
+      );
+      if (result.capabilities.length === 0) {
+        const chapter = await chapters.findById(chapterId);
+        if (!chapter) throw notFound;
+        throw forbidden;
+      }
+      return result;
+    },
+  );
 
   app.patch(
     "/chapters/:chapterId",

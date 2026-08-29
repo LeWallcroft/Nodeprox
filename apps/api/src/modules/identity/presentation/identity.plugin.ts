@@ -18,6 +18,7 @@ import {
 const registrationSchema = z
   .object({
     email: z.string().trim().email().max(320),
+    discordUsername: z.string().trim().min(1).max(64),
     password: z.string().min(8),
   })
   .strict();

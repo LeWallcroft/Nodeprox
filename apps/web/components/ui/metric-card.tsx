@@ -8,7 +8,7 @@ export function MetricCard({
   detail?: string;
 }) {
   return (
-    <article className="grid gap-2 rounded-xl border border-border bg-surface p-[18px]">
+    <article className="grid gap-2 rounded-panel border border-border bg-surface p-[18px] shadow-card">
       <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
         {label}
       </span>

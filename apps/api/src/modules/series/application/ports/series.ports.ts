@@ -1,18 +1,24 @@
 import type {
   ChapterCoreRecord,
+  SeriesPrincipalUploader,
   SeriesRecord,
+  SeriesUploaderCandidate,
 } from "../../domain/series.types.js";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
+import type { Role } from "../../../authorization/domain/roles.js";
 
 export interface SeriesRepositoryPort {
   create(input: {
     title: string;
     slug: string;
     description?: string | null | undefined;
+    coverUrl?: string | null | undefined;
     createdBy: string;
   }): Promise<SeriesRecord>;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
   listAll(): Promise<SeriesRecord[]>;
+  listWithHelperAccess(userId: string): Promise<SeriesRecord[]>;
+  hasHelperAccess(seriesId: string, userId: string): Promise<boolean>;
   findById(id: string): Promise<SeriesRecord | null>;
   update(
     id: string,
@@ -20,6 +26,7 @@ export interface SeriesRepositoryPort {
       title?: string | undefined;
       slug?: string | undefined;
       description?: string | null | undefined;
+      coverUrl?: string | null | undefined;
     },
   ): Promise<SeriesRecord | null>;
   delete(id: string): Promise<void>;
@@ -35,6 +42,10 @@ export interface SeriesAssignmentRepositoryPort {
     assignedBy: string;
   }): Promise<void>;
   clear(seriesId: string): Promise<void>;
+  listPrincipalUploaders(
+    seriesIds: readonly string[],
+  ): Promise<ReadonlyMap<string, SeriesPrincipalUploader>>;
+  listActiveUploaderCandidates(): Promise<SeriesUploaderCandidate[]>;
 }
 
 export interface SeriesUserPort {
@@ -59,6 +70,7 @@ export interface SeriesMutationBoundaryPort {
       title?: string | undefined;
       slug?: string | undefined;
       description?: string | null | undefined;
+      coverUrl?: string | null | undefined;
     };
   }): Promise<
     { outcome: "updated"; series: SeriesRecord } | SeriesMutationFailure
@@ -86,6 +98,23 @@ export interface ChapterCoreRepositoryPort {
     createdBy: string;
   }): Promise<ChapterCoreRecord>;
   listBySeries(seriesId: string): Promise<ChapterCoreRecord[]>;
+  listBySeriesVisibleForActor(input: {
+    seriesId: string;
+    userId: string;
+    role: Role;
+  }): Promise<ChapterCoreRecord[]>;
+  listVisibleForActor(input: { userId: string; role: Role }): Promise<
+    Array<
+      ChapterCoreRecord & {
+        series: {
+          id: string;
+          title: string;
+          slug: string;
+          coverUrl: string | null;
+        };
+      }
+    >
+  >;
   findById(id: string): Promise<ChapterCoreRecord | null>;
   update(
     id: string,

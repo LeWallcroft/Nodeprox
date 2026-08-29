@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DELETE, GET, PATCH, POST } from "./route";
+import { DELETE, GET, PATCH, POST, PUT } from "./route";
 
 const context = (path: string[]) => ({ params: Promise.resolve({ path }) });
 
@@ -23,6 +23,25 @@ describe("same-origin API proxy", () => {
     await expect(response.json()).resolves.toEqual({ status: "ok" });
     expect(backend).toHaveBeenCalledWith(
       "http://localhost:3001/health?check=1",
+      expect.objectContaining({ method: "GET" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies the explicit Overview read model route", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+
+    const response = await GET(
+      new Request("http://localhost:3000/api/overview"),
+      context(["overview"]),
+    );
+
+    expect(response.status).toBe(200);
+    expect(backend).toHaveBeenCalledWith(
+      "http://localhost:3001/overview",
       expect.objectContaining({ method: "GET" }),
     );
     vi.unstubAllGlobals();
@@ -72,6 +91,30 @@ describe("same-origin API proxy", () => {
       "nodeprox_session=old",
     );
     expect(new Headers(options.headers).get("origin")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies registration without accepting client authority fields", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", backend);
+    const response = await POST(
+      new Request("http://localhost:3000/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "new@example.com",
+          password: "password123",
+        }),
+      }),
+      context(["auth", "register"]),
+    );
+    expect(response.status).toBe(201);
+    expect(backend).toHaveBeenCalledWith(
+      "http://localhost:3001/auth/register",
+      expect.objectContaining({ method: "POST" }),
+    );
     vi.unstubAllGlobals();
   });
 
@@ -140,6 +183,229 @@ describe("same-origin API proxy", () => {
     );
     expect(legacy.status).toBe(404);
     expect(backend).toHaveBeenCalledTimes(3);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies explicit global and contextual capability projections", async () => {
+    const backend = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ capabilities: ["series.read"] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", backend);
+    const seriesId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+
+    const series = await GET(
+      new Request(`http://localhost:3000/api/series/${seriesId}/capabilities`),
+      context(["series", seriesId, "capabilities"]),
+    );
+    const chapter = await GET(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/capabilities`,
+      ),
+      context(["chapters", chapterId, "capabilities"]),
+    );
+    const global = await GET(
+      new Request("http://localhost:3000/api/auth/capabilities"),
+      context(["auth", "capabilities"]),
+    );
+    const denied = await GET(
+      new Request(`http://localhost:3000/api/series/${seriesId}/audit`),
+      context(["series", seriesId, "audit"]),
+    );
+
+    expect(series.status).toBe(200);
+    expect(chapter.status).toBe(200);
+    expect(global.status).toBe(200);
+    expect(denied.status).toBe(404);
+    expect(await denied.json()).toMatchObject({ code: "invalid-proxy-path" });
+    expect(backend.mock.calls.map(([url]) => url)).toEqual([
+      `http://localhost:3001/series/${seriesId}/capabilities`,
+      `http://localhost:3001/chapters/${chapterId}/capabilities`,
+      "http://localhost:3001/auth/capabilities",
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies only the contextual uploader assignment routes", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", backend);
+    const seriesId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+
+    const candidates = await GET(
+      new Request(
+        `http://localhost:3000/api/series/${seriesId}/uploader-candidates`,
+      ),
+      context(["series", seriesId, "uploader-candidates"]),
+    );
+    const assigned = await PUT(
+      new Request(`http://localhost:3000/api/series/${seriesId}/uploader`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uploaderId: "uploader-1" }),
+      }),
+      context(["series", seriesId, "uploader"]),
+    );
+    const cleared = await DELETE(
+      new Request(`http://localhost:3000/api/series/${seriesId}/uploader`, {
+        method: "DELETE",
+      }),
+      context(["series", seriesId, "uploader"]),
+    );
+    const blocked = await GET(
+      new Request(`http://localhost:3000/api/series/${seriesId}/uploader/raw`),
+      context(["series", seriesId, "uploader", "raw"]),
+    );
+
+    expect(candidates.status).toBe(204);
+    expect(assigned.status).toBe(204);
+    expect(cleared.status).toBe(204);
+    expect(blocked.status).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(3);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies the explicit global Chapters and helper-management routes", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+    await GET(
+      new Request("http://localhost:3000/api/chapters"),
+      context(["chapters"]),
+    );
+    await GET(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/permissions`,
+      ),
+      context(["chapters", chapterId, "permissions"]),
+    );
+    await GET(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/helper-candidates`,
+      ),
+      context(["chapters", chapterId, "helper-candidates"]),
+    );
+    expect(backend).toHaveBeenCalledTimes(3);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies only explicit user administration and import batch routes", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    const seriesId = "series-1";
+    const batchId = "batch-1";
+    const itemId = "item-1";
+    const userId = "user-1";
+    expect(
+      (
+        await GET(
+          new Request("http://localhost:3000/api/admin/users"),
+          context(["admin", "users"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await PATCH(
+          new Request(`http://localhost:3000/api/admin/users/${userId}`, {
+            method: "PATCH",
+          }),
+          context(["admin", "users", userId]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await POST(
+          new Request(
+            `http://localhost:3000/api/series/${seriesId}/import-batches`,
+            { method: "POST" },
+          ),
+          context(["series", seriesId, "import-batches"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await GET(
+          new Request(`http://localhost:3000/api/import-batches/${batchId}`),
+          context(["import-batches", batchId]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await POST(
+          new Request(
+            `http://localhost:3000/api/series/${seriesId}/import-batches/${batchId}/items/${itemId}/retry`,
+            { method: "POST" },
+          ),
+          context([
+            "series",
+            seriesId,
+            "import-batches",
+            batchId,
+            "items",
+            itemId,
+            "retry",
+          ]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await GET(
+          new Request("http://localhost:3000/api/admin/users/raw"),
+          context(["admin", "users", "raw"]),
+        )
+      ).status,
+    ).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(5);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies only the allowlisted product settings routes", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    expect(
+      (
+        await GET(
+          new Request("http://localhost:3000/api/admin/settings"),
+          context(["admin", "settings"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await PATCH(
+          new Request("http://localhost:3000/api/admin/settings", {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ changes: [] }),
+          }),
+          context(["admin", "settings"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await GET(
+          new Request("http://localhost:3000/api/admin/settings/raw"),
+          context(["admin", "settings", "raw"]),
+        )
+      ).status,
+    ).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   });
 

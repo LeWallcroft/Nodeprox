@@ -10,15 +10,18 @@ export function SeriesForm({
   onSubmit,
   submitLabel = "Crear Series",
   onCancel,
+  showSlug = true,
 }: {
   initial?: Partial<SeriesInput>;
   onSubmit: (input: SeriesInput) => Promise<void>;
   submitLabel?: string;
   onCancel?: () => void;
+  showSlug?: boolean;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [slug, setSlug] = useState(initial?.slug ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
+  const [coverUrl, setCoverUrl] = useState(initial?.coverUrl ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -31,6 +34,7 @@ export function SeriesForm({
         title: title.trim(),
         slug: slug.trim(),
         description: description.trim() || null,
+        coverUrl: coverUrl.trim() || null,
       });
     } catch (cause) {
       setError(errorMessage(cause));
@@ -42,7 +46,7 @@ export function SeriesForm({
   return (
     <form className="grid gap-3.5" onSubmit={handleSubmit}>
       <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
+        className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="series-title"
       >
         Título
@@ -54,21 +58,38 @@ export function SeriesForm({
           onChange={(event) => setTitle(event.target.value)}
         />
       </label>
+      {showSlug ? (
+        <label
+          className="grid gap-1.5 text-[13px] font-medium text-muted"
+          htmlFor="series-slug"
+        >
+          Slug
+          <input
+            id="series-slug"
+            required
+            maxLength={220}
+            value={slug}
+            onChange={(event) => setSlug(event.target.value)}
+          />
+        </label>
+      ) : null}
       <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
-        htmlFor="series-slug"
+        className="grid gap-1.5 text-[13px] font-medium text-muted"
+        htmlFor="series-cover-url"
       >
-        Slug
+        Portada
         <input
-          id="series-slug"
-          required
-          maxLength={220}
-          value={slug}
-          onChange={(event) => setSlug(event.target.value)}
+          id="series-cover-url"
+          type="url"
+          maxLength={2048}
+          placeholder="https://i.imgur.com/..."
+          value={coverUrl ?? ""}
+          onChange={(event) => setCoverUrl(event.target.value)}
         />
+        <span className="font-normal text-muted">URL externa de portada</span>
       </label>
       <label
-        className="grid gap-1.5 text-[13px] font-bold text-muted"
+        className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="series-description"
       >
         Descripción
@@ -81,7 +102,7 @@ export function SeriesForm({
         />
       </label>
       {error ? (
-        <p className="text-[13px] text-[#a52f2f]" role="alert">
+        <p className="text-[13px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
@@ -91,8 +112,9 @@ export function SeriesForm({
         </Button>
         {onCancel ? (
           <button
-            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-semibold text-text"
+            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-medium text-text"
             type="button"
+            disabled={loading}
             onClick={onCancel}
           >
             Cancelar

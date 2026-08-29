@@ -29,6 +29,9 @@ import { UnavailableUploadTransfer } from "./modules/uploads/infrastructure/stor
 import { ImageQueryService } from "./modules/images/application/services/image-query.service.js";
 import { registerIdentityPlugin } from "./modules/identity/presentation/identity.plugin.js";
 import { registerImportBatchPlugin } from "./modules/ingestion/presentation/import-batch.plugin.js";
+import { registerAuditPlugin } from "./modules/authorization/presentation/audit.plugin.js";
+import { registerSettingsPlugin } from "./modules/authorization/presentation/settings.plugin.js";
+import { registerOverviewPlugin } from "./modules/overview/presentation/overview.plugin.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -59,6 +62,24 @@ export function buildApp(
       authentication,
     );
     registerIdentityPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+    );
+    registerAuditPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+    );
+    registerSettingsPlugin(
+      app,
+      dependencies.database,
+      authentication,
+      authorization,
+    );
+    registerOverviewPlugin(
       app,
       dependencies.database,
       authentication,

@@ -14,11 +14,7 @@ export class ChapterCoreService {
     const chapter = await this.chapters.findById(id);
     if (!chapter || chapter.status === "deleting")
       return { notFound: true as const };
-    const decision = await this.permissions.check({
-      context,
-      chapterId: id,
-      permission: "chapters.read",
-    });
+    const decision = await this.permissions.canReadContext(context, id);
     if (!decision.allowed) return { denied: true as const };
     return { chapter };
   }

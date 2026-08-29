@@ -7,7 +7,7 @@ export function EmptyState({
 }) {
   return (
     <section
-      className="grid min-h-60 place-content-center justify-items-center rounded-xl border border-border bg-surface p-8 text-center"
+      className="grid min-h-60 place-content-center justify-items-center rounded-panel border border-border bg-surface p-8 text-center shadow-card"
       aria-live="polite"
     >
       <span className="text-4xl text-primary" aria-hidden="true">
