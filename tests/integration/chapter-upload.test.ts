@@ -3,7 +3,7 @@ import {
   UploadTransferProviderError,
   type UploadTransferPort,
   type VerifiedUploadedObject,
-} from "../../packages/storage/src/port.js";
+} from "../../packages/storage/dist/port.js";
 import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";

@@ -17,9 +17,9 @@ COPY apps/worker ./apps/worker
 COPY apps/web ./apps/web
 
 RUN pnpm install --frozen-lockfile
+RUN pnpm packages:build
 RUN pnpm --filter @nodeprox/api build
-RUN pnpm exec tsc -p packages/types/tsconfig.json
-RUN pnpm --filter @nodeprox/api --prod deploy --legacy /deploy
+RUN pnpm --filter @nodeprox/api --prod deploy /deploy
 
 FROM node:24-bookworm-slim AS runtime
 
@@ -28,10 +28,6 @@ ENV NODE_ENV=production
 
 COPY --from=build --chown=node:node /deploy ./
 COPY --from=build --chown=node:node /workspace/apps/api/dist ./dist
-# pnpm deploy keeps workspace dependency symlinks rooted at /workspace.
-COPY --from=build --chown=node:node /workspace/packages /workspace/packages
-RUN ln -s /app/node_modules /workspace/node_modules \
-  && node -e "const fs=require('node:fs'); const path='/workspace/packages/types/package.json'; const pkg=JSON.parse(fs.readFileSync(path, 'utf8')); pkg.exports={'.':'./dist/index.js'}; fs.writeFileSync(path, JSON.stringify(pkg));"
 
 USER node
 EXPOSE 3001
@@ -45,9 +41,6 @@ ENV NODE_ENV=production
 
 COPY --from=build --chown=node:node /deploy ./
 COPY --from=build --chown=node:node /workspace/apps/api/dist ./dist
-COPY --from=build --chown=node:node /workspace/packages /workspace/packages
-RUN ln -s /app/node_modules /workspace/node_modules \
-  && node -e "const fs=require('node:fs'); const path='/workspace/packages/types/package.json'; const pkg=JSON.parse(fs.readFileSync(path, 'utf8')); pkg.exports={'.':'./dist/index.js'}; fs.writeFileSync(path, JSON.stringify(pkg));"
 COPY --from=build --chown=node:node /workspace/database/migrations ./database/migrations
 COPY --chown=node:node deploy/migration ./deploy/migration
 

@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 importers:
 
@@ -78,15 +79,27 @@ importers:
       '@nodeprox/types':
         specifier: workspace:*
         version: link:../../packages/types
+      argon2:
+        specifier: ^0.44.0
+        version: 0.44.0
       bullmq:
         specifier: ^6.2.0
         version: 6.2.0(ioredis@6.0.0(supports-color@7.2.0))(redis@5.12.1)
+      drizzle-orm:
+        specifier: ^0.44.7
+        version: 0.44.7(postgres@3.4.9)
       fastify:
         specifier: ^5.5.0
         version: 5.12.0
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0(supports-color@7.2.0)
+      postgres:
+        specifier: ^3.4.9
+        version: 3.4.9
+      zod:
+        specifier: ^4.0.17
+        version: 4.4.3
 
   apps/bot: {}
 
@@ -141,6 +154,9 @@ importers:
       bullmq:
         specifier: ^6.2.0
         version: 6.2.0(ioredis@6.0.0(supports-color@7.2.0))(redis@5.12.1)
+      dotenv:
+        specifier: ^17.2.1
+        version: 17.4.2
       drizzle-orm:
         specifier: ^0.44.7
         version: 0.44.7(postgres@3.4.9)
@@ -160,7 +176,11 @@ importers:
         specifier: ^4.0.17
         version: 4.4.3
 
-  packages/schemas: {}
+  packages/schemas:
+    dependencies:
+      zod:
+        specifier: ^4.0.17
+        version: 4.4.3
 
   packages/storage:
     dependencies:

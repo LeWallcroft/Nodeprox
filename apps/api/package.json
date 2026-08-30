@@ -15,8 +15,12 @@
     "@nodeprox/schemas": "workspace:*",
     "@nodeprox/storage": "workspace:*",
     "@nodeprox/types": "workspace:*",
+    "argon2": "^0.44.0",
     "bullmq": "^6.2.0",
+    "drizzle-orm": "^0.44.7",
     "fastify": "^5.5.0",
-    "ioredis": "^6.0.0"
+    "ioredis": "^6.0.0",
+    "postgres": "^3.4.9",
+    "zod": "^4.0.17"
   }
 }
