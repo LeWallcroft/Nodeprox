@@ -18,6 +18,7 @@ COPY apps/web ./apps/web
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @nodeprox/web build
+RUN pnpm exec tsc -p packages/types/tsconfig.json
 RUN pnpm --filter @nodeprox/web --prod deploy --legacy /deploy
 
 FROM node:24-bookworm-slim AS runtime
@@ -28,6 +29,10 @@ ENV NODE_ENV=production
 COPY --from=build --chown=node:node /deploy ./
 COPY --from=build --chown=node:node /workspace/apps/web/.next ./.next
 COPY --from=build --chown=node:node /workspace/apps/web/public ./public
+# Preserve resolved workspace package targets used by the deployed node_modules.
+COPY --from=build --chown=node:node /workspace/packages /workspace/packages
+RUN ln -s /app/node_modules /workspace/node_modules \
+  && node -e "const fs=require('node:fs'); const path='/workspace/packages/types/package.json'; const pkg=JSON.parse(fs.readFileSync(path, 'utf8')); pkg.exports={'.':'./dist/index.js'}; fs.writeFileSync(path, JSON.stringify(pkg));"
 
 USER node
 EXPOSE 3000
