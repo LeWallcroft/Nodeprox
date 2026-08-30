@@ -1,4 +1,7 @@
-import type { UploadTransferPort } from "../../packages/storage/src/port.js";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+} from "../../packages/storage/dist/port.js";
 import { describe, expect, it, vi } from "vitest";
 import type { ChapterPermissionService } from "../../apps/api/src/modules/chapters/application/services/chapter-permission.service.js";
 import {
@@ -11,7 +14,6 @@ import type {
   UploadLifecycleBoundaryPort,
   UploadRepositoryPort,
 } from "../../apps/api/src/modules/uploads/application/ports/upload.ports.js";
-import { UploadTransferObjectNotFoundError } from "../../packages/storage/src/port.js";
 
 const permission = {
   check: vi.fn().mockResolvedValue({
