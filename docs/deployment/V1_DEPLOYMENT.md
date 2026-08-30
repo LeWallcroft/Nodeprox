@@ -56,7 +56,7 @@ Wait until both services are healthy. PostgreSQL persists in `postgres-data`. Re
 
 ## H. Run database migrations exactly once
 
-Run migrations before starting traffic for a new release. The operational `migrate` service is intentionally not part of the normal stack and uses the repository's real `pnpm db:migrate` command:
+Run migrations before starting traffic for a new release. The operational `migrate` service is intentionally not part of the normal stack. Its image contains a prebuilt Node.js migration runner and the official Drizzle migration files; it does not run `pnpm install`, fetch packages, or require `tsx` at runtime:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
@@ -72,7 +72,7 @@ An empty production database has no functional users. After migrations, create t
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate pnpm db:bootstrap:admin
 ```
 
-Set `ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` to unique, secret values in `.env.production` before running it. The command uses the existing `AdminBootstrapService` and Argon2 password hasher; it never requires hand-written SQL or a manually generated password hash. On a clean installation it creates one active `admin` user and its audit event. Subsequent executions report `already-admin` for the same address, or promote an existing user with that address, so treat this as a controlled bootstrap operation rather than a startup hook.
+Set `ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` to unique, secret values in `.env.production` before running it. The migration runner preserves this Compose command as a compatibility operation while dispatching to a prebuilt Node.js artifact, not `pnpm`. That artifact uses the existing `AdminBootstrapService` and Argon2 password hasher; it never requires hand-written SQL or a manually generated password hash. On a clean installation it creates one active `admin` user and its audit event. Subsequent executions report `already-admin` for the same address, or promote an existing user with that address, so treat this as a controlled bootstrap operation rather than a startup hook.
 
 `pnpm db:seed:auth` is a development/test helper and must not be run in production.
 

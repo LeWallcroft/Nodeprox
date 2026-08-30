@@ -18,6 +18,7 @@ COPY apps/web ./apps/web
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @nodeprox/worker build
+RUN pnpm exec tsc -p packages/types/tsconfig.json
 RUN pnpm --filter @nodeprox/worker --prod deploy --legacy /deploy
 
 FROM node:24-bookworm-slim AS runtime
@@ -27,6 +28,10 @@ ENV NODE_ENV=production
 
 COPY --from=build --chown=node:node /deploy ./
 COPY --from=build --chown=node:node /workspace/apps/worker/dist ./dist
+# pnpm deploy keeps workspace dependency symlinks rooted at /workspace.
+COPY --from=build --chown=node:node /workspace/packages /workspace/packages
+RUN ln -s /app/node_modules /workspace/node_modules \
+  && node -e "const fs=require('node:fs'); const path='/workspace/packages/types/package.json'; const pkg=JSON.parse(fs.readFileSync(path, 'utf8')); pkg.exports={'.':'./dist/index.js'}; fs.writeFileSync(path, JSON.stringify(pkg));"
 
 USER node
 CMD ["node", "dist/apps/worker/src/index.js"]
