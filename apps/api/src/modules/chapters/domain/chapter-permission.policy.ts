@@ -44,7 +44,24 @@ export function evaluateChapterContextualAuthorization(input: {
   hasHelperPermission: boolean;
 }): ChapterContextualAuthorizationReason | null {
   if (input.role === "admin") return "role";
-  if (input.role === "gestor" && input.isSeriesOwner) return "role";
+  // Gestor is a global operational Chapter role. Series ownership remains
+  // relevant to Series administration and helper management, not here.
+  if (input.role === "gestor") return "role";
   if (input.role === "uploader" && input.isAssigned) return "assigned";
   return input.hasHelperPermission ? "helper" : null;
+}
+
+/**
+ * Helper grants/revocations are Series administration, not ordinary Chapter
+ * operations. Keep Gestor restricted to its own Series for that boundary.
+ */
+export function evaluateChapterAdministrationAuthorization(input: {
+  role: Role;
+  isSeriesOwner: boolean;
+  isAssigned: boolean;
+}): "role" | "assigned" | null {
+  if (input.role === "admin") return "role";
+  if (input.role === "gestor" && input.isSeriesOwner) return "role";
+  if (input.role === "uploader" && input.isAssigned) return "assigned";
+  return null;
 }

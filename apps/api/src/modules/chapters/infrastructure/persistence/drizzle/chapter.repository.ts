@@ -18,12 +18,14 @@ import type {
   ChapterPermissionRecord,
   ChapterRecord,
 } from "../../../domain/chapter.types.js";
-import type { DelegableChapterPermission } from "../../../domain/chapter-permission.policy.js";
+import {
+  evaluateChapterAdministrationAuthorization,
+  type DelegableChapterPermission,
+} from "../../../domain/chapter-permission.policy.js";
 import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
 import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import { lockCurrentAuthorization } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
 import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
-import { evaluateChapterContextualAuthorization } from "../../../domain/chapter-permission.policy.js";
 
 const toChapter = (row: typeof chapters.$inferSelect): ChapterRecord => ({
   id: row.id,
@@ -174,11 +176,10 @@ export class DrizzleChapterRepository
       if (!chapter) return { outcome: "not-found" as const };
       if (chapter.seriesId !== snapshot.seriesId)
         return { outcome: "denied" as const };
-      const reason = evaluateChapterContextualAuthorization({
+      const reason = evaluateChapterAdministrationAuthorization({
         role: actor.role,
         isSeriesOwner,
         isAssigned,
-        hasHelperPermission: false,
       });
       if (!reason) return { outcome: "denied" as const };
 
@@ -281,11 +282,10 @@ export class DrizzleChapterRepository
       if (!chapter) return { outcome: "not-found" as const };
       if (chapter.seriesId !== snapshot.seriesId)
         return { outcome: "denied" as const };
-      const reason = evaluateChapterContextualAuthorization({
+      const reason = evaluateChapterAdministrationAuthorization({
         role: actor.role,
         isSeriesOwner,
         isAssigned,
-        hasHelperPermission: false,
       });
       if (!reason) return { outcome: "denied" as const };
 

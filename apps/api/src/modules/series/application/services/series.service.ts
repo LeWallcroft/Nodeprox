@@ -1,7 +1,7 @@
 import type { AuthorizationService } from "../../../authorization/application/services/authorization.service.js";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
-import { isOwner } from "../../domain/series.policy.js";
+import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
 import type {
   ChapterCoreRepositoryPort,
   SeriesAssignmentRepositoryPort,
@@ -48,9 +48,7 @@ export class SeriesService {
     if (decision.role === "admin")
       return this.withPrincipalUploaders(await this.series.listAll());
     if (decision.role === "gestor")
-      return this.withPrincipalUploaders(
-        await this.series.listByOwner(context.userId),
-      );
+      return this.withPrincipalUploaders(await this.series.listAll());
     const ids = new Set(
       await this.assignments.listAssignedSeriesIds(context.userId),
     );
@@ -80,13 +78,15 @@ export class SeriesService {
     for (const permission of [
       PERMISSIONS.SERIES_EDIT,
       PERMISSIONS.SERIES_DELETE,
-      PERMISSIONS.CHAPTERS_CREATE,
       PERMISSIONS.CHAPTERS_HELPER_GRANT,
       PERMISSIONS.CHAPTERS_HELPER_REVOKE,
     ] as const) {
       const managed = await this.findManaged(context, id, permission);
       if (managed && !("forbidden" in managed)) capabilities.push(permission);
     }
+    const chapterOperation = await this.findChapterOperational(context, id);
+    if (chapterOperation && !("forbidden" in chapterOperation))
+      capabilities.push(PERMISSIONS.CHAPTERS_CREATE);
     const assignment = await this.findManaged(
       context,
       id,
@@ -142,12 +142,8 @@ export class SeriesService {
     seriesId: string,
     input: { chapterNumber: number; title?: string | null | undefined },
   ) {
-    const owner = await this.findManaged(
-      context,
-      seriesId,
-      PERMISSIONS.CHAPTERS_CREATE,
-    );
-    if (!owner || "forbidden" in owner) return owner;
+    const operational = await this.findChapterOperational(context, seriesId);
+    if (!operational || "forbidden" in operational) return operational;
     return this.chapters.create({
       ...input,
       seriesId,
@@ -269,7 +265,7 @@ export class SeriesService {
     if (!decision.allowed) return { forbidden: true as const };
     if (
       decision.role === "admin" ||
-      (decision.role === "gestor" && isOwner(context.userId, item.createdBy)) ||
+      decision.role === "gestor" ||
       (await this.assignments.isAssigned(id, context.userId))
     )
       return item;
@@ -287,15 +283,34 @@ export class SeriesService {
     if (!item) return null;
     const decision = await this.authorization.authorize(context, permission);
     if (!decision.allowed) return { forbidden: true as const };
-    if (decision.role === "admin") return item;
-    if (decision.role === "uploader") {
-      return (await this.assignments.isAssigned(id, context.userId))
-        ? item
-        : { forbidden: true as const };
-    }
-    if (!isOwner(context.userId, item.createdBy))
+    const isAssigned = await this.assignments.isAssigned(id, context.userId);
+    if (
+      !canAdministerSeries({
+        role: decision.role,
+        isOwner: isOwner(context.userId, item.createdBy),
+        isAssigned,
+      })
+    )
       return { forbidden: true as const };
     return item;
+  }
+
+  private async findChapterOperational(
+    context: AuthorizationContext,
+    id: string,
+  ) {
+    this.requireSession(context);
+    const item = await this.series.findById(id);
+    if (!item) return null;
+    const decision = await this.authorization.authorize(
+      context,
+      PERMISSIONS.CHAPTERS_CREATE,
+    );
+    if (!decision.allowed) return { forbidden: true as const };
+    if (decision.role === "admin" || decision.role === "gestor") return item;
+    return (await this.assignments.isAssigned(id, context.userId))
+      ? item
+      : { forbidden: true as const };
   }
 
   private requireSession(context: AuthorizationContext) {

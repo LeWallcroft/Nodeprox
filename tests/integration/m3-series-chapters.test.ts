@@ -178,7 +178,18 @@ afterAll(async () => {
     );
   await database.db
     .delete(users)
-    .where(inArray(users.id, [ownerId, otherId, helperId, adminId, gestorId, uploaderTwoId, pendingUploaderId, suspendedUploaderId]));
+    .where(
+      inArray(users.id, [
+        ownerId,
+        otherId,
+        helperId,
+        adminId,
+        gestorId,
+        uploaderTwoId,
+        pendingUploaderId,
+        suspendedUploaderId,
+      ]),
+    );
   await app.close();
   await database.sql.end();
 });
@@ -282,7 +293,9 @@ describe("M3 Series and Chapters Core", () => {
       headers: { cookie: ownerCookie },
     });
     expect(candidates.statusCode).toBe(200);
-    const candidateIds = candidates.json().map((item: { id: string }) => item.id);
+    const candidateIds = candidates
+      .json()
+      .map((item: { id: string }) => item.id);
     expect(candidateIds).toContain(helperId);
     expect(candidateIds).toContain(uploaderTwoId);
     expect(candidateIds).not.toContain(pendingUploaderId);
@@ -466,7 +479,7 @@ describe("M3 Series and Chapters Core", () => {
     ).toBe(204);
   });
 
-  it("enforces ownership and rejects forged authority fields", async () => {
+  it("keeps Series administration owned while allowing Gestor Chapter support", async () => {
     const ownerCookie = await login(emails.owner);
     const otherCookie = await login(emails.other);
     const created = await app.inject({
@@ -492,7 +505,7 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: otherCookie },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await app.inject({
@@ -521,16 +534,17 @@ describe("M3 Series and Chapters Core", () => {
           payload: { chapterNumber: 2 },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(201);
     expect(
       (
         await app.inject({
-          method: "DELETE",
+          method: "PATCH",
           url: `/chapters/${chapterId}`,
           headers: { cookie: otherCookie },
+          payload: { title: "Supported without Series ownership" },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(200);
 
     const forged = await app.inject({
       method: "PATCH",
@@ -550,7 +564,7 @@ describe("M3 Series and Chapters Core", () => {
     expect(forged.statusCode).toBe(422);
   });
 
-  it("keeps Chapter delete non-delegable while enforcing managed Series scope", async () => {
+  it("keeps Chapter delete non-delegable while allowing Gestor support", async () => {
     const ownerCookie = await login(emails.owner);
     const helperCookie = await login(emails.helper);
     const adminCookie = await login(emails.admin);
@@ -632,7 +646,7 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: gestorCookie },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(204);
     expect(
       (
         await app.inject({
