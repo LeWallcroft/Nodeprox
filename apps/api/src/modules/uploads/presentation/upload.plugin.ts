@@ -190,10 +190,12 @@ export function registerUploadPlugin(
           uploadParamsSchema,
           request.params,
         );
+        const requestId = getRequestContext()?.requestId;
         return await service.complete({
           context: context(),
           chapterId,
           uploadId,
+          ...(requestId ? { originRequestId: requestId } : {}),
         });
       } catch (error) {
         mapUploadError(error);

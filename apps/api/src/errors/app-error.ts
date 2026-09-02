@@ -1,6 +1,8 @@
-import type { ProblemDetails } from "@nodeprox/types";
+import type { ProblemCategory, ProblemDetails } from "@nodeprox/types";
+import { problemCategoryForStatus } from "./error-codes.js";
 
 interface AppErrorOptions {
+  category?: ProblemCategory;
   code: string;
   detail: string;
   errors?: readonly unknown[];
@@ -10,6 +12,7 @@ interface AppErrorOptions {
 }
 
 export class AppError extends Error {
+  readonly category: ProblemCategory;
   readonly code: string;
   readonly errors: readonly unknown[] | undefined;
   readonly statusCode: number;
@@ -19,6 +22,8 @@ export class AppError extends Error {
   constructor(options: AppErrorOptions) {
     super(options.detail);
     this.name = "AppError";
+    this.category =
+      options.category ?? problemCategoryForStatus(options.statusCode);
     this.code = options.code;
     this.errors = options.errors;
     this.statusCode = options.statusCode;
@@ -34,6 +39,7 @@ export class AppError extends Error {
       detail: this.message,
       instance,
       code: this.code,
+      category: this.category,
       ...(requestId ? { requestId } : {}),
       ...(this.errors ? { errors: this.errors } : {}),
     };

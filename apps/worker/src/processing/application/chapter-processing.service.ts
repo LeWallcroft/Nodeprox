@@ -73,6 +73,10 @@ export class ChapterProcessingService {
           action: "chapter.processing.completed",
           resourceType: "chapter",
           resourceId: input.chapterId,
+          result: "success",
+          ...(input.originRequestId
+            ? { requestId: input.originRequestId }
+            : {}),
           metadata: {
             imageCount: records.length,
           },
@@ -101,6 +105,11 @@ export class ChapterProcessingService {
           action: "chapter.processing.failed",
           resourceType: "chapter",
           resourceId: input.chapterId,
+          result: "failed",
+          reasonCode: "processing-failed",
+          ...(input.originRequestId
+            ? { requestId: input.originRequestId }
+            : {}),
           metadata: { result: "failed" },
         })
         .catch(() => undefined);

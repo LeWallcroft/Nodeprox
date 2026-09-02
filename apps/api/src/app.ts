@@ -32,6 +32,11 @@ import { registerImportBatchPlugin } from "./modules/ingestion/presentation/impo
 import { registerAuditPlugin } from "./modules/authorization/presentation/audit.plugin.js";
 import { registerSettingsPlugin } from "./modules/authorization/presentation/settings.plugin.js";
 import { registerOverviewPlugin } from "./modules/overview/presentation/overview.plugin.js";
+import { API_LOGGER_OPTIONS } from "./observability/logger.js";
+import {
+  DrizzleOperationAuditWriter,
+  type OperationAuditWriter,
+} from "./observability/operation-audit-writer.js";
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
@@ -39,16 +44,35 @@ export interface AppDependencies {
   storage?: NodeProxStorageConfig;
   uploadTransfer?: UploadTransferPort;
   publicMediaOrigin?: string;
+  operationAuditWriter?: OperationAuditWriter;
 }
 
 export function buildApp(
   options: FastifyServerOptions = {},
   dependencies: AppDependencies = {},
 ): FastifyInstance {
-  const app = Fastify({ logger: true, ...options });
+  const configuredLogger = options.logger;
+  const logger =
+    configuredLogger === false
+      ? false
+      : {
+          ...API_LOGGER_OPTIONS,
+          ...(typeof configuredLogger === "object" ? configuredLogger : {}),
+          redact:
+            typeof configuredLogger === "object" && configuredLogger.redact
+              ? configuredLogger.redact
+              : API_LOGGER_OPTIONS.redact,
+        };
+  const app = Fastify({ ...options, logger });
 
   registerRequestContext(app);
-  registerErrorHandler(app);
+  registerErrorHandler(
+    app,
+    dependencies.operationAuditWriter ??
+      (dependencies.database
+        ? new DrizzleOperationAuditWriter(dependencies.database)
+        : undefined),
+  );
   registerHealthController(app, new HealthService(new HealthRepository()));
   if (dependencies.database) {
     const authentication = registerAuthentication(

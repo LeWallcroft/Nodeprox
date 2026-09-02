@@ -1,7 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppError } from "../../../errors/app-error.js";
-import { getRequestContext } from "../../../plugins/request-context.js";
+import {
+  getRequestContext,
+  markOperationAuditRecorded,
+  setOperationAuditContext,
+} from "../../../plugins/request-context.js";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
@@ -93,6 +97,12 @@ const conflict = error(
   "The requested operation conflicts with the current state.",
   409,
   "Conflict",
+);
+const chapterConflict = error(
+  "chapter-conflict",
+  "A chapter with this number already exists in the series.",
+  409,
+  "Chapter conflict",
 );
 const invalid = error(
   "validation-failed",
@@ -279,17 +289,46 @@ export function registerSeriesPlugin(
     { preHandler: session },
     async (request, reply) => {
       const { seriesId } = parse(idSchema, request.params);
+      const payload = parse(chapterCreateSchema, request.body);
+      setOperationAuditContext({
+        action: "chapter.created",
+        resourceType: "chapter",
+        seriesId,
+      });
       try {
         const result = await seriesService.createChapter(
           context(),
           seriesId,
-          parse(chapterCreateSchema, request.body),
+          payload,
         );
         if (!result) throw notFound;
         if ("forbidden" in result) throw forbidden;
+        const requestId = getRequestContext()?.requestId;
+        await repository.appendAudit({
+          actorId: context().userId,
+          action: "chapter.created",
+          resourceType: "chapter",
+          resourceId: result.id,
+          result: "success",
+          ...(requestId ? { requestId } : {}),
+        });
+        markOperationAuditRecorded();
         return reply.code(201).send(result);
       } catch (cause) {
-        if (isUnique(cause)) throw conflict;
+        if (isUnique(cause)) {
+          const requestContext = getRequestContext();
+          request.log.info(
+            {
+              requestId: requestContext?.requestId,
+              actorId: requestContext?.actorId ?? requestContext?.userId,
+              seriesId,
+              chapterNumber: payload.chapterNumber,
+              code: "chapter-conflict",
+            },
+            "Chapter creation rejected because the chapter number conflicts",
+          );
+          throw chapterConflict;
+        }
         throw cause;
       }
     },

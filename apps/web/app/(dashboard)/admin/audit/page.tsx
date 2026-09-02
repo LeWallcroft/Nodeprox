@@ -20,6 +20,9 @@ type AuditEvent = {
   action: string;
   resourceType: string;
   resourceId: string | null;
+  result: "success" | "rejected" | "failed" | null;
+  reasonCode: string | null;
+  requestId: string | null;
   metadata: Record<string, unknown>;
   createdAt: string;
 };
@@ -29,6 +32,7 @@ export default function AuditPage() {
   const [actor, setActor] = useState("");
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
+  const [result, setResult] = useState("");
   const events = useQuery({
     queryKey: ["admin", "audit"],
     queryFn: () => apiRequestBrowser<AuditEvent[]>("/admin/audit"),
@@ -39,14 +43,15 @@ export default function AuditPage() {
     return (events.data ?? []).filter(
       (event) =>
         (!value ||
-          `${event.actorEmail ?? ""} ${event.action} ${event.resourceType} ${event.resourceId ?? ""}`
+          `${event.actorEmail ?? ""} ${event.action} ${event.resourceType} ${event.resourceId ?? ""} ${event.reasonCode ?? ""} ${event.requestId ?? ""}`
             .toLowerCase()
             .includes(value)) &&
         (!actor || event.actorEmail === actor) &&
         (!action || event.action === action) &&
-        (!resource || event.resourceType === resource),
+        (!resource || event.resourceType === resource) &&
+        (!result || event.result === result),
     );
-  }, [action, actor, events.data, query, resource]);
+  }, [action, actor, events.data, query, resource, result]);
   const options = useMemo(
     () => ({
       actors: [
@@ -114,6 +119,16 @@ export default function AuditPage() {
             </option>
           ))}
         </select>
+        <select
+          aria-label="Filtrar por resultado"
+          value={result}
+          onChange={(event) => setResult(event.target.value)}
+        >
+          <option value="">Resultado</option>
+          <option value="success">Exitoso</option>
+          <option value="rejected">Rechazado</option>
+          <option value="failed">Falló</option>
+        </select>
         <Button
           variant="secondary"
           type="button"
@@ -122,6 +137,7 @@ export default function AuditPage() {
             setActor("");
             setAction("");
             setResource("");
+            setResult("");
           }}
         >
           Limpiar filtros
@@ -163,6 +179,8 @@ export default function AuditPage() {
                   <th>Actor</th>
                   <th>Acción</th>
                   <th>Recurso</th>
+                  <th>Resultado</th>
+                  <th>Motivo / Request ID</th>
                 </tr>
               </thead>
               <tbody>
@@ -172,6 +190,11 @@ export default function AuditPage() {
                     <td>{event.actorEmail ?? "Sistema"}</td>
                     <td>
                       <AuditActionBadge action={event.action} />
+                    </td>
+                    <td>{auditResultLabel(event.result)}</td>
+                    <td className="max-w-48 break-words text-xs text-muted">
+                      {event.reasonCode ?? "—"}
+                      {event.requestId ? ` · ${event.requestId}` : ""}
                     </td>
                     <td>
                       {event.resourceType}
@@ -203,6 +226,11 @@ export default function AuditPage() {
                   {event.resourceType}
                   {event.resourceId ? ` · ${event.resourceId}` : ""}
                 </p>
+                <p className="mt-2 text-xs text-muted">
+                  {auditResultLabel(event.result)}
+                  {event.reasonCode ? ` · ${event.reasonCode}` : ""}
+                  {event.requestId ? ` · ${event.requestId}` : ""}
+                </p>
               </article>
             ))}
           </div>
@@ -210,4 +238,11 @@ export default function AuditPage() {
       ) : null}
     </>
   );
+}
+
+function auditResultLabel(result: AuditEvent["result"]) {
+  if (result === "success") return "Exitoso";
+  if (result === "rejected") return "Rechazado";
+  if (result === "failed") return "Falló";
+  return "—";
 }

@@ -40,6 +40,7 @@ export class ChapterPermissionService {
     chapterId: string;
     helperUserId: string;
     permissions: readonly string[];
+    requestId?: string;
   }): Promise<
     | { count: number }
     | { conflict: "cooldown" | "already-granted" }
@@ -56,6 +57,8 @@ export class ChapterPermissionService {
         input.context.userId,
         "chapter.permission.grant.denied",
         input.chapterId,
+        "forbidden",
+        input.requestId,
       );
       return actor.reason === "not-found"
         ? { notFound: true }
@@ -86,6 +89,8 @@ export class ChapterPermissionService {
         input.context.userId,
         "chapter.permission.grant.denied",
         input.chapterId,
+        "forbidden",
+        input.requestId,
       );
       return { denied: true };
     }
@@ -104,6 +109,8 @@ export class ChapterPermissionService {
       input.context.userId,
       "chapter.permission.grant.denied",
       input.chapterId,
+      "chapter-permission-conflict",
+      input.requestId,
     );
     return { conflict: result.reason };
   }
@@ -123,6 +130,7 @@ export class ChapterPermissionService {
         input.context.userId,
         "chapter.permission.revoke.denied",
         input.chapterId,
+        "forbidden",
       );
       return actor.reason === "not-found"
         ? { notFound: true }
@@ -398,6 +406,8 @@ export class ChapterPermissionService {
     actorId: string | undefined,
     action: string,
     chapterId: string,
+    reasonCode: string,
+    requestId?: string,
   ) {
     if (!actorId) return;
     await this.audit.append({
@@ -405,6 +415,9 @@ export class ChapterPermissionService {
       action,
       resourceType: "chapter",
       resourceId: chapterId,
+      result: "rejected",
+      reasonCode,
+      ...(requestId ? { requestId } : {}),
       metadata: { result: "denied" },
     });
   }

@@ -127,12 +127,14 @@ export function registerChapterPermissionPlugin(
       const { chapterId } = parseParams(request);
       const body = parseChapterSchema(grantBodySchema, request.body);
       const context = requestContext();
+      const requestId = getRequestContext()?.requestId;
       try {
         const result = await service.grant({
           context,
           chapterId,
           helperUserId: body.userId,
           permissions: body.permissions,
+          ...(requestId ? { requestId } : {}),
         });
         if ("notFound" in result) throw notFound;
         if ("denied" in result) throw forbidden;

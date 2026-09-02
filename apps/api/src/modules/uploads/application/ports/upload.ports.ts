@@ -46,6 +46,7 @@ export interface UploadLifecycleBoundaryPort {
     chapterId: string;
     uploadId: string;
     verifiedObject: VerifiedUploadedObject;
+    originRequestId?: string;
   }): Promise<UploadFinalizationResult>;
   claimAbortIfAuthorized(input: {
     actor: AuthorizationContext;
@@ -60,6 +61,9 @@ export interface UploadAuditPort {
     action: string;
     resourceType: string;
     resourceId?: string;
+    result?: "success" | "rejected" | "failed";
+    reasonCode?: string;
+    requestId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<void>;
 }

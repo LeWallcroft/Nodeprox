@@ -54,6 +54,9 @@ export function registerAuditPlugin(
           action: auditLogs.action,
           resourceType: auditLogs.resourceType,
           resourceId: auditLogs.resourceId,
+          result: auditLogs.result,
+          reasonCode: auditLogs.reasonCode,
+          requestId: auditLogs.requestId,
           metadata: auditLogs.metadata,
           createdAt: auditLogs.createdAt,
         })

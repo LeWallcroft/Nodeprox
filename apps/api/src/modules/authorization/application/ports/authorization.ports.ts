@@ -13,6 +13,9 @@ export interface AuthorizationAuditRepository {
     action: string;
     resourceType: string;
     resourceId?: string;
+    result?: "success" | "rejected" | "failed";
+    reasonCode?: string;
+    requestId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<void>;
 }

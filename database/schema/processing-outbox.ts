@@ -28,6 +28,7 @@ export const processingOutbox = pgTable(
       .references(() => chapters.id, { onDelete: "cascade" }),
     seriesId: uuid("series_id").notNull(),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    originRequestId: varchar("origin_request_id", { length: 128 }),
     status: processingOutboxStatusEnum("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     availableAt: timestamp("available_at", { withTimezone: true })

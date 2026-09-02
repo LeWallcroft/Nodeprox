@@ -96,6 +96,7 @@ export class ChapterUploadService {
     context: AuthorizationContext;
     chapterId: string;
     uploadId: string;
+    originRequestId?: string;
   }): Promise<ChapterUploadResult> {
     await this.authorize(input.context, input.chapterId);
     const upload = await this.uploads.claimForCompletion(
@@ -136,6 +137,9 @@ export class ChapterUploadService {
         chapterId: input.chapterId,
         uploadId: input.uploadId,
         verifiedObject: verified,
+        ...(input.originRequestId
+          ? { originRequestId: input.originRequestId }
+          : {}),
       });
     } catch (error) {
       await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
@@ -151,6 +155,7 @@ export class ChapterUploadService {
       "chapter.upload.completed",
       input.chapterId,
       "completed",
+      input.originRequestId,
     );
     return {
       chapterId: input.chapterId,
@@ -236,6 +241,7 @@ export class ChapterUploadService {
     action: string,
     chapterId: string,
     result: string,
+    requestId?: string,
   ) {
     try {
       await this.audit.append({
@@ -243,6 +249,8 @@ export class ChapterUploadService {
         action,
         resourceType: "chapter",
         resourceId: chapterId,
+        result: result === "failed" ? "failed" : "success",
+        ...(requestId ? { requestId } : {}),
         metadata: { result },
       });
     } catch {

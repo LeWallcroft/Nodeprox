@@ -16,7 +16,10 @@ export class DrizzleChapterDeletionRepository
 
   async load(deletionId: string, chapterId: string) {
     const [request] = await this.db
-      .select({ requestedBy: chapterDeletionOutbox.requestedBy })
+      .select({
+        requestedBy: chapterDeletionOutbox.requestedBy,
+        originRequestId: chapterDeletionOutbox.originRequestId,
+      })
       .from(chapterDeletionOutbox)
       .where(
         and(
@@ -39,6 +42,7 @@ export class DrizzleChapterDeletionRepository
       deletionId,
       chapterId,
       requestedBy: request.requestedBy,
+      originRequestId: request.originRequestId,
       storageKeys: [...imageRows, ...uploadRows].map((row) => row.key),
     };
   }
@@ -49,6 +53,7 @@ export class DrizzleChapterDeletionRepository
         .select({
           status: chapterDeletionOutbox.status,
           requestedBy: chapterDeletionOutbox.requestedBy,
+          originRequestId: chapterDeletionOutbox.originRequestId,
         })
         .from(chapterDeletionOutbox)
         .where(
@@ -77,6 +82,10 @@ export class DrizzleChapterDeletionRepository
         action: "chapter.deleted",
         resourceType: "chapter",
         resourceId: chapterId,
+        result: "success",
+        ...(request.originRequestId
+          ? { requestId: request.originRequestId }
+          : {}),
         metadata: { result: "completed" },
       });
       await tx

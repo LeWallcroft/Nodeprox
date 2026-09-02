@@ -7,6 +7,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "toRole",
   "resourceType",
   "resourceId",
+  "seriesId",
+  "chapterId",
   "configKey",
   "result",
   "imageCount",

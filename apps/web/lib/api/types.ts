@@ -9,6 +9,16 @@ export interface ProblemDetails {
   detail?: string;
   instance?: string;
   code?: string;
+  category?:
+    | "validation"
+    | "authentication"
+    | "authorization"
+    | "not_found"
+    | "conflict"
+    | "business_rule"
+    | "rate_limit"
+    | "external_dependency"
+    | "internal";
   requestId?: string;
   errors?: readonly unknown[];
 }

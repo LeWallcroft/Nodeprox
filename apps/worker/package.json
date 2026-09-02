@@ -17,6 +17,7 @@
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.7",
     "ioredis": "^6.0.0",
+    "pino": "^9.14.0",
     "postgres": "^3.4.9",
     "unzipper": "^0.12.5"
   }

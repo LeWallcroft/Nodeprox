@@ -14,11 +14,13 @@ import type { NodeProxDatabase } from "../../../../../../../../database/client.j
 import {
   chapterPermissions,
   chapterDeletionOutbox,
+  auditLogs,
   chapters,
   series,
   seriesAssignments,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import {
   lockCurrentAuthorization,
   type NodeProxTransaction,
@@ -80,6 +82,28 @@ export class DrizzleSeriesRepository
     const [row] = await this.db.insert(series).values(input).returning();
     if (!row) throw new Error("series-create-failed");
     return toSeries(row);
+  }
+
+  async appendAudit(input: {
+    actorId: string;
+    action: string;
+    resourceType: string;
+    resourceId?: string;
+    result: "success" | "rejected" | "failed";
+    reasonCode?: string;
+    requestId?: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.db.insert(auditLogs).values({
+      actorId: input.actorId,
+      action: input.action,
+      resourceType: input.resourceType,
+      ...(input.resourceId ? { resourceId: input.resourceId } : {}),
+      result: input.result,
+      ...(input.reasonCode ? { reasonCode: input.reasonCode } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+      metadata: sanitizeAuditMetadata(input.metadata),
+    });
   }
 
   async listByOwner(ownerId: string) {

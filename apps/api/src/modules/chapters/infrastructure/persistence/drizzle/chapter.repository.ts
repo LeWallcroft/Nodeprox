@@ -469,6 +469,9 @@ export class DrizzleChapterRepository
     action: string;
     resourceType: string;
     resourceId?: string;
+    result?: "success" | "rejected" | "failed";
+    reasonCode?: string;
+    requestId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     await this.db.insert(auditLogs).values({
@@ -476,6 +479,9 @@ export class DrizzleChapterRepository
       action: input.action,
       resourceType: input.resourceType,
       ...(input.resourceId ? { resourceId: input.resourceId } : {}),
+      ...(input.result ? { result: input.result } : {}),
+      ...(input.reasonCode ? { reasonCode: input.reasonCode } : {}),
+      ...(input.requestId ? { requestId: input.requestId } : {}),
       metadata: sanitizeAuditMetadata(input.metadata),
     });
   }

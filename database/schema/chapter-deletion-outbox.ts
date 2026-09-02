@@ -3,6 +3,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   uuid,
@@ -22,6 +23,7 @@ export const chapterDeletionOutbox = pgTable(
     requestedBy: uuid("requested_by")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    originRequestId: text("origin_request_id"),
     status: chapterDeletionOutboxStatusEnum("status")
       .notNull()
       .default("pending"),

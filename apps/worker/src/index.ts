@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { join } from "node:path";
 import { Worker } from "bullmq";
+import pino from "pino";
 import {
   loadConfig,
   loadProcessingConfig,
@@ -16,6 +17,24 @@ import { DrizzleProcessingRepository } from "./processing/infrastructure/persist
 import { ChapterDeletionService } from "./deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "./deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 const config = loadConfig();
+const logger = pino({
+  level: config.LOG_LEVEL,
+  redact: {
+    paths: [
+      "password",
+      "passwordHash",
+      "token",
+      "accessToken",
+      "refreshToken",
+      "authorization",
+      "cookie",
+      "DATABASE_URL",
+      "REDIS_URL",
+      "presignedUrl",
+    ],
+    censor: "[REDACTED]",
+  },
+});
 const processing = loadProcessingConfig();
 const database = createDatabase(config.DATABASE_URL);
 const storageConfig = loadStorageConfig();
@@ -39,8 +58,17 @@ const connection = {
 const worker = new Worker(
   processing.PROCESSING_QUEUE_NAME,
   async (job) => {
+    const correlation = {
+      jobId: String(job.id),
+      attemptsMade: job.attemptsMade,
+      originRequestId: job.data.originRequestId,
+      chapterId: job.data.chapterId,
+      uploadId: "uploadId" in job.data ? job.data.uploadId : undefined,
+    };
+    logger.info(correlation, "Worker job started");
     if (job.name === "chapter.delete") {
       await deletion.execute(job.data);
+      logger.info(correlation, "Worker job completed");
       return;
     }
     const warningRows = await database.db
@@ -74,6 +102,7 @@ const worker = new Worker(
       extractor,
       repository,
     ).process(job.data, finalAttempt);
+    logger.info(correlation, "Worker job completed");
   },
   { connection, concurrency: 1 },
 );
@@ -101,14 +130,20 @@ function sanitizeDiagnosticText(value: string): string {
 }
 
 worker.on("failed", (job, error) => {
-  console.error({
-    event: "worker-job-failed",
-    jobName: job?.name ?? "unknown",
-    jobId: job?.id ?? "unknown",
-    attemptsMade: job?.attemptsMade ?? 0,
-    errorName: error.name,
-    errorMessage: sanitizeDiagnosticText(error.message),
-  });
+  logger.error(
+    {
+      event: "worker-job-failed",
+      jobName: job?.name ?? "unknown",
+      jobId: job?.id ?? "unknown",
+      attemptsMade: job?.attemptsMade ?? 0,
+      originRequestId: job?.data.originRequestId,
+      chapterId: job?.data.chapterId,
+      uploadId: job?.data.uploadId,
+      errorName: error.name,
+      errorMessage: sanitizeDiagnosticText(error.message),
+    },
+    "Worker job failed",
+  );
 });
 process.once("SIGTERM", async () => {
   await worker.close();
