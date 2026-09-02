@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import type {
-  StoragePort,
-  UploadTransferPort,
-} from "../../packages/storage/src/port.js";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
+import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import type { ZipExtractorPort } from "../../apps/worker/src/processing/application/ports.js";
+import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
+import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
@@ -17,13 +17,14 @@ import {
   images,
   processingOutbox,
   series,
+  seriesAssignments,
   uploads,
   users,
 } from "../../database/schema/index.js";
-import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
-import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
-import type { ZipExtractorPort } from "../../apps/worker/src/processing/application/ports.js";
-import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
+import type {
+  StoragePort,
+  UploadTransferPort,
+} from "../../packages/storage/src/port.js";
 
 class FakeTransfer implements UploadTransferPort {
   readonly keys: string[] = [];
@@ -96,8 +97,10 @@ const app = buildApp(
 );
 const ownerId = randomUUID();
 const unrelatedId = randomUUID();
+const supportGestorId = randomUUID();
 const ownerEmail = `batch-owner-${ownerId}@example.test`;
 const unrelatedEmail = `batch-unrelated-${unrelatedId}@example.test`;
+const supportGestorEmail = `batch-support-${supportGestorId}@example.test`;
 const password = "batch-test-password";
 const createdSeriesIds: string[] = [];
 
@@ -118,13 +121,20 @@ beforeAll(async () => {
       status: "active",
       role: "uploader",
     },
+    {
+      id: supportGestorId,
+      email: supportGestorEmail,
+      passwordHash,
+      status: "active",
+      role: "gestor",
+    },
   ]);
 });
 
 afterAll(async () => {
   await database.db
     .delete(auditLogs)
-    .where(inArray(auditLogs.actorId, [ownerId, unrelatedId]));
+    .where(inArray(auditLogs.actorId, [ownerId, unrelatedId, supportGestorId]));
   if (createdSeriesIds.length) {
     const createdChapters = await database.db
       .select({ id: chapters.id })
@@ -154,7 +164,7 @@ afterAll(async () => {
   }
   await database.db
     .delete(users)
-    .where(inArray(users.id, [ownerId, unrelatedId]));
+    .where(inArray(users.id, [ownerId, unrelatedId, supportGestorId]));
   await app.close();
   await database.sql.end();
 });
@@ -172,8 +182,401 @@ async function login(email: string) {
   return value;
 }
 
+async function createSeries(cookie: string, title: string) {
+  const response = await app.inject({
+    method: "POST",
+    url: "/series",
+    headers: { cookie },
+    payload: { title, slug: `bulk-${randomUUID()}` },
+  });
+  expect(response.statusCode, response.body).toBe(201);
+  const seriesId = response.json().id as string;
+  createdSeriesIds.push(seriesId);
+  return seriesId;
+}
+
+async function createChapter(
+  cookie: string,
+  seriesId: string,
+  chapterNumber: number,
+) {
+  const response = await app.inject({
+    method: "POST",
+    url: `/series/${seriesId}/chapters`,
+    headers: { cookie },
+    payload: { chapterNumber },
+  });
+  expect(response.statusCode, response.body).toBe(201);
+  return response.json() as { id: string; chapterNumber: number };
+}
+
 describe("ChapterImportBatch metadata orchestration", () => {
+  it("persists created, reused and conflict resolutions independently", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const seriesId = await createSeries(ownerCookie, "Smart Bulk Raven");
+    const reusable = await createChapter(ownerCookie, seriesId, 1.5);
+    const processing = await createChapter(ownerCookie, seriesId, 2);
+    await database.db
+      .update(chapters)
+      .set({ status: "processing" })
+      .where(eq(chapters.id, processing.id));
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        items: [
+          {
+            clientId: "created-zero",
+            chapterNumber: 0,
+            filename: "not-authority.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+          {
+            clientId: "reused-decimal",
+            chapterNumber: 1.5,
+            filename: "999.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+          {
+            clientId: "processing-conflict",
+            chapterNumber: 2,
+            filename: "2.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+        ],
+      },
+    });
+
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json().items).toEqual([
+      expect.objectContaining({
+        clientId: "created-zero",
+        resolution: "created",
+        status: "uploading",
+      }),
+      expect.objectContaining({
+        clientId: "reused-decimal",
+        chapterId: reusable.id,
+        resolution: "reused",
+        status: "uploading",
+      }),
+      expect.objectContaining({
+        clientId: "processing-conflict",
+        chapterId: processing.id,
+        resolution: "conflict",
+        status: "failed",
+        errorCode: "chapter-processing",
+      }),
+    ]);
+
+    const batchId = response.json().batchId as string;
+    const persisted = await database.db
+      .select()
+      .from(chapterImportItems)
+      .where(eq(chapterImportItems.batchId, batchId));
+    expect(persisted).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          clientId: "created-zero",
+          targetResolution: "created",
+          errorCode: null,
+        }),
+        expect.objectContaining({
+          clientId: "reused-decimal",
+          chapterId: reusable.id,
+          targetResolution: "reused",
+          errorCode: null,
+        }),
+        expect.objectContaining({
+          clientId: "processing-conflict",
+          chapterId: processing.id,
+          targetResolution: "conflict",
+          status: "failed",
+          errorCode: "chapter-processing",
+        }),
+      ]),
+    );
+    const projected = await app.inject({
+      method: "GET",
+      url: `/import-batches/${batchId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(projected.statusCode).toBe(200);
+    expect(
+      projected
+        .json()
+        .items.map((item: { clientId: string; resolution: string | null }) => [
+          item.clientId,
+          item.resolution,
+        ]),
+    ).toEqual([
+      ["created-zero", "created"],
+      ["reused-decimal", "reused"],
+      ["processing-conflict", "conflict"],
+    ]);
+    expect(
+      persisted.filter((item) => item.chapterId === processing.id),
+    ).toHaveLength(1);
+    expect(
+      await database.db
+        .select({ id: uploads.id })
+        .from(uploads)
+        .where(eq(uploads.chapterId, processing.id)),
+    ).toHaveLength(0);
+  });
+
+  it("serializes concurrent absent resolution to one Chapter and one active upload", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const seriesId = await createSeries(ownerCookie, "Concurrent Smart Bulk");
+    const payload = (clientId: string) => ({
+      items: [
+        {
+          clientId,
+          chapterNumber: 25.125,
+          filename: `${clientId}.zip`,
+          contentType: "application/zip",
+          sizeBytes: 4,
+        },
+      ],
+    });
+
+    const responses = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/import-batches`,
+        headers: { cookie: ownerCookie },
+        payload: payload("race-a"),
+      }),
+      app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/import-batches`,
+        headers: { cookie: ownerCookie },
+        payload: payload("race-b"),
+      }),
+    ]);
+    expect(responses.map((item) => item.statusCode)).toEqual([201, 201]);
+    const results = responses.map((item) => item.json().items[0]);
+    expect(results.map((item) => item.resolution).sort()).toEqual([
+      "conflict",
+      "created",
+    ]);
+    expect(
+      results.find((item) => item.resolution === "conflict"),
+    ).toMatchObject({
+      status: "failed",
+      errorCode: "chapter-upload-active",
+    });
+    const chapterRows = await database.db
+      .select({ id: chapters.id })
+      .from(chapters)
+      .where(eq(chapters.seriesId, seriesId));
+    expect(chapterRows).toHaveLength(1);
+    const uploadRows = await database.db
+      .select({ id: uploads.id })
+      .from(uploads)
+      .where(eq(uploads.chapterId, chapterRows[0]?.id ?? ""));
+    expect(uploadRows).toHaveLength(1);
+  });
+
+  it("allows only one upload when two requests concurrently reuse a draft", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const seriesId = await createSeries(ownerCookie, "Concurrent Reuse");
+    const chapter = await createChapter(ownerCookie, seriesId, 1.5);
+    const request = (clientId: string) =>
+      app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/import-batches`,
+        headers: { cookie: ownerCookie },
+        payload: {
+          items: [
+            {
+              clientId,
+              chapterNumber: 1.5,
+              filename: `${clientId}.zip`,
+              contentType: "application/zip",
+              sizeBytes: 4,
+            },
+          ],
+        },
+      });
+
+    const responses = await Promise.all([
+      request("reuse-a"),
+      request("reuse-b"),
+    ]);
+    expect(responses.map((item) => item.statusCode)).toEqual([201, 201]);
+    const results = responses.map((item) => item.json().items[0]);
+    expect(results.map((item) => item.resolution).sort()).toEqual([
+      "conflict",
+      "reused",
+    ]);
+    expect(results.every((item) => item.chapterId === chapter.id)).toBe(true);
+    expect(
+      await database.db
+        .select({ id: uploads.id })
+        .from(uploads)
+        .where(eq(uploads.chapterId, chapter.id)),
+    ).toHaveLength(1);
+  });
+
+  it("allows a Gestor to resolve a foreign Chapter without changing ownership", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const supportCookie = await login(supportGestorEmail);
+    const seriesId = await createSeries(ownerCookie, "Foreign Smart Bulk");
+    const response = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie: supportCookie },
+      payload: {
+        items: [
+          {
+            clientId: "foreign-gestor",
+            chapterNumber: 0.5,
+            filename: "foreign.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+        ],
+      },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json().items[0]).toMatchObject({
+      resolution: "created",
+      status: "uploading",
+    });
+    const [persistedSeries] = await database.db
+      .select({ createdBy: series.createdBy })
+      .from(series)
+      .where(eq(series.id, seriesId));
+    expect(persistedSeries?.createdBy).toBe(ownerId);
+    expect(
+      await database.db
+        .select({ id: seriesAssignments.id })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, seriesId)),
+    ).toHaveLength(0);
+  });
+
+  it("reresolves a conflict item to reused on retry", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const seriesId = await createSeries(ownerCookie, "Retry Smart Target");
+    const chapter = await createChapter(ownerCookie, seriesId, 5);
+    const active = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapter.id}/uploads/initiate`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        filename: "active.zip",
+        contentType: "application/zip",
+        sizeBytes: 4,
+      },
+    });
+    expect(active.statusCode, active.body).toBe(201);
+
+    const batch = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        items: [
+          {
+            clientId: "retry-conflict",
+            chapterNumber: 5,
+            filename: "5.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+        ],
+      },
+    });
+    expect(batch.statusCode).toBe(201);
+    expect(batch.json().items[0]).toMatchObject({
+      chapterId: chapter.id,
+      resolution: "conflict",
+      errorCode: "chapter-upload-active",
+    });
+
+    const abort = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapter.id}/uploads/${active.json().uploadId}/abort`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(abort.statusCode, abort.body).toBe(204);
+
+    const item = batch.json().items[0] as { itemId: string };
+    const retried = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches/${batch.json().batchId}/items/${item.itemId}/retry`,
+      headers: { cookie: ownerCookie },
+      payload: { contentType: "application/zip", sizeBytes: 4 },
+    });
+    expect(retried.statusCode, retried.body).toBe(201);
+    expect(retried.json()).toMatchObject({
+      chapterId: chapter.id,
+      resolution: "reused",
+      status: "uploading",
+    });
+    const [persisted] = await database.db
+      .select({
+        chapterId: chapterImportItems.chapterId,
+        resolution: chapterImportItems.targetResolution,
+        status: chapterImportItems.status,
+        errorCode: chapterImportItems.errorCode,
+      })
+      .from(chapterImportItems)
+      .where(eq(chapterImportItems.id, item.itemId));
+    expect(persisted).toEqual({
+      chapterId: chapter.id,
+      resolution: "reused",
+      status: "uploading",
+      errorCode: null,
+    });
+  });
+
+  it("reads historical null resolution and rejects invalid enum values", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const seriesId = await createSeries(ownerCookie, "Historical Smart Bulk");
+    const batchId = randomUUID();
+    await database.db.insert(chapterImportBatches).values({
+      id: batchId,
+      seriesId,
+      createdBy: ownerId,
+    });
+    const [historical] = await database.db
+      .insert(chapterImportItems)
+      .values({
+        batchId,
+        clientId: "historical-null",
+        chapterNumber: 1,
+        filename: "historical.zip",
+        status: "failed",
+        errorCode: "historical",
+      })
+      .returning({ id: chapterImportItems.id });
+    const response = await app.inject({
+      method: "GET",
+      url: `/import-batches/${batchId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items[0]).toMatchObject({
+      clientId: "historical-null",
+      resolution: null,
+    });
+    await expect(
+      database.db.execute(
+        sql`update chapter_import_items set target_resolution = 'invalid' where id = ${historical?.id}`,
+      ),
+    ).rejects.toThrow();
+  });
+
   it("creates independent direct-upload items and keeps chapterNumber explicit", async () => {
+    const transferCountBefore = transfer.keys.length;
     const ownerCookie = await login(ownerEmail);
     const created = await app.inject({
       method: "POST",
@@ -218,7 +621,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
     expect(
       response.json().items.map((item: { status: string }) => item.status),
     ).toEqual(["uploading", "failed", "uploading"]);
-    expect(transfer.keys).toHaveLength(2);
+    expect(transfer.keys).toHaveLength(transferCountBefore + 2);
 
     const persistedChapters = await database.db
       .select({ number: chapters.chapterNumber, publicKey: chapters.publicKey })
@@ -244,8 +647,12 @@ describe("ChapterImportBatch metadata orchestration", () => {
       .where(eq(chapterImportItems.batchId, response.json().batchId));
     expect(batchItems).toHaveLength(3);
     expect(
-      batchItems.find((item) => item.clientId === "item-26")?.errorCode,
-    ).toBe("invalid-upload");
+      batchItems.find((item) => item.clientId === "item-26"),
+    ).toMatchObject({
+      errorCode: "invalid-upload",
+      targetResolution: "created",
+      chapterId: expect.any(String),
+    });
     expect(await database.db.select().from(uploads)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ originalFilename: "999.zip" }),
