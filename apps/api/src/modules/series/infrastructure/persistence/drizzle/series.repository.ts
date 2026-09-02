@@ -30,6 +30,7 @@ import {
   type Permission,
 } from "../../../../authorization/domain/permissions.js";
 import { canAdministerSeries } from "../../../domain/series.policy.js";
+import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
 import { evaluateChapterDelete } from "../../../../chapters/domain/chapter-delete.policy.js";
 import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
@@ -59,7 +60,7 @@ const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
 const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
   id: row.id,
   seriesId: row.seriesId,
-  chapterNumber: row.chapterNumber,
+  chapterNumber: ChapterNumber.parse(row.chapterNumber).toNumber(),
   publicKey: row.publicKey,
   title: row.title,
   status: row.status,
@@ -445,7 +446,11 @@ export class DrizzleChapterCoreRepository
       );
       const [row] = await tx
         .insert(chapters)
-        .values({ ...input, publicKey: String(input.chapterNumber) })
+        .values({
+          ...input,
+          chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
+          publicKey: ChapterNumber.parse(input.chapterNumber).toPublicKey(),
+        })
         .returning();
       if (!row) throw new Error("chapter-create-failed");
       return toChapter(row);
@@ -567,7 +572,17 @@ export class DrizzleChapterCoreRepository
   ) {
     const [row] = await this.db
       .update(chapters)
-      .set({ ...input, updatedAt: new Date() })
+      .set({
+        ...input,
+        ...(input.chapterNumber === undefined
+          ? {}
+          : {
+              chapterNumber: ChapterNumber.parse(
+                input.chapterNumber,
+              ).toNumber(),
+            }),
+        updatedAt: new Date(),
+      })
       .where(eq(chapters.id, id))
       .returning();
     return row ? toChapter(row) : null;
@@ -598,7 +613,17 @@ export class DrizzleChapterCoreRepository
         return { outcome: "conflict" as const };
       const [updated] = await tx
         .update(chapters)
-        .set({ ...input.mutation, updatedAt: new Date() })
+        .set({
+          ...input.mutation,
+          ...(input.mutation.chapterNumber === undefined
+            ? {}
+            : {
+                chapterNumber: ChapterNumber.parse(
+                  input.mutation.chapterNumber,
+                ).toNumber(),
+              }),
+          updatedAt: new Date(),
+        })
         .where(eq(chapters.id, input.chapterId))
         .returning();
       return updated

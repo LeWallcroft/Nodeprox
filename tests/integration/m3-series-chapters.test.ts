@@ -479,6 +479,109 @@ describe("M3 Series and Chapters Core", () => {
     ).toBe(204);
   });
 
+  it("accepts exact non-negative decimal Chapter numbers and orders them numerically", async () => {
+    const ownerCookie = await login(emails.owner);
+    const created = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: { title: "Decimal Chapters", slug: `decimal-${randomUUID()}` },
+    });
+    expect(created.statusCode).toBe(201);
+    const seriesId = created.json().id as string;
+    const values = [0, 0.1, 0.5, 1, 1.5, 2.1, 25.125];
+    for (const chapterNumber of values) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/chapters`,
+        headers: { cookie: ownerCookie },
+        payload: { chapterNumber },
+      });
+      expect(response.statusCode, response.body).toBe(201);
+      expect(response.json().chapterNumber).toBe(chapterNumber);
+      if (chapterNumber === 0) expect(response.json().status).toBe("draft");
+    }
+    const listed = await app.inject({
+      method: "GET",
+      url: `/series/${seriesId}/chapters`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(
+      listed
+        .json()
+        .map((chapter: { chapterNumber: number }) => chapter.chapterNumber),
+    ).toEqual(values);
+
+    for (const chapterNumber of [-0.1, -1, 1.2345]) {
+      expect(
+        (
+          await app.inject({
+            method: "POST",
+            url: `/series/${seriesId}/chapters`,
+            headers: { cookie: ownerCookie },
+            payload: { chapterNumber },
+          })
+        ).statusCode,
+      ).toBe(422);
+    }
+    const duplicate = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/chapters`,
+      headers: { cookie: ownerCookie },
+      payload: { chapterNumber: 1.5 },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json()).toMatchObject({ code: "chapter-conflict" });
+
+    const edited = await app.inject({
+      method: "PATCH",
+      url: `/chapters/${
+        listed
+          .json()
+          .find(
+            (chapter: { chapterNumber: number }) =>
+              chapter.chapterNumber === 1.5,
+          ).id as string
+      }`,
+      headers: { cookie: ownerCookie },
+      payload: { title: "Decimal title" },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().chapterNumber).toBe(1.5);
+  });
+
+  it("maps concurrent canonical-equivalent Chapter creates to one conflict", async () => {
+    const ownerCookie = await login(emails.owner);
+    const created = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: {
+        title: "Concurrent Decimal Chapters",
+        slug: `decimal-concurrent-${randomUUID()}`,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const seriesId = created.json().id as string;
+    const responses = await Promise.all(
+      [1.5, 1.5].map((chapterNumber) =>
+        app.inject({
+          method: "POST",
+          url: `/series/${seriesId}/chapters`,
+          headers: { cookie: ownerCookie },
+          payload: { chapterNumber },
+        }),
+      ),
+    );
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      201, 409,
+    ]);
+    expect(
+      responses.find((response) => response.statusCode === 409)?.json(),
+    ).toMatchObject({ code: "chapter-conflict" });
+  });
+
   it("keeps Series administration owned while allowing Gestor Chapter support", async () => {
     const ownerCookie = await login(emails.owner);
     const otherCookie = await login(emails.other);

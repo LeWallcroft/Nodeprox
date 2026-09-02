@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
+  check,
   index,
-  integer,
+  numeric,
   pgEnum,
   pgTable,
   timestamp,
@@ -51,7 +53,11 @@ export const chapterImportItems = pgTable(
       .notNull()
       .references(() => chapterImportBatches.id, { onDelete: "cascade" }),
     clientId: varchar("client_id", { length: 100 }).notNull(),
-    chapterNumber: integer("chapter_number").notNull(),
+    chapterNumber: numeric("chapter_number", {
+      precision: 10,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
     filename: varchar("filename", { length: 255 }).notNull(),
     chapterId: uuid("chapter_id").references(() => chapters.id, {
       onDelete: "set null",
@@ -69,6 +75,10 @@ export const chapterImportItems = pgTable(
       .defaultNow(),
   },
   (table) => [
+    check(
+      "chapter_import_items_number_non_negative",
+      sql`${table.chapterNumber} >= 0`,
+    ),
     uniqueIndex("chapter_import_items_client_unique").on(
       table.batchId,
       table.clientId,

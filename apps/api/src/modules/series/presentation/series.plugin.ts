@@ -13,6 +13,7 @@ import { requireSession } from "../../authentication/presentation/session-guards
 import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import { ChapterDeleteService } from "../../chapters/application/services/chapter-delete.service.js";
 import { ChapterCoreService } from "../../chapters/application/services/chapter-core.service.js";
+import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
 import {
   DrizzleChapterCoreRepository,
@@ -54,7 +55,7 @@ const seriesPatchSchema = z
   .strict();
 const chapterCreateSchema = z
   .object({
-    chapterNumber: z.number().int().positive(),
+    chapterNumber: z.number().finite().refine(ChapterNumber.isValid),
     title: z.string().trim().max(200).nullable().optional(),
   })
   .strict();

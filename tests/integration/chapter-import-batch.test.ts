@@ -271,6 +271,57 @@ describe("ChapterImportBatch metadata orchestration", () => {
     expect(unrelated.statusCode).toBe(403);
   });
 
+  it("accepts explicit decimal Chapter numbers independently of ZIP filenames", async () => {
+    const ownerCookie = await login(ownerEmail);
+    const created = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: {
+        title: "Decimal Bulk Raven",
+        slug: `bulk-decimal-${randomUUID()}`,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const seriesId = created.json().id as string;
+    createdSeriesIds.push(seriesId);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie: ownerCookie },
+      payload: {
+        items: [
+          {
+            clientId: "decimal-zero",
+            chapterNumber: 0,
+            filename: "not-the-number.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+          {
+            clientId: "decimal-half",
+            chapterNumber: 0.5,
+            filename: "24.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+        ],
+      },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    const persisted = await database.db
+      .select({ number: chapters.chapterNumber })
+      .from(chapters)
+      .where(eq(chapters.seriesId, seriesId));
+    expect(persisted.map((chapter) => chapter.number).sort()).toEqual([0, 0.5]);
+    const persistedItems = await database.db
+      .select({ number: chapterImportItems.chapterNumber })
+      .from(chapterImportItems)
+      .where(eq(chapterImportItems.batchId, response.json().batchId));
+    expect(persistedItems.map((item) => item.number).sort()).toEqual([0, 0.5]);
+  });
+
   it("projects partial failure and atomically retries only the failed item", async () => {
     const ownerCookie = await login(ownerEmail);
     const unrelatedCookie = await login(unrelatedEmail);
@@ -297,7 +348,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
       url: `/series/${seriesId}/import-batches`,
       headers: { cookie: ownerCookie },
       payload: {
-        items: [25, 26, 30].map((chapterNumber) => ({
+        items: [25, 0.5, 30].map((chapterNumber) => ({
           clientId: `item-${chapterNumber}`,
           chapterNumber,
           filename: `${chapterNumber}.zip`,
@@ -370,7 +421,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
     }
 
     const item25 = batch.items.find((item) => item.clientId === "item-25");
-    const item26 = batch.items.find((item) => item.clientId === "item-26");
+    const item26 = batch.items.find((item) => item.clientId === "item-0.5");
     const item30 = batch.items.find((item) => item.clientId === "item-30");
     if (!item25 || !item26 || !item30) throw new Error("batch items missing");
     await completeAndProcess(item25);
@@ -388,7 +439,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
       items: [
         { clientId: "item-25", status: "ready" },
         {
-          clientId: "item-26",
+          clientId: "item-0.5",
           status: "failed",
           errorCode: "processing-failed",
         },
@@ -459,15 +510,16 @@ describe("ChapterImportBatch metadata orchestration", () => {
       status: "completed",
       items: [
         { clientId: "item-25", status: "ready" },
-        { clientId: "item-26", status: "ready", errorCode: null },
+        { clientId: "item-0.5", status: "ready", errorCode: null },
         { clientId: "item-30", status: "ready" },
       ],
     });
     expect(
       completed
         .json()
-        .items.find((item: { clientId: string }) => item.clientId === "item-26")
-        ?.itemId,
+        .items.find(
+          (item: { clientId: string }) => item.clientId === "item-0.5",
+        )?.itemId,
     ).toBe(failed.itemId);
     expect(
       completed
@@ -505,8 +557,8 @@ describe("ChapterImportBatch metadata orchestration", () => {
         ),
       );
     expect(publishedKeys.map((row) => row.storageKey).sort()).toEqual([
+      `Media/${seriesSlug}/0-5/01.jpg`,
       `Media/${seriesSlug}/25/01.jpg`,
-      `Media/${seriesSlug}/26/01.jpg`,
       `Media/${seriesSlug}/30/01.jpg`,
     ]);
   });

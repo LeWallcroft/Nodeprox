@@ -1,6 +1,7 @@
 import type { AuthorizationService } from "../../../authorization/application/services/authorization.service.js";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
+import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
 import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
 import type {
   ChapterCoreRepositoryPort,
@@ -146,6 +147,7 @@ export class SeriesService {
     if (!operational || "forbidden" in operational) return operational;
     return this.chapters.create({
       ...input,
+      chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
       seriesId,
       createdBy: context.userId,
     });
