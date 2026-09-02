@@ -5,10 +5,7 @@ import {
   PRODUCT_SETTINGS_REGISTRY,
   type ProductSettingValue,
 } from "../../domain/product-settings.registry.js";
-import type {
-  AuthorizationAuditRepository,
-  ProductSettingsRepository,
-} from "../ports/authorization.ports.js";
+import type { ProductSettingsRepository } from "../ports/authorization.ports.js";
 import type { AuthorizationService } from "./authorization.service.js";
 
 export class ProductSettingsValidationError extends Error {}
@@ -18,7 +15,6 @@ export class ProductSettingsService {
   constructor(
     private readonly repository: ProductSettingsRepository,
     private readonly authorization: AuthorizationService,
-    private readonly audit: AuthorizationAuditRepository,
   ) {}
 
   private async requireManage(context: AuthorizationContext) {
@@ -61,6 +57,7 @@ export class ProductSettingsService {
   async update(
     context: AuthorizationContext,
     changes: Array<{ key: string; value: ProductSettingValue }>,
+    requestId?: string,
   ) {
     await this.requireManage(context);
     if (!changes.length) throw new ProductSettingsValidationError();
@@ -78,12 +75,10 @@ export class ProductSettingsService {
         throw new ProductSettingsValidationError();
       normalized.set(change.key, change.value);
     }
-    await this.repository.write([...normalized.entries()], context.userId);
-    await this.audit.append({
+    await this.repository.writeWithAudit({
+      changes: [...normalized.entries()],
       actorId: context.userId,
-      action: "settings.updated",
-      resourceType: "product-settings",
-      metadata: { keys: [...normalized.keys()] },
+      ...(requestId ? { requestId } : {}),
     });
     return this.list(context);
   }
