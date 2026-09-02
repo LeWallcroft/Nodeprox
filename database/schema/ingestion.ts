@@ -20,6 +20,11 @@ export const chapterImportItemStatusEnum = pgEnum(
   ["pending", "uploading", "uploaded", "processing", "ready", "failed"],
 );
 
+export const chapterImportTargetResolutionEnum = pgEnum(
+  "chapter_import_target_resolution",
+  ["created", "reused", "conflict"],
+);
+
 export const chapterImportBatches = pgTable(
   "chapter_import_batches",
   {
@@ -67,6 +72,7 @@ export const chapterImportItems = pgTable(
     }),
     status: chapterImportItemStatusEnum("status").notNull().default("pending"),
     errorCode: varchar("error_code", { length: 100 }),
+    targetResolution: chapterImportTargetResolutionEnum("target_resolution"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

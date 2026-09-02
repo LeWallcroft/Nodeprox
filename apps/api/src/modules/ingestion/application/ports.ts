@@ -1,6 +1,6 @@
 import type { UploadTransferGrant } from "@nodeprox/storage/port";
-import type { AuthorizationContext } from "../../authorization/domain/authorization.types.js";
 import type { MediaWarning } from "@nodeprox/types";
+import type { AuthorizationContext } from "../../authorization/domain/authorization.types.js";
 
 export type ImportItemInput = {
   clientId: string;
@@ -8,6 +8,40 @@ export type ImportItemInput = {
   filename: string;
   contentType: string;
   sizeBytes: number;
+};
+
+export type ChapterTargetResolutionKind = "created" | "reused" | "conflict";
+
+export type ChapterConflictReason =
+  | "chapter-upload-active"
+  | "chapter-uploaded"
+  | "chapter-processing"
+  | "chapter-ready"
+  | "chapter-failed"
+  | "chapter-deleting"
+  | "chapter-media-exists";
+
+export type ChapterTargetResolution =
+  | { kind: "created" | "reused"; chapterId: string }
+  | {
+      kind: "conflict";
+      chapterId?: string;
+      reason: ChapterConflictReason;
+    };
+
+export type ImportChapterTarget = {
+  chapterId: string;
+  status:
+    | "draft"
+    | "uploading"
+    | "uploaded"
+    | "processing"
+    | "ready"
+    | "failed"
+    | "deleting";
+  hasActiveUpload: boolean;
+  hasUpload: boolean;
+  hasMedia: boolean;
 };
 
 export type ImportItemProjection = {
@@ -25,6 +59,7 @@ export type ImportItemProjection = {
     | "ready"
     | "failed";
   errorCode: string | null;
+  resolution: ChapterTargetResolutionKind | null;
   warnings: readonly MediaWarning[];
   createdAt: Date;
   updatedAt: Date;
@@ -45,7 +80,17 @@ export interface ImportBatchRepositoryPort {
     uploadId?: string;
     status: ImportItemProjection["status"];
     errorCode?: string;
+    resolution?: ChapterTargetResolutionKind;
   }): Promise<string>;
+  attachUpload(input: { itemId: string; uploadId: string }): Promise<boolean>;
+  updateResolution(input: {
+    itemId: string;
+    chapterId?: string;
+    resolution: ChapterTargetResolutionKind;
+    errorCode?: string | null;
+    status?: ImportItemProjection["status"];
+  }): Promise<boolean>;
+  failItem(input: { itemId: string; errorCode: string }): Promise<void>;
   find(batchId: string): Promise<{
     id: string;
     seriesId: string;
@@ -61,17 +106,13 @@ export interface ImportBatchRepositoryPort {
         item: {
           id: string;
           clientId: string;
-          chapterId: string;
+          chapterId: string | null;
+          chapterNumber: number;
           filename: string;
         };
       }
     | { outcome: "not-found" | "conflict" }
   >;
-  attachRetryUpload(input: {
-    itemId: string;
-    uploadId: string;
-  }): Promise<boolean>;
-  failRetry(input: { itemId: string; errorCode: string }): Promise<void>;
 }
 
 export interface ImportSeriesAccessPort {
@@ -81,7 +122,14 @@ export interface ImportSeriesAccessPort {
   ): Promise<"allowed" | "denied" | "not-found">;
 }
 
-export interface ImportChapterPort {
+export interface ImportChapterLookupPort {
+  findTarget(
+    seriesId: string,
+    chapterNumber: number,
+  ): Promise<ImportChapterTarget | null>;
+}
+
+export interface ImportChapterCreatePort {
   create(input: {
     actor: AuthorizationContext;
     seriesId: string;
@@ -99,10 +147,14 @@ export interface ImportUploadPort {
     filename: string;
     contentType: string;
     sizeBytes: number;
-  }): Promise<{
-    uploadId: string;
-    transfer: UploadTransferGrant;
-  }>;
+  }): Promise<
+    | {
+        outcome: "initiated";
+        uploadId: string;
+        transfer: UploadTransferGrant;
+      }
+    | { outcome: "conflict" }
+  >;
   abort(input: {
     actor: AuthorizationContext;
     chapterId: string;

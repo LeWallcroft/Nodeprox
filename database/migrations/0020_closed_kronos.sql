@@ -1,0 +1,2 @@
+CREATE TYPE "public"."chapter_import_target_resolution" AS ENUM('created', 'reused', 'conflict');--> statement-breakpoint
+ALTER TABLE "chapter_import_items" ADD COLUMN "target_resolution" "chapter_import_target_resolution";

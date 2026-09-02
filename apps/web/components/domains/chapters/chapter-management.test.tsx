@@ -1,15 +1,19 @@
-import { renderToStaticMarkup } from "react-dom/server";
-import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
+import { UploadForm } from "../uploads/upload-form";
+import {
+  BulkChapterUploadDialog,
+  importErrorLabel,
+  resolutionLabel,
+} from "./bulk-chapter-upload-dialog";
 import { ChapterDetailPanel } from "./chapter-detail-panel";
 import { ChapterForm } from "./chapter-form";
 import { ChapterList } from "./chapter-list";
-import { UploadForm } from "../uploads/upload-form";
-import { BulkChapterUploadDialog } from "./bulk-chapter-upload-dialog";
 
 const chapter = {
   id: "chapter-25",
@@ -119,6 +123,18 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain('type="file"');
     expect(markup).toContain("multiple");
     expect(markup).not.toContain("Continuar con ZIP");
+  });
+
+  it("presents Smart Bulk target resolutions and typed conflicts", () => {
+    expect(resolutionLabel("created")).toBe("Capítulo creado");
+    expect(resolutionLabel("reused")).toBe("Capítulo reutilizado");
+    expect(resolutionLabel("conflict")).toBe("Conflicto de capítulo");
+    expect(importErrorLabel("chapter-processing")).toBe(
+      "El capítulo se está procesando.",
+    );
+    expect(importErrorLabel("chapter-ready")).toBe(
+      "El capítulo ya está listo.",
+    );
   });
 
   it("renders the shared loading, empty and error states", () => {

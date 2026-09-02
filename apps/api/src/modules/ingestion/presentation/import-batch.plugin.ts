@@ -1,21 +1,25 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
-import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
+import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
+import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { SeriesService } from "../../series/application/services/series.service.js";
-import type { ChapterUploadService } from "../../uploads/application/services/chapter-upload.service.js";
+import {
+  type ChapterUploadService,
+  UploadConflictError,
+} from "../../uploads/application/services/chapter-upload.service.js";
 import { mapUploadError } from "../../uploads/presentation/upload.plugin.js";
 import {
-  ImportBatchConflictError,
   ChapterImportBatchService,
+  ImportBatchConflictError,
   ImportBatchDeniedError,
   ImportBatchNotFoundError,
 } from "../application/chapter-import-batch.service.js";
+import { ChapterTargetResolver } from "../application/chapter-target.resolver.js";
 import { DrizzleImportBatchRepository } from "../infrastructure/persistence/drizzle/import-batch.repository.js";
 
 const createSchema = z
@@ -64,6 +68,21 @@ export function registerImportBatchPlugin(
   uploads: ChapterUploadService,
 ) {
   const repository = new DrizzleImportBatchRepository(db);
+  const targets = new ChapterTargetResolver(repository, {
+    async create(input) {
+      try {
+        const result = await series.createChapter(input.actor, input.seriesId, {
+          chapterNumber: input.chapterNumber,
+        });
+        if (!result) return { outcome: "not-found" as const };
+        if ("forbidden" in result) return { outcome: "denied" as const };
+        return { outcome: "created" as const, chapterId: result.id };
+      } catch (error) {
+        if (isUnique(error)) return { outcome: "conflict" as const };
+        throw error;
+      }
+    },
+  });
   const service = new ChapterImportBatchService(
     repository,
     {
@@ -75,33 +94,27 @@ export function registerImportBatchPlugin(
           : ("allowed" as const);
       },
     },
-    {
-      async create(input) {
-        try {
-          const result = await series.createChapter(
-            input.actor,
-            input.seriesId,
-            { chapterNumber: input.chapterNumber },
-          );
-          if (!result) return { outcome: "not-found" as const };
-          if ("forbidden" in result) return { outcome: "denied" as const };
-          return { outcome: "created" as const, chapterId: result.id };
-        } catch (error) {
-          if (isUnique(error)) return { outcome: "conflict" as const };
-          throw error;
-        }
-      },
-    },
+    targets,
     {
       async initiate(input) {
-        const result = await uploads.initiate({
-          context: input.actor,
-          chapterId: input.chapterId,
-          filename: input.filename,
-          contentType: input.contentType,
-          sizeBytes: input.sizeBytes,
-        });
-        return { uploadId: result.uploadId, transfer: result.transfer };
+        try {
+          const result = await uploads.initiate({
+            context: input.actor,
+            chapterId: input.chapterId,
+            filename: input.filename,
+            contentType: input.contentType,
+            sizeBytes: input.sizeBytes,
+          });
+          return {
+            outcome: "initiated" as const,
+            uploadId: result.uploadId,
+            transfer: result.transfer,
+          };
+        } catch (error) {
+          if (error instanceof UploadConflictError)
+            return { outcome: "conflict" as const };
+          throw error;
+        }
       },
       async abort(input) {
         await uploads.abort({
@@ -200,8 +213,8 @@ function mapError(error: unknown): unknown {
     );
   if (error instanceof ImportBatchConflictError)
     return problem(
-      "import-batch-item-conflict",
-      "The import batch item cannot be retried in its current state.",
+      "chapter-conflict",
+      "The Chapter cannot accept a new upload in its current state.",
       409,
     );
   return error;

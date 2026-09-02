@@ -1,17 +1,22 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterImportBatches,
   chapterImportItems,
+  chapters,
   images,
+  uploads,
 } from "../../../../../../../../database/schema/index.js";
+import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 import type {
   ImportBatchRepositoryPort,
+  ImportChapterLookupPort,
   ImportItemProjection,
 } from "../../../application/ports.js";
-import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 
-export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
+export class DrizzleImportBatchRepository
+  implements ImportBatchRepositoryPort, ImportChapterLookupPort
+{
   constructor(private readonly db: NodeProxDatabase) {}
 
   async create(input: { id: string; seriesId: string; createdBy: string }) {
@@ -27,16 +32,112 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
     uploadId?: string;
     status: ImportItemProjection["status"];
     errorCode?: string;
+    resolution?: ImportItemProjection["resolution"];
   }) {
     const [item] = await this.db
       .insert(chapterImportItems)
       .values({
         ...input,
+        targetResolution: input.resolution,
         chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
       })
       .returning({ id: chapterImportItems.id });
     if (!item) throw new Error("import-batch-item-create-failed");
     return item.id;
+  }
+
+  async attachUpload(input: { itemId: string; uploadId: string }) {
+    const [item] = await this.db
+      .update(chapterImportItems)
+      .set({
+        uploadId: input.uploadId,
+        status: "uploading",
+        errorCode: null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chapterImportItems.id, input.itemId),
+          eq(chapterImportItems.status, "pending"),
+        ),
+      )
+      .returning({ id: chapterImportItems.id });
+    return Boolean(item);
+  }
+
+  async updateResolution(input: {
+    itemId: string;
+    chapterId?: string;
+    resolution: NonNullable<ImportItemProjection["resolution"]>;
+    errorCode?: string | null;
+    status?: ImportItemProjection["status"];
+  }) {
+    const [item] = await this.db
+      .update(chapterImportItems)
+      .set({
+        ...(input.chapterId ? { chapterId: input.chapterId } : {}),
+        targetResolution: input.resolution,
+        ...(input.errorCode !== undefined
+          ? { errorCode: input.errorCode }
+          : {}),
+        ...(input.status ? { status: input.status } : {}),
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chapterImportItems.id, input.itemId),
+          eq(chapterImportItems.status, "pending"),
+        ),
+      )
+      .returning({ id: chapterImportItems.id });
+    return Boolean(item);
+  }
+
+  async failItem(input: { itemId: string; errorCode: string }): Promise<void> {
+    await this.db
+      .update(chapterImportItems)
+      .set({
+        status: "failed",
+        errorCode: input.errorCode,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chapterImportItems.id, input.itemId),
+          eq(chapterImportItems.status, "pending"),
+        ),
+      );
+  }
+
+  async findTarget(seriesId: string, chapterNumber: number) {
+    const canonical = ChapterNumber.parse(chapterNumber).toNumber();
+    const [row] = await this.db
+      .select({
+        chapterId: chapters.id,
+        status: chapters.status,
+        hasActiveUpload: sql<boolean>`exists (
+          select 1 from ${uploads}
+          where ${uploads.chapterId} = ${chapters.id}
+            and ${uploads.status} in ('pending', 'verifying', 'aborting')
+        )`,
+        hasUpload: sql<boolean>`exists (
+          select 1 from ${uploads}
+          where ${uploads.chapterId} = ${chapters.id}
+        )`,
+        hasMedia: sql<boolean>`exists (
+          select 1 from ${images}
+          where ${images.chapterId} = ${chapters.id}
+        )`,
+      })
+      .from(chapters)
+      .where(
+        and(
+          eq(chapters.seriesId, seriesId),
+          eq(chapters.chapterNumber, canonical),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
   }
 
   async find(batchId: string) {
@@ -59,6 +160,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
         uploadId: chapterImportItems.uploadId,
         status: chapterImportItems.status,
         errorCode: chapterImportItems.errorCode,
+        resolution: chapterImportItems.targetResolution,
         createdAt: chapterImportItems.createdAt,
         updatedAt: chapterImportItems.updatedAt,
       })
@@ -89,6 +191,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
           uploadId: row.uploadId,
           status: row.status,
           errorCode: row.errorCode,
+          resolution: row.resolution,
           warnings: imageRows
             .filter((image) => image.chapterId === row.chapterId)
             .flatMap((image) => image.warnings),
@@ -103,26 +206,17 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
     seriesId: string;
     batchId: string;
     itemId: string;
-  }): Promise<
-    | {
-        outcome: "claimed";
-        item: {
-          id: string;
-          clientId: string;
-          chapterId: string;
-          filename: string;
-        };
-      }
-    | { outcome: "not-found" | "conflict" }
-  > {
+  }): ReturnType<ImportBatchRepositoryPort["claimRetry"]> {
     return this.db.transaction(async (tx) => {
       const [item] = await tx
         .select({
           id: chapterImportItems.id,
           clientId: chapterImportItems.clientId,
           chapterId: chapterImportItems.chapterId,
+          chapterNumber: chapterImportItems.chapterNumber,
           filename: chapterImportItems.filename,
           status: chapterImportItems.status,
+          errorCode: chapterImportItems.errorCode,
         })
         .from(chapterImportItems)
         .innerJoin(
@@ -139,8 +233,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
         .limit(1)
         .for("update");
       if (!item) return { outcome: "not-found" as const };
-      if (item.status !== "failed" || !item.chapterId)
-        return { outcome: "conflict" as const };
+      if (item.status !== "failed") return { outcome: "conflict" as const };
       const [claimed] = await tx
         .update(chapterImportItems)
         .set({ uploadId: null, status: "pending", updatedAt: new Date() })
@@ -158,48 +251,11 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
               id: item.id,
               clientId: item.clientId,
               chapterId: item.chapterId,
+              chapterNumber: ChapterNumber.parse(item.chapterNumber).toNumber(),
               filename: item.filename,
             },
           }
         : { outcome: "conflict" as const };
     });
-  }
-
-  async attachRetryUpload(input: {
-    itemId: string;
-    uploadId: string;
-  }): Promise<boolean> {
-    const [item] = await this.db
-      .update(chapterImportItems)
-      .set({
-        uploadId: input.uploadId,
-        status: "uploading",
-        errorCode: null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(chapterImportItems.id, input.itemId),
-          eq(chapterImportItems.status, "pending"),
-        ),
-      )
-      .returning({ id: chapterImportItems.id });
-    return Boolean(item);
-  }
-
-  async failRetry(input: { itemId: string; errorCode: string }): Promise<void> {
-    await this.db
-      .update(chapterImportItems)
-      .set({
-        status: "failed",
-        errorCode: input.errorCode,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(chapterImportItems.id, input.itemId),
-          eq(chapterImportItems.status, "pending"),
-        ),
-      );
   }
 }

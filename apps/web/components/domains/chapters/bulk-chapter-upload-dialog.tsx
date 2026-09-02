@@ -1,14 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { FileArchive, Upload, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { errorMessage } from "../feedback";
-import { AppDialog } from "../../ui/app-dialog";
-import { Button } from "../../ui/button";
-import { ProgressBar } from "../../ui/progress-bar";
-import { StatusBadge } from "../../ui/status-badge";
-import { queryKeys } from "../../../lib/domains/query-keys";
+import { FileArchive, Upload, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import {
   abortImportItem,
@@ -22,9 +16,15 @@ import {
   runPool,
   safeBulkUploadConcurrency,
 } from "../../../lib/domains/ingestion/orchestration";
-import { useProductSettings } from "../../../lib/domains/settings/hooks";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
+import { queryKeys } from "../../../lib/domains/query-keys";
+import { useProductSettings } from "../../../lib/domains/settings/hooks";
 import { putDirectUpload } from "../../../lib/domains/uploads/api";
+import { AppDialog } from "../../ui/app-dialog";
+import { Button } from "../../ui/button";
+import { ProgressBar } from "../../ui/progress-bar";
+import { StatusBadge } from "../../ui/status-badge";
+import { errorMessage } from "../feedback";
 
 export function BulkChapterUploadDialog({
   open,
@@ -82,6 +82,9 @@ export function BulkChapterUploadDialog({
                 else delete next.uploadId;
                 if (projected.errorCode) next.error = projected.errorCode;
                 else delete next.error;
+                if (projected.resolution)
+                  next.resolution = projected.resolution;
+                else delete next.resolution;
                 return next;
               }),
             );
@@ -128,6 +131,7 @@ export function BulkChapterUploadDialog({
     session: {
       chapterId: string;
       uploadId: string;
+      resolution: "created" | "reused";
       transfer: Parameters<typeof putDirectUpload>[1];
     },
   ) {
@@ -135,6 +139,7 @@ export function BulkChapterUploadDialog({
       chapterId: session.chapterId,
       uploadId: session.uploadId,
       status: "uploading",
+      resolution: session.resolution,
       progress: 0,
     });
     setItems((current) =>
@@ -185,6 +190,7 @@ export function BulkChapterUploadDialog({
         const mutation: Partial<ImportCandidate> = {
           itemId: item.itemId,
           status: item.status,
+          resolution: item.resolution,
         };
         if (item.chapterId) mutation.chapterId = item.chapterId;
         if ("uploadId" in item) mutation.uploadId = item.uploadId;
@@ -341,6 +347,11 @@ export function BulkChapterUploadDialog({
                 label={labelFor(item.status)}
                 tone={toneFor(item.status)}
               />
+              {item.resolution ? (
+                <span className="text-xs text-secondary">
+                  {resolutionLabel(item.resolution)}
+                </span>
+              ) : null}
               {item.status === "uploading" ? (
                 <ProgressBar value={item.progress} />
               ) : null}
@@ -374,7 +385,7 @@ export function BulkChapterUploadDialog({
             )}
             {item.error ? (
               <p className="m-0 text-sm text-danger md:col-span-4">
-                {item.error}
+                {importErrorLabel(item.error)}
               </p>
             ) : null}
             {item.warnings?.map((warning) => (
@@ -446,4 +457,28 @@ function toneFor(status: ImportCandidate["status"]) {
           status === "uploading"
         ? "info"
         : "neutral";
+}
+
+export function resolutionLabel(
+  resolution: NonNullable<ImportCandidate["resolution"]>,
+) {
+  return {
+    created: "Capítulo creado",
+    reused: "Capítulo reutilizado",
+    conflict: "Conflicto de capítulo",
+  }[resolution];
+}
+
+export function importErrorLabel(errorCode: string) {
+  return (
+    {
+      "chapter-upload-active": "El capítulo ya tiene una carga activa.",
+      "chapter-uploaded": "El capítulo ya tiene una carga completada.",
+      "chapter-processing": "El capítulo se está procesando.",
+      "chapter-ready": "El capítulo ya está listo.",
+      "chapter-failed": "El capítulo requiere reintentar su carga existente.",
+      "chapter-deleting": "El capítulo se está eliminando.",
+      "chapter-media-exists": "El capítulo ya contiene imágenes.",
+    }[errorCode] ?? errorCode
+  );
 }
