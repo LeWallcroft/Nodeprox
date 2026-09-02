@@ -90,20 +90,31 @@ export class DrizzleAuthorizationRepository
     );
   }
 
-  async write(
-    changes: Array<[string, number | boolean | string]>,
-    actorId: string,
-  ): Promise<void> {
+  async writeWithAudit(input: {
+    changes: Array<[string, number | boolean | string]>;
+    actorId: string;
+    requestId?: string;
+  }): Promise<void> {
     await this.db.transaction(async (tx) => {
-      for (const [key, value] of changes) {
+      for (const [key, value] of input.changes) {
         await tx
           .insert(systemConfig)
-          .values({ key, value, updatedBy: actorId })
+          .values({ key, value, updatedBy: input.actorId })
           .onConflictDoUpdate({
             target: systemConfig.key,
-            set: { value, updatedBy: actorId, updatedAt: new Date() },
+            set: { value, updatedBy: input.actorId, updatedAt: new Date() },
           });
       }
+      await tx.insert(auditLogs).values({
+        actorId: input.actorId,
+        action: "settings.updated",
+        resourceType: "product-settings",
+        result: "success",
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+        metadata: sanitizeAuditMetadata({
+          keys: input.changes.map(([key]) => key),
+        }),
+      });
     });
   }
 }

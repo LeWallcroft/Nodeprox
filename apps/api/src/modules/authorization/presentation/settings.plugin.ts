@@ -2,7 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
-import { getRequestContext } from "../../../plugins/request-context.js";
+import {
+  getRequestContext,
+  markOperationAuditRecorded,
+  setOperationAuditContext,
+} from "../../../plugins/request-context.js";
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
@@ -66,11 +70,7 @@ export function registerSettingsPlugin(
   authorization: AuthorizationService,
 ) {
   const repository = new DrizzleAuthorizationRepository(db);
-  const settings = new ProductSettingsService(
-    repository,
-    authorization,
-    repository,
-  );
+  const settings = new ProductSettingsService(repository, authorization);
   const session = requireSession(
     authentication.service,
     authentication.cookies,
@@ -88,8 +88,18 @@ export function registerSettingsPlugin(
   app.patch("/admin/settings", { preHandler: session }, async (request) => {
     const input = schema.safeParse(request.body);
     if (!input.success) throw invalid();
+    setOperationAuditContext({
+      action: "settings.updated",
+      resourceType: "product-settings",
+    });
     try {
-      return await settings.update(context(), input.data.changes);
+      const result = await settings.update(
+        context(),
+        input.data.changes,
+        getRequestContext()?.requestId,
+      );
+      markOperationAuditRecorded();
+      return result;
     } catch (error) {
       if (error instanceof ProductSettingsForbiddenError) throw forbidden();
       if (error instanceof ProductSettingsValidationError) throw invalid();

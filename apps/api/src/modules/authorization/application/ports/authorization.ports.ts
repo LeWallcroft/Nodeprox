@@ -26,10 +26,11 @@ export interface AuthorizationConfigRepository {
 
 export interface ProductSettingsRepository {
   read(keys: readonly string[]): Promise<Map<string, ProductSettingValue>>;
-  write(
-    changes: Array<[string, ProductSettingValue]>,
-    actorId: string,
-  ): Promise<void>;
+  writeWithAudit(input: {
+    changes: Array<[string, ProductSettingValue]>;
+    actorId: string;
+    requestId?: string;
+  }): Promise<void>;
 }
 
 export interface ResourceAuthorizationPort {

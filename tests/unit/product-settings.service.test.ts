@@ -8,16 +8,14 @@ import type { AuthorizationService } from "../../apps/api/src/modules/authorizat
 function setup(values = new Map<string, number | boolean | string>()) {
   const repository = {
     read: vi.fn().mockResolvedValue(values),
-    write: vi.fn().mockResolvedValue(undefined),
+    writeWithAudit: vi.fn().mockResolvedValue(undefined),
   };
   const authorization = {
     authorize: vi.fn().mockResolvedValue({ allowed: true }),
   } as unknown as AuthorizationService;
-  const audit = { append: vi.fn().mockResolvedValue(undefined) };
   return {
     repository,
-    audit,
-    service: new ProductSettingsService(repository, authorization, audit),
+    service: new ProductSettingsService(repository, authorization),
   };
 }
 
@@ -47,15 +45,17 @@ describe("ProductSettingsService", () => {
     ).rejects.toBeInstanceOf(ProductSettingsValidationError);
   });
 
-  it("persists registered values and audits only changed key names", async () => {
-    const { service, repository, audit } = setup();
-    await service.update(context, [{ key: "helper_cooldown_days", value: 0 }]);
-    expect(repository.write).toHaveBeenCalledWith(
-      [["helper_cooldown_days", 0]],
-      "user-1",
+  it("persists registered values and their audit in one repository operation", async () => {
+    const { service, repository } = setup();
+    await service.update(
+      context,
+      [{ key: "helper_cooldown_days", value: 0 }],
+      "req-settings",
     );
-    expect(audit.append).toHaveBeenCalledWith(
-      expect.objectContaining({ metadata: { keys: ["helper_cooldown_days"] } }),
-    );
+    expect(repository.writeWithAudit).toHaveBeenCalledWith({
+      changes: [["helper_cooldown_days", 0]],
+      actorId: "user-1",
+      requestId: "req-settings",
+    });
   });
 });
