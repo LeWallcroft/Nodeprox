@@ -17,11 +17,7 @@ export function evaluateChapterDelete(input: {
   if (input.permission !== "chapters.delete")
     return { allowed: false, reason: "wrong-permission" };
   if (input.actorRole === "admin") return { allowed: true, reason: "admin" };
-  if (input.actorRole === "gestor") {
-    return input.seriesOwner
-      ? { allowed: true, reason: "gestor" }
-      : { allowed: false, reason: "not-owner" };
-  }
+  if (input.actorRole === "gestor") return { allowed: true, reason: "gestor" };
   if (input.actorRole === "uploader") {
     if (input.assigned) return { allowed: true, reason: "assigned" };
   }

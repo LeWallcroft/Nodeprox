@@ -88,6 +88,30 @@ describe("Series management presentation", () => {
     expect(markup).not.toContain("Asignar responsable");
   });
 
+  it("keeps foreign Series administration hidden while exposing Chapter work", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesDetailPanel
+        series={series}
+        capabilities={["series.read", "chapters.create"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+        candidates={[]}
+        candidatesLoading={false}
+        candidatesError={null}
+        assignmentPending={false}
+        updatePending={false}
+        deletePending={false}
+        onAssignUploader={async () => undefined}
+        onClearUploader={async () => undefined}
+      />,
+    );
+    expect(markup).toContain("Gestionar capítulos");
+    expect(markup).not.toContain("Editar series");
+    expect(markup).not.toContain("Eliminar serie");
+    expect(markup).not.toContain("Asignar responsable");
+  });
+
   it("renders shared loading, empty and error states", () => {
     expect(renderToStaticMarkup(<LoadingState />)).toContain("Cargando");
     expect(

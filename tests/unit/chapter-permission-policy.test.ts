@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  evaluateChapterAdministrationAuthorization,
+  evaluateChapterContextualAuthorization,
   isCooldownActive,
   isDelegableChapterPermission,
 } from "../../apps/api/src/modules/chapters/domain/chapter-permission.policy.js";
@@ -25,5 +27,23 @@ describe("chapter permission policy", () => {
     expect(isCooldownActive(new Date("2026-08-01T00:00:00.000Z"), 7, now)).toBe(
       false,
     );
+  });
+
+  it("keeps Gestor Chapter operations global but helper administration owned", () => {
+    expect(
+      evaluateChapterContextualAuthorization({
+        role: "gestor",
+        isSeriesOwner: false,
+        isAssigned: false,
+        hasHelperPermission: false,
+      }),
+    ).toBe("role");
+    expect(
+      evaluateChapterAdministrationAuthorization({
+        role: "gestor",
+        isSeriesOwner: false,
+        isAssigned: false,
+      }),
+    ).toBeNull();
   });
 });

@@ -6,7 +6,7 @@ const base = {
 };
 
 describe("M3 chapter delete policy", () => {
-  it("allows admin, the owning gestor, and the assigned uploader", () => {
+  it("allows admin, any gestor, and the assigned uploader", () => {
     expect(
       evaluateChapterDelete({ ...base, actorRole: "admin" }),
     ).toMatchObject({ allowed: true, reason: "admin" });
@@ -19,7 +19,7 @@ describe("M3 chapter delete policy", () => {
     ).toMatchObject({ allowed: true, reason: "gestor" });
     expect(
       evaluateChapterDelete({ ...base, actorRole: "gestor" }),
-    ).toMatchObject({ allowed: false, reason: "not-owner" });
+    ).toMatchObject({ allowed: true, reason: "gestor" });
     expect(
       evaluateChapterDelete({
         ...base,

@@ -446,7 +446,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
           headers: { cookie: ownerCookie },
         })
       ).json(),
-    ).not.toEqual(
+    ).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: otherSeriesId })]),
     );
     const ownerChapter = await app.inject({
@@ -695,6 +695,344 @@ describe("A1 identity, assignment and chapter numbering", () => {
           method: "POST",
           url: `/chapters/${assignedChapterId}/uploads/${assignedUploadId}/abort`,
           headers: { cookie: adminCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+  });
+
+  it("keeps Gestor uploader assignment operational without transferring ownership", async () => {
+    const ownerCookie = await login(emails.owner);
+    const foreignOwnerCookie = await login(emails.secondOwner);
+    const adminCookie = await login(emails.admin);
+    const uploaderCookie = await login(emails.uploader);
+    const ownSeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: {
+        title: "Assignment owned",
+        slug: `a1-assignment-own-${randomUUID()}`,
+      },
+    });
+    expect(ownSeries.statusCode).toBe(201);
+    const ownSeriesId = ownSeries.json().id as string;
+    const foreignSeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: foreignOwnerCookie },
+      payload: {
+        title: "Assignment foreign",
+        slug: `a1-assignment-foreign-${randomUUID()}`,
+      },
+    });
+    expect(foreignSeries.statusCode).toBe(201);
+    const foreignSeriesId = foreignSeries.json().id as string;
+
+    const assignOwned = await app.inject({
+      method: "PUT",
+      url: `/series/${ownSeriesId}/uploader`,
+      headers: { cookie: ownerCookie },
+      payload: { uploaderId },
+    });
+    expect(assignOwned.statusCode).toBe(200);
+    await expect(
+      database.db
+        .select({ uploaderId: seriesAssignments.uploaderId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, ownSeriesId)),
+    ).resolves.toEqual([{ uploaderId }]);
+    await expect(
+      database.db
+        .select({ createdBy: series.createdBy })
+        .from(series)
+        .where(eq(series.id, ownSeriesId)),
+    ).resolves.toEqual([{ createdBy: ownerId }]);
+
+    const revokeOwned = await app.inject({
+      method: "DELETE",
+      url: `/series/${ownSeriesId}/uploader`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(revokeOwned.statusCode).toBe(204);
+    await expect(
+      database.db
+        .select({ uploaderId: seriesAssignments.uploaderId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, ownSeriesId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ createdBy: series.createdBy })
+        .from(series)
+        .where(eq(series.id, ownSeriesId)),
+    ).resolves.toEqual([{ createdBy: ownerId }]);
+
+    const adminAssignForeign = await app.inject({
+      method: "PUT",
+      url: `/series/${foreignSeriesId}/uploader`,
+      headers: { cookie: adminCookie },
+      payload: { uploaderId },
+    });
+    expect(adminAssignForeign.statusCode).toBe(200);
+    for (const request of [
+      {
+        method: "PUT" as const,
+        url: `/series/${foreignSeriesId}/uploader`,
+        payload: { uploaderId: secondUploaderId },
+        cookie: ownerCookie,
+      },
+      {
+        method: "DELETE" as const,
+        url: `/series/${foreignSeriesId}/uploader`,
+        cookie: ownerCookie,
+      },
+      {
+        method: "PUT" as const,
+        url: `/series/${ownSeriesId}/uploader`,
+        payload: { uploaderId },
+        cookie: uploaderCookie,
+      },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            ...request,
+            headers: { cookie: request.cookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+  });
+
+  it("allows Gestor Chapter support on a foreign Series without Series administration", async () => {
+    const ownerCookie = await login(emails.owner);
+    const supportGestorCookie = await login(emails.secondOwner);
+    const unrelatedUploaderCookie = await login(emails.uploader);
+    const foreign = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: {
+        title: "Support target",
+        slug: `a1-support-${randomUUID()}`,
+      },
+    });
+    expect(foreign.statusCode).toBe(201);
+    const foreignSeriesId = foreign.json().id as string;
+
+    const visible = await app.inject({
+      method: "GET",
+      url: `/series/${foreignSeriesId}`,
+      headers: { cookie: supportGestorCookie },
+    });
+    expect(visible.statusCode).toBe(200);
+
+    const capabilities = await app.inject({
+      method: "GET",
+      url: `/series/${foreignSeriesId}/capabilities`,
+      headers: { cookie: supportGestorCookie },
+    });
+    expect(capabilities.statusCode).toBe(200);
+    expect(capabilities.json().capabilities).toEqual(
+      expect.arrayContaining(["series.read", "chapters.create"]),
+    );
+    expect(capabilities.json().capabilities).not.toEqual(
+      expect.arrayContaining([
+        "series.edit",
+        "series.delete",
+        "series.assignment.manage",
+        "chapters.helper.grant",
+        "chapters.helper.revoke",
+      ]),
+    );
+
+    for (const request of [
+      {
+        method: "PATCH" as const,
+        url: `/series/${foreignSeriesId}`,
+        payload: { title: "Denied foreign mutation" },
+      },
+      { method: "DELETE" as const, url: `/series/${foreignSeriesId}` },
+      {
+        method: "PUT" as const,
+        url: `/series/${foreignSeriesId}/uploader`,
+        payload: { uploaderId },
+      },
+      {
+        method: "DELETE" as const,
+        url: `/series/${foreignSeriesId}/uploader`,
+      },
+    ]) {
+      expect(
+        (
+          await app.inject({
+            ...request,
+            headers: { cookie: supportGestorCookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+
+    const chapter = await app.inject({
+      method: "POST",
+      url: `/series/${foreignSeriesId}/chapters`,
+      headers: { cookie: supportGestorCookie },
+      payload: { chapterNumber: 91, title: "Supported chapter" },
+    });
+    expect(chapter.statusCode).toBe(201);
+    const chapterId = chapter.json().id as string;
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/series/${foreignSeriesId}/chapters`,
+          headers: { cookie: supportGestorCookie },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/chapters",
+          headers: { cookie: supportGestorCookie },
+        })
+      ).json(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: chapterId,
+          series: expect.objectContaining({ id: foreignSeriesId }),
+        }),
+      ]),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/chapters/${chapterId}`,
+          headers: { cookie: supportGestorCookie },
+          payload: { title: "Edited by support Gestor" },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const upload = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/initiate`,
+      headers: { cookie: supportGestorCookie },
+      payload: {
+        filename: "support.zip",
+        contentType: "application/zip",
+        sizeBytes: 16,
+      },
+    });
+    expect(upload.statusCode).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${chapterId}/uploads/${upload.json().uploadId}/abort`,
+          headers: { cookie: supportGestorCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/chapters/${chapterId}/helper-candidates`,
+          headers: { cookie: supportGestorCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const batch = await app.inject({
+      method: "POST",
+      url: `/series/${foreignSeriesId}/import-batches`,
+      headers: { cookie: supportGestorCookie },
+      payload: {
+        items: [
+          {
+            clientId: "support-bulk-1",
+            chapterNumber: 92,
+            filename: "support-bulk.zip",
+            contentType: "application/zip",
+            sizeBytes: 16,
+          },
+        ],
+      },
+    });
+    expect(batch.statusCode).toBe(201);
+    const batchItem = batch.json().items[0] as {
+      chapterId: string;
+      uploadId: string;
+      itemId: string;
+    };
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${batchItem.chapterId}/uploads/${batchItem.uploadId}/abort`,
+          headers: { cookie: supportGestorCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/series/${foreignSeriesId}/import-batches/${batch.json().batchId}/items/${batchItem.itemId}/retry`,
+          headers: { cookie: supportGestorCookie },
+          payload: { contentType: "application/zip", sizeBytes: 16 },
+        })
+      ).statusCode,
+    ).toBe(201);
+
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/series/${foreignSeriesId}/chapters`,
+          headers: { cookie: unrelatedUploaderCookie },
+          payload: { chapterNumber: 93 },
+        })
+      ).statusCode,
+    ).toBe(403);
+
+    const [storedSeries] = await database.db
+      .select({ createdBy: series.createdBy })
+      .from(series)
+      .where(eq(series.id, foreignSeriesId));
+    expect(storedSeries?.createdBy).toBe(ownerId);
+    expect(
+      await database.db
+        .select({ id: seriesAssignments.id })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, foreignSeriesId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select({
+          actorId: auditLogs.actorId,
+          requestId: auditLogs.requestId,
+        })
+        .from(auditLogs)
+        .where(eq(auditLogs.resourceId, chapterId)),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actorId: secondOwnerId,
+          requestId: expect.any(String),
+        }),
+      ]),
+    );
+
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/chapters/${chapterId}`,
+          headers: { cookie: supportGestorCookie },
         })
       ).statusCode,
     ).toBe(204);

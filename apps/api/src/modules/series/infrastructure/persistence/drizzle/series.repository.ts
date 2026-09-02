@@ -29,6 +29,7 @@ import {
   PERMISSIONS,
   type Permission,
 } from "../../../../authorization/domain/permissions.js";
+import { canAdministerSeries } from "../../../domain/series.policy.js";
 import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
 import { evaluateChapterDelete } from "../../../../chapters/domain/chapter-delete.policy.js";
 import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
@@ -378,13 +379,12 @@ export class DrizzleSeriesRepository
       .where(eq(seriesAssignments.seriesId, input.seriesId))
       .limit(1)
       .for("update");
-    const reason = evaluateChapterContextualAuthorization({
+    const allowed = canAdministerSeries({
       role: actor.role,
-      isSeriesOwner: lockedSeries.createdBy === input.actor.userId,
+      isOwner: lockedSeries.createdBy === input.actor.userId,
       isAssigned: assignment?.uploaderId === input.actor.userId,
-      hasHelperPermission: false,
     });
-    return reason
+    return allowed
       ? { outcome: "authorized", usersById: actor.usersById }
       : { outcome: "denied" };
   }
@@ -498,11 +498,7 @@ export class DrizzleChapterCoreRepository
   }) {
     const base = ne(chapters.status, "deleting");
     let where = base;
-    if (input.role === "gestor") {
-      const ownerCondition = and(base, eq(series.createdBy, input.userId));
-      if (!ownerCondition) return [];
-      where = ownerCondition;
-    } else if (input.role === "uploader") {
+    if (input.role === "uploader") {
       const assigned = await this.db
         .select({ seriesId: seriesAssignments.seriesId })
         .from(seriesAssignments)
