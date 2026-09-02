@@ -1,0 +1,1 @@
+ALTER TABLE "chapter_import_items" ADD CONSTRAINT "chapter_import_items_number_non_negative" CHECK ("chapter_import_items"."chapter_number" >= 0);

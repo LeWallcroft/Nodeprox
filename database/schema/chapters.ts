@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   check,
   index,
-  integer,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -41,7 +41,11 @@ export const chapters = pgTable(
     seriesId: uuid("series_id")
       .notNull()
       .references(() => series.id, { onDelete: "restrict" }),
-    chapterNumber: integer("chapter_number").notNull(),
+    chapterNumber: numeric("chapter_number", {
+      precision: 10,
+      scale: 3,
+      mode: "number",
+    }).notNull(),
     publicKey: varchar("public_key", { length: 64 }).notNull(),
     title: text("title"),
     status: chapterStatusEnum("status").notNull().default("draft"),
@@ -65,7 +69,7 @@ export const chapters = pgTable(
       table.seriesId,
       table.publicKey,
     ),
-    check("chapters_number_positive", sql`${table.chapterNumber} > 0`),
+    check("chapters_number_non_negative", sql`${table.chapterNumber} >= 0`),
     check(
       "chapters_public_key_url_safe",
       sql`${table.publicKey} ~ '^[a-z0-9]+(?:-[a-z0-9]+)*$'`,

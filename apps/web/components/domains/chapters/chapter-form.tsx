@@ -4,6 +4,10 @@ import { useState, type FormEvent } from "react";
 import { Button } from "../../ui/button";
 import { errorMessage } from "../feedback";
 import type { ChapterInput } from "../../../lib/domains/chapters/types";
+import {
+  normalizeChapterNumber,
+  parseChapterNumber,
+} from "../../../lib/domains/chapters/chapter-number";
 
 export function ChapterForm({
   initial,
@@ -28,10 +32,17 @@ export function ChapterForm({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    const parsedChapterNumber = parseChapterNumber(chapterNumber);
+    if (parsedChapterNumber === null) {
+      setError(
+        "Usa un número de capítulo no negativo con un máximo de tres decimales.",
+      );
+      return;
+    }
     setLoading(true);
     try {
       await onSubmit({
-        chapterNumber: Number(chapterNumber),
+        chapterNumber: parsedChapterNumber,
         title: title.trim() || null,
       });
     } catch (cause) {
@@ -52,11 +63,15 @@ export function ChapterForm({
           <input
             id="chapter-number"
             type="number"
-            min={1}
-            step={1}
+            min={0}
+            step={0.001}
             required
             value={chapterNumber}
             onChange={(event) => setChapterNumber(event.target.value)}
+            onBlur={(event) => {
+              const canonical = normalizeChapterNumber(event.target.value);
+              if (canonical !== null) setChapterNumber(canonical);
+            }}
           />
         </label>
       ) : null}

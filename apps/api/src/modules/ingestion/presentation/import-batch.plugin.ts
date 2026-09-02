@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
@@ -24,7 +25,7 @@ const createSchema = z
         z
           .object({
             clientId: z.string().trim().min(1).max(100),
-            chapterNumber: z.number().int().positive(),
+            chapterNumber: z.number().finite().refine(ChapterNumber.isValid),
             filename: z.string().trim().min(1).max(255),
             contentType: z.string().trim().min(1).max(128),
             sizeBytes: z.number().int().positive(),

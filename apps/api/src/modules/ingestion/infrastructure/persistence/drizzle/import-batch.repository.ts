@@ -9,6 +9,7 @@ import type {
   ImportBatchRepositoryPort,
   ImportItemProjection,
 } from "../../../application/ports.js";
+import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 
 export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
   constructor(private readonly db: NodeProxDatabase) {}
@@ -29,7 +30,10 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
   }) {
     const [item] = await this.db
       .insert(chapterImportItems)
-      .values(input)
+      .values({
+        ...input,
+        chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
+      })
       .returning({ id: chapterImportItems.id });
     if (!item) throw new Error("import-batch-item-create-failed");
     return item.id;
@@ -79,7 +83,7 @@ export class DrizzleImportBatchRepository implements ImportBatchRepositoryPort {
         (row): ImportItemProjection => ({
           itemId: row.id,
           clientId: row.clientId,
-          chapterNumber: row.chapterNumber,
+          chapterNumber: ChapterNumber.parse(row.chapterNumber).toNumber(),
           filename: row.filename,
           chapterId: row.chapterId,
           uploadId: row.uploadId,

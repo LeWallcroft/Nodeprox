@@ -19,6 +19,7 @@ import {
 } from "../../../lib/domains/ingestion/orchestration";
 import { useProductSettings } from "../../../lib/domains/settings/hooks";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
+import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import { putDirectUpload } from "../../../lib/domains/uploads/api";
 
 export default function BulkUploadPage() {
@@ -32,7 +33,13 @@ export default function BulkUploadPage() {
   const valid = useMemo(
     () =>
       items.length > 0 &&
-      items.every((item) => item.chapterNumber !== null && item.file.size > 0),
+      items.every(
+        (item) =>
+          item.chapterNumber !== null &&
+          Number.isFinite(item.chapterNumber) &&
+          item.chapterNumber >= 0 &&
+          item.file.size > 0,
+      ),
     [items],
   );
 
@@ -261,14 +268,14 @@ export default function BulkUploadPage() {
             <input
               aria-label={`Chapter para ${item.file.name}`}
               type="number"
-              min={1}
-              step={1}
+              min={0}
+              step={0.001}
               value={item.chapterNumber ?? ""}
               disabled={running || item.status !== "pending"}
               onChange={(event) =>
                 update(item.clientId, {
                   chapterNumber: event.target.value
-                    ? Number(event.target.value)
+                    ? parseChapterNumber(event.target.value)
                     : null,
                 })
               }
@@ -312,8 +319,8 @@ export default function BulkUploadPage() {
 }
 
 function inferChapterNumber(filename: string): number | null {
-  const match = /^(\d+)\.zip$/i.exec(filename.trim());
+  const match = /^(\d+(?:\.\d{1,3})?)\.zip$/i.exec(filename.trim());
   if (!match) return null;
-  const value = Number(match[1]);
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
+  const value = match[1];
+  return value ? parseChapterNumber(value) : null;
 }

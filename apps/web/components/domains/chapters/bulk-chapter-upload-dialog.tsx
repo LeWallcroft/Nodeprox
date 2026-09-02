@@ -9,6 +9,7 @@ import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { StatusBadge } from "../../ui/status-badge";
 import { queryKeys } from "../../../lib/domains/query-keys";
+import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import {
   abortImportItem,
   completeImportItem,
@@ -49,7 +50,8 @@ export function BulkChapterUploadDialog({
       items.every(
         (item) =>
           item.chapterNumber !== null &&
-          item.chapterNumber > 0 &&
+          Number.isFinite(item.chapterNumber) &&
+          item.chapterNumber >= 0 &&
           item.file.size > 0,
       ) &&
       new Set(items.map((item) => item.chapterNumber)).size === items.length,
@@ -322,14 +324,14 @@ export function BulkChapterUploadDialog({
               aria-label={`Número de capítulo para ${item.file.name}`}
               placeholder="N.º capítulo"
               type="number"
-              min={1}
-              step={1}
+              min={0}
+              step={0.001}
               value={item.chapterNumber ?? ""}
               disabled={busy || item.status !== "pending"}
               onChange={(event) =>
                 update(item.clientId, {
                   chapterNumber: event.target.value
-                    ? Number(event.target.value)
+                    ? parseChapterNumber(event.target.value)
                     : null,
                 })
               }
@@ -386,8 +388,12 @@ export function BulkChapterUploadDialog({
           </div>
         ))}
         {items.length > 1 &&
-        new Set(items.map((item) => item.chapterNumber).filter(Boolean))
-          .size !== items.filter((item) => item.chapterNumber).length ? (
+        new Set(
+          items
+            .map((item) => item.chapterNumber)
+            .filter((value) => value !== null),
+        ).size !==
+          items.filter((item) => item.chapterNumber !== null).length ? (
           <p className="m-0 text-sm text-danger">
             Cada ZIP debe tener un número de capítulo único.
           </p>
@@ -416,9 +422,9 @@ function canonicalZipMime(file: File) {
     : "application/zip";
 }
 function inferChapterNumber(filename: string): number | null {
-  const match = /^(\d+)\.zip$/i.exec(filename.trim());
-  const value = match ? Number(match[1]) : Number.NaN;
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
+  const match = /^(\d+(?:\.\d{1,3})?)\.zip$/i.exec(filename.trim());
+  const value = match?.[1];
+  return value ? parseChapterNumber(value) : null;
 }
 function labelFor(status: ImportCandidate["status"]) {
   return {
