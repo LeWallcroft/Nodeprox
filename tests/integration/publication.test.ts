@@ -10,6 +10,7 @@ import {
   series,
   users,
 } from "../../database/schema/index.js";
+import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -72,17 +73,19 @@ beforeAll(async () => {
       createdBy: userId,
     },
   ]);
-  await database.db.insert(images).values({
-    id: readyImageId,
-    chapterId: readyChapterId,
-    filename: "01.jpg",
-    storageKey: `Media/publication-${seriesId}/1/01.jpg`,
-    extension: "jpg",
-    contentType: "image/jpeg",
-    sizeBytes: 128,
-    sortOrder: 1,
-    checksum: "a".repeat(64),
-  });
+  await insertImagesWithInitialVersions(database.db, [
+    {
+      id: readyImageId,
+      chapterId: readyChapterId,
+      filename: "01.jpg",
+      storageKey: `Media/publication-${seriesId}/1/01.jpg`,
+      extension: "jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 128,
+      sortOrder: 1,
+      checksum: "a".repeat(64),
+    },
+  ]);
 });
 
 afterAll(async () => {

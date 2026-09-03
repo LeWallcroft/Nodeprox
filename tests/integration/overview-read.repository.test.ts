@@ -19,10 +19,10 @@ import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapters,
-  images,
   series,
   users,
 } from "../../database/schema/index.js";
+import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const fixedNow = new Date("2026-08-29T12:00:00.000Z");
 const createdUserIds: string[] = [];
@@ -128,10 +128,20 @@ describe("DrizzleOverviewReadRepository", () => {
     const context = { userId: activeUserId };
     const firstSeriesId = await createSeries(context, fixedNow, "First");
     const secondSeriesId = await createSeries(context, fixedNow, "Second");
-    const firstChapterId = await createChapter(context, firstSeriesId, fixedNow, 1);
-    const secondChapterId = await createChapter(context, secondSeriesId, fixedNow, 1);
+    const firstChapterId = await createChapter(
+      context,
+      firstSeriesId,
+      fixedNow,
+      1,
+    );
+    const secondChapterId = await createChapter(
+      context,
+      secondSeriesId,
+      fixedNow,
+      1,
+    );
 
-    await database.db.insert(images).values([
+    await insertImagesWithInitialVersions(database.db, [
       {
         id: randomUUID(),
         chapterId: firstChapterId,
@@ -156,7 +166,10 @@ describe("DrizzleOverviewReadRepository", () => {
       },
     ]);
 
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getTotals()).resolves.toEqual({
       series: 2,
@@ -167,7 +180,10 @@ describe("DrizzleOverviewReadRepository", () => {
   });
 
   it("returns zeros for an empty database", async () => {
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getTotals()).resolves.toEqual({
       series: 0,
@@ -187,7 +203,11 @@ describe("DrizzleOverviewReadRepository", () => {
       new Date("2026-08-29T00:00:01.000Z"),
       "Today",
     );
-    await createSeries(context, new Date("2026-08-28T10:00:00.000Z"), "Same day");
+    await createSeries(
+      context,
+      new Date("2026-08-28T10:00:00.000Z"),
+      "Same day",
+    );
     await createSeries(context, new Date("2026-08-22T23:59:59.000Z"), "Old");
     await createSeries(context, new Date("2026-08-29T12:00:01.000Z"), "Future");
 
@@ -217,7 +237,10 @@ describe("DrizzleOverviewReadRepository", () => {
       4,
     );
 
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getActivity7d()).resolves.toEqual([
       { date: "2026-08-23", series: 1, chapters: 1 },
@@ -264,14 +287,20 @@ describe("DrizzleOverviewReadRepository", () => {
         createdAt: new Date("2026-08-29T11:50:00.000Z"),
       },
     ]);
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     const activity = await repository.getRecentActivity(5);
 
     expect(activity).toHaveLength(2);
     expect(activity).toMatchObject([
       {
-        actor: { id: emailActorId, label: `overview-${emailActorId}@example.com` },
+        actor: {
+          id: emailActorId,
+          label: `overview-${emailActorId}@example.com`,
+        },
         action: "chapter.permission.granted",
         resourceType: "chapter",
         resourceLabel: null,
@@ -299,7 +328,10 @@ describe("DrizzleOverviewReadRepository", () => {
         createdAt: new Date(fixedNow.getTime() - index * 1000),
       })),
     );
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getRecentActivity(999)).resolves.toHaveLength(50);
     await expect(repository.getRecentActivity(0)).resolves.toEqual([]);
@@ -309,7 +341,7 @@ describe("DrizzleOverviewReadRepository", () => {
     const context = { userId: await createUser("active") };
     const seriesId = await createSeries(context, fixedNow);
     const chapterId = await createChapter(context, seriesId, fixedNow, 1);
-    await database.db.insert(images).values([
+    await insertImagesWithInitialVersions(database.db, [
       {
         id: randomUUID(),
         chapterId,
@@ -333,7 +365,10 @@ describe("DrizzleOverviewReadRepository", () => {
         checksum: "storage-two",
       },
     ]);
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getStorageUsage()).resolves.toEqual({
       usedBytes: 3072,
@@ -343,7 +378,10 @@ describe("DrizzleOverviewReadRepository", () => {
   });
 
   it("reports zero database storage usage for an empty database", async () => {
-    const repository = new DrizzleOverviewReadRepository(database.db, () => fixedNow);
+    const repository = new DrizzleOverviewReadRepository(
+      database.db,
+      () => fixedNow,
+    );
 
     await expect(repository.getStorageUsage()).resolves.toEqual({
       usedBytes: 0,

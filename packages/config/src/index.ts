@@ -33,6 +33,8 @@ const configSchema = z.object({
   B2_BUCKET: z.string().trim().min(1).optional(),
   B2_KEY_ID: z.string().trim().min(1).optional(),
   B2_APPLICATION_KEY: z.string().trim().min(1).optional(),
+  CLOUDFLARE_ZONE_ID: z.string().trim().min(1).optional(),
+  CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1).optional(),
 });
 
 const databaseConfigSchema = configSchema.pick({ DATABASE_URL: true });
@@ -69,6 +71,10 @@ const processingConfigSchema = z.object({
   MEDIA_WARN_WIDTH_PX: z.coerce.number().int().positive().default(4000),
   MEDIA_WARN_HEIGHT_PX: z.coerce.number().int().positive().default(12000),
 });
+const mediaEffectsConfigSchema = z.object({
+  CLOUDFLARE_ZONE_ID: z.string().trim().min(1),
+  CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1),
+});
 
 export type NodeProxConfig = z.infer<typeof configSchema>;
 export type NodeProxDatabaseConfig = z.infer<typeof databaseConfigSchema>;
@@ -88,6 +94,9 @@ export type NodeProxStorageConfig =
       b2: z.infer<typeof b2ConfigSchema>;
     };
 export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
+export type NodeProxMediaEffectsConfig = z.infer<
+  typeof mediaEffectsConfigSchema
+>;
 
 export {
   adminBootstrapConfigSchema,
@@ -95,6 +104,7 @@ export {
   configSchema,
   databaseConfigSchema,
   processingConfigSchema,
+  mediaEffectsConfigSchema,
 };
 
 export function loadConfig(
@@ -107,6 +117,17 @@ export function loadProcessingConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxProcessingConfig {
   return processingConfigSchema.parse(env);
+}
+
+export function loadMediaEffectsConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxMediaEffectsConfig | null {
+  const nodeEnv = configSchema.shape.NODE_ENV.parse(env.NODE_ENV);
+  const configured = Boolean(
+    env.CLOUDFLARE_ZONE_ID || env.CLOUDFLARE_PURGE_API_TOKEN,
+  );
+  if (!configured && nodeEnv !== "production") return null;
+  return mediaEffectsConfigSchema.parse(env);
 }
 
 export function loadDatabaseConfig(

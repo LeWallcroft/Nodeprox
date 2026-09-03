@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   loadConfig,
   loadDatabaseConfig,
+  loadMediaEffectsConfig,
   loadProcessingConfig,
 } from "../../packages/config/src/index.js";
 
@@ -78,5 +79,20 @@ describe("NodeProx configuration", () => {
       MEDIA_WARN_WIDTH_PX: 4000,
       MEDIA_WARN_HEIGHT_PX: 12000,
     });
+  });
+
+  it("requires server-only Cloudflare purge configuration in production", () => {
+    expect(() => loadMediaEffectsConfig({ NODE_ENV: "production" })).toThrow();
+    expect(
+      loadMediaEffectsConfig({
+        NODE_ENV: "production",
+        CLOUDFLARE_ZONE_ID: "zone-id",
+        CLOUDFLARE_PURGE_API_TOKEN: "secret-token",
+      }),
+    ).toEqual({
+      CLOUDFLARE_ZONE_ID: "zone-id",
+      CLOUDFLARE_PURGE_API_TOKEN: "secret-token",
+    });
+    expect(loadMediaEffectsConfig({ NODE_ENV: "test" })).toBeNull();
   });
 });

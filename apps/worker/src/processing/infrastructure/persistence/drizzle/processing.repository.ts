@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
@@ -5,6 +6,7 @@ import {
   chapterImportItems,
   chapters,
   images,
+  imageVersions,
   series,
   uploads,
 } from "../../../../../../../database/schema/index.js";
@@ -65,8 +67,14 @@ export class DrizzleProcessingRepository
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx.delete(images).where(eq(images.chapterId, chapterId));
+      const prepared = records.map((record) => ({
+        imageId: randomUUID(),
+        versionId: randomUUID(),
+        record,
+      }));
       await tx.insert(images).values(
-        records.map((record) => ({
+        prepared.map(({ imageId, versionId, record }) => ({
+          id: imageId,
           chapterId,
           filename: record.filename,
           storageKey: record.storageKey,
@@ -76,6 +84,20 @@ export class DrizzleProcessingRepository
           sortOrder: record.sortOrder,
           checksum: record.checksum,
           warnings: record.warnings,
+          currentVersionId: versionId,
+        })),
+      );
+      await tx.insert(imageVersions).values(
+        prepared.map(({ imageId, versionId, record }) => ({
+          id: versionId,
+          imageId,
+          version: 1,
+          physicalFilename: record.filename,
+          storageKey: record.storageKey,
+          extension: record.extension,
+          contentType: record.contentType,
+          sizeBytes: record.sizeBytes,
+          checksum: record.checksum,
         })),
       );
       const [chapter] = await tx

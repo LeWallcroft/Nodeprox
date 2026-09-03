@@ -14,6 +14,7 @@ import {
   series,
   users,
 } from "../../database/schema/index.js";
+import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -82,17 +83,19 @@ beforeAll(async () => {
     createdBy: ownerId,
     status: "ready",
   });
-  await database.db.insert(images).values({
-    id: imageId,
-    chapterId,
-    filename: "01.jpg",
-    storageKey,
-    extension: "jpg",
-    contentType: "image/jpeg",
-    sizeBytes: content.length,
-    sortOrder: 1,
-    checksum: "sha256-test",
-  });
+  await insertImagesWithInitialVersions(database.db, [
+    {
+      id: imageId,
+      chapterId,
+      filename: "01.jpg",
+      storageKey,
+      extension: "jpg",
+      contentType: "image/jpeg",
+      sizeBytes: content.length,
+      sortOrder: 1,
+      checksum: "sha256-test",
+    },
+  ]);
   await storage.put({
     key: storageKey,
     body: Readable.from([content]),
