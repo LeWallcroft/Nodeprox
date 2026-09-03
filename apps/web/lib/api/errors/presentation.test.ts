@@ -18,6 +18,24 @@ describe("resolveErrorPresentation", () => {
     expect(presentation.message).not.toContain("technical text");
   });
 
+  it.each([
+    ["series-slug-conflict", 409],
+    ["series-slug-invalid", 422],
+  ])("uses a friendly Series slug message for %s", (code, status) => {
+    const presentation = resolveErrorPresentation(
+      new ApiError(status, "technical text", code, {
+        code,
+        requestId: "req-series",
+      }),
+    );
+    expect(presentation).toMatchObject({
+      presentation: "inline",
+      severity: "warning",
+      requestId: "req-series",
+    });
+    expect(presentation.message).not.toContain("technical text");
+  });
+
   it("does not expose internal details and retains the support reference", () => {
     const presentation = resolveErrorPresentation(
       new ApiError(500, "SQLSTATE leaked", "internal-error", {

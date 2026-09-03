@@ -4,6 +4,7 @@ import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
 import { SeriesDetailPanel } from "./series-detail-panel";
+import { SeriesForm } from "./series-form";
 import { SeriesList } from "./series-list";
 
 const series = {
@@ -19,6 +20,14 @@ const series = {
 };
 
 describe("Series management presentation", () => {
+  it("keeps slug backend-owned in the Series form", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesForm onSubmit={async () => undefined} />,
+    );
+    expect(markup).toContain("El slug público se genera automáticamente");
+    expect(markup).not.toContain('id="series-slug"');
+  });
+
   it("renders a selectable list from Series contract data", () => {
     const markup = renderToStaticMarkup(
       <SeriesList

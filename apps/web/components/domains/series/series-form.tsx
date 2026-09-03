@@ -10,16 +10,13 @@ export function SeriesForm({
   onSubmit,
   submitLabel = "Crear Series",
   onCancel,
-  showSlug = true,
 }: {
   initial?: Partial<SeriesInput>;
   onSubmit: (input: SeriesInput) => Promise<void>;
   submitLabel?: string;
   onCancel?: () => void;
-  showSlug?: boolean;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
-  const [slug, setSlug] = useState(initial?.slug ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [coverUrl, setCoverUrl] = useState(initial?.coverUrl ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +29,6 @@ export function SeriesForm({
     try {
       await onSubmit({
         title: title.trim(),
-        slug: slug.trim(),
         description: description.trim() || null,
         coverUrl: coverUrl.trim() || null,
       });
@@ -57,22 +53,10 @@ export function SeriesForm({
           value={title}
           onChange={(event) => setTitle(event.target.value)}
         />
+        <span className="font-normal text-muted">
+          El slug público se genera automáticamente y permanece estable.
+        </span>
       </label>
-      {showSlug ? (
-        <label
-          className="grid gap-1.5 text-[13px] font-medium text-muted"
-          htmlFor="series-slug"
-        >
-          Slug
-          <input
-            id="series-slug"
-            required
-            maxLength={220}
-            value={slug}
-            onChange={(event) => setSlug(event.target.value)}
-          />
-        </label>
-      ) : null}
       <label
         className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="series-cover-url"

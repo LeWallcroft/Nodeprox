@@ -10,7 +10,11 @@ export function errorMessage(
     const reference = presentation.requestId
       ? ` Referencia: ${presentation.requestId}`
       : "";
-    if (error.code === "chapter-conflict")
+    if (
+      error.code === "chapter-conflict" ||
+      error.code === "series-slug-conflict" ||
+      error.code === "series-slug-invalid"
+    )
       return `${presentation.message}${reference}`;
     if (error.status === 401) return "Tu sesión no es válida o ha expirado.";
     if (error.status === 403)

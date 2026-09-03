@@ -205,7 +205,6 @@ export function SeriesDetailPanel({
       >
         <SeriesForm
           initial={series}
-          showSlug={false}
           submitLabel="Guardar cambios"
           onSubmit={async (input) => {
             await onUpdate({

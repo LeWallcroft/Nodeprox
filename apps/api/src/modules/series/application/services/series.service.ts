@@ -2,6 +2,7 @@ import type { AuthorizationService } from "../../../authorization/application/se
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
+import { SeriesSlug } from "../../domain/series-slug.js";
 import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
 import type {
   ChapterCoreRepositoryPort,
@@ -25,18 +26,18 @@ export class SeriesService {
     context: AuthorizationContext,
     input: {
       title: string;
-      slug: string;
       description?: string | null | undefined;
       coverUrl?: string | null | undefined;
     },
   ) {
     this.requireSession(context);
+    const slug = SeriesSlug.fromTitle(input.title).toString();
     const decision = await this.authorization.authorize(
       context,
       PERMISSIONS.SERIES_CREATE,
     );
     if (!decision.allowed) return { forbidden: true as const };
-    return this.series.create({ ...input, createdBy: context.userId });
+    return this.series.create({ ...input, slug, createdBy: context.userId });
   }
 
   async list(context: AuthorizationContext) {

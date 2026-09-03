@@ -403,7 +403,6 @@ export class DrizzleSeriesRepository
     id: string,
     input: {
       title?: string | undefined;
-      slug?: string | undefined;
       description?: string | null | undefined;
       coverUrl?: string | null | undefined;
     },
