@@ -20,6 +20,18 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
       severity: "warning",
       presentation: "inline",
     },
+    "series-slug-conflict": {
+      title: "Slug de serie en uso",
+      message: "Ya existe una serie con el mismo slug canónico.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-slug-invalid": {
+      title: "Título no válido para URL",
+      message: "El título debe incluir letras o números que formen un slug.",
+      severity: "warning",
+      presentation: "inline",
+    },
     forbidden: {
       title: "Acción no permitida",
       message: "No tienes permisos para realizar esta operación.",

@@ -20,6 +20,7 @@ import {
   DrizzleSeriesRepository,
 } from "../infrastructure/persistence/drizzle/series.repository.js";
 import { SeriesService } from "../application/services/series.service.js";
+import { InvalidSeriesSlugError } from "../domain/series-slug.js";
 import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
@@ -36,12 +37,14 @@ const externalCoverUrlSchema = z
 const seriesCreateSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
+    // Compatibility-only input: the backend always derives the persisted slug.
     slug: z
       .string()
       .trim()
       .min(1)
       .max(220)
-      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional(),
     description: z.string().max(5000).nullable().optional(),
     coverUrl: externalCoverUrlSchema.nullable().optional(),
   })
@@ -105,6 +108,18 @@ const chapterConflict = error(
   409,
   "Chapter conflict",
 );
+const seriesSlugConflict = error(
+  "series-slug-conflict",
+  "A Series with this canonical slug already exists.",
+  409,
+  "Series slug conflict",
+);
+const invalidSeriesSlug = error(
+  "series-slug-invalid",
+  "The title does not produce a valid public slug.",
+  422,
+  "Invalid Series slug",
+);
 const invalid = error(
   "validation-failed",
   "The request payload is invalid.",
@@ -164,14 +179,16 @@ export function registerSeriesPlugin(
 
   app.post("/series", { preHandler: session }, async (request, reply) => {
     try {
-      const result = await seriesService.create(
-        context(),
-        parse(seriesCreateSchema, request.body),
+      const { slug: _legacySlug, ...input } = parse(
+        seriesCreateSchema,
+        request.body,
       );
+      const result = await seriesService.create(context(), input);
       if ("forbidden" in result) throw forbidden;
       return reply.code(201).send(result);
     } catch (cause) {
-      if (isUnique(cause)) throw conflict;
+      if (cause instanceof InvalidSeriesSlugError) throw invalidSeriesSlug;
+      if (isUnique(cause)) throw seriesSlugConflict;
       throw cause;
     }
   });

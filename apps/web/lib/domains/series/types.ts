@@ -20,7 +20,6 @@ export type SeriesUploaderCandidate = SeriesPrincipalUploader;
 
 export interface SeriesInput {
   title: string;
-  slug: string;
   description?: string | null;
   coverUrl?: string | null;
 }

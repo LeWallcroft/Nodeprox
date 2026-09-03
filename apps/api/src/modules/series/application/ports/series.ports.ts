@@ -24,7 +24,6 @@ export interface SeriesRepositoryPort {
     id: string,
     input: {
       title?: string | undefined;
-      slug?: string | undefined;
       description?: string | null | undefined;
       coverUrl?: string | null | undefined;
     },
@@ -68,7 +67,6 @@ export interface SeriesMutationBoundaryPort {
     seriesId: string;
     mutation: {
       title?: string | undefined;
-      slug?: string | undefined;
       description?: string | null | undefined;
       coverUrl?: string | null | undefined;
     };

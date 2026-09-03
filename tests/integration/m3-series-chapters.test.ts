@@ -197,7 +197,7 @@ afterAll(async () => {
 describe("M3 Series and Chapters Core", () => {
   it("keeps public identities stable when editable labels or numbers change", async () => {
     const ownerCookie = await login(emails.owner);
-    const slug = `stable-media-${ownerId}`;
+    const slug = "stable-media";
     const createdSeries = await app.inject({
       method: "POST",
       url: "/series",
@@ -347,12 +347,99 @@ describe("M3 Series and Chapters Core", () => {
     });
     expect(updated.statusCode).toBe(200);
     expect(updated.json().coverUrl).toBeNull();
-    expect(updated.json().slug).toBe(`covered-${ownerId}`);
+    expect(updated.json().slug).toBe("covered-series");
     const [stored] = await database.db
       .select({ createdBy: series.createdBy })
       .from(series)
       .where(eq(series.id, seriesId));
     expect(stored?.createdBy).toBe(ownerId);
+  });
+
+  it("owns canonical Series slugs and maps collisions without leaking SQL", async () => {
+    const ownerCookie = await login(emails.owner);
+    const suffix = randomUUID();
+    const title = `Café / Stable ${suffix}`;
+    const expectedSlug = `cafe-stable-${suffix}`;
+
+    const created = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: { title, slug: `client-override-${suffix}` },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().slug).toBe(expectedSlug);
+    const seriesId = created.json().id as string;
+
+    const renamed = await app.inject({
+      method: "PATCH",
+      url: `/series/${seriesId}`,
+      headers: { cookie: ownerCookie },
+      payload: { title: `Renamed ${suffix}`, description: "Updated" },
+    });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().slug).toBe(expectedSlug);
+
+    const descriptionOnly = await app.inject({
+      method: "PATCH",
+      url: `/series/${seriesId}`,
+      headers: { cookie: ownerCookie },
+      payload: { description: "Description-only update" },
+    });
+    expect(descriptionOnly.statusCode).toBe(200);
+    expect(descriptionOnly.json().slug).toBe(expectedSlug);
+
+    const duplicate = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: { title },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json()).toMatchObject({
+      code: "series-slug-conflict",
+      category: "conflict",
+      requestId: expect.any(String),
+    });
+    expect(JSON.stringify(duplicate.json())).not.toContain(
+      "series_slug_unique",
+    );
+
+    const concurrentTitle = `Concurrent ${randomUUID()}`;
+    const concurrent = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/series",
+        headers: { cookie: ownerCookie },
+        payload: { title: concurrentTitle },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/series",
+        headers: { cookie: ownerCookie },
+        payload: { title: concurrentTitle },
+      }),
+    ]);
+    expect(concurrent.map((response) => response.statusCode).sort()).toEqual([
+      201, 409,
+    ]);
+    expect(
+      concurrent.find((response) => response.statusCode === 409)?.json(),
+    ).toMatchObject({
+      code: "series-slug-conflict",
+      requestId: expect.any(String),
+    });
+
+    const emptyCanonical = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: ownerCookie },
+      payload: { title: "日本語" },
+    });
+    expect(emptyCanonical.statusCode).toBe(422);
+    expect(emptyCanonical.json()).toMatchObject({
+      code: "series-slug-invalid",
+    });
   });
 
   it("implements the authenticated Series and Chapter CRUD contract", async () => {

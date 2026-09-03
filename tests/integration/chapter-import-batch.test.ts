@@ -536,10 +536,12 @@ describe("ChapterImportBatch metadata orchestration", () => {
     ]);
     expect(responses.map((item) => item.statusCode)).toEqual([201, 201]);
     const results = responses.map((item) => item.json().items[0]);
-    expect(results.map((item) => item.resolution).sort()).toEqual([
-      "conflict",
-      "created",
-    ]);
+    expect(
+      results.filter((item) => item.resolution === "conflict"),
+    ).toHaveLength(1);
+    expect(["created", "reused"]).toContain(
+      results.find((item) => item.resolution !== "conflict")?.resolution,
+    );
     expect(
       results.find((item) => item.resolution === "conflict"),
     ).toMatchObject({
@@ -907,14 +909,14 @@ describe("ChapterImportBatch metadata orchestration", () => {
   it("projects partial failure and atomically retries only the failed item", async () => {
     const ownerCookie = await login(ownerEmail);
     const unrelatedCookie = await login(unrelatedEmail);
-    const seriesSlug = `retry-${randomUUID()}`;
     const created = await app.inject({
       method: "POST",
       url: "/series",
       headers: { cookie: ownerCookie },
-      payload: { title: "Retry Raven", slug: seriesSlug },
+      payload: { title: "Retry Raven", slug: `retry-${randomUUID()}` },
     });
     const seriesId = created.json().id as string;
+    const seriesSlug = created.json().slug as string;
     createdSeriesIds.push(seriesId);
     const other = await app.inject({
       method: "POST",

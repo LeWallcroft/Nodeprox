@@ -166,7 +166,6 @@ export default function SeriesDetailPage() {
       >
         <SeriesForm
           initial={series}
-          showSlug={false}
           submitLabel="Guardar cambios"
           onSubmit={handleUpdate}
           onCancel={() => setEditing(false)}
