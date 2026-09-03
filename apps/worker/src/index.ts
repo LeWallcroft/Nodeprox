@@ -4,6 +4,7 @@ import { Worker } from "bullmq";
 import pino from "pino";
 import {
   loadConfig,
+  loadMediaEffectsConfig,
   loadProcessingConfig,
   loadStorageConfig,
 } from "@nodeprox/config";
@@ -16,6 +17,9 @@ import { UnzipperExtractor } from "./processing/infrastructure/zip/unzipper.extr
 import { DrizzleProcessingRepository } from "./processing/infrastructure/persistence/drizzle/processing.repository.js";
 import { ChapterDeletionService } from "./deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "./deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
+import { MediaEffectProcessor } from "./media-effects/application/media-effect.processor.js";
+import { CloudflareCdnInvalidationAdapter } from "./media-effects/infrastructure/cloudflare-cdn-invalidation.adapter.js";
+import { DrizzleMediaEffectRepository } from "./media-effects/infrastructure/persistence/drizzle/media-effect.repository.js";
 const config = loadConfig();
 const logger = pino({
   level: config.LOG_LEVEL,
@@ -31,6 +35,7 @@ const logger = pino({
       "DATABASE_URL",
       "REDIS_URL",
       "presignedUrl",
+      "CLOUDFLARE_PURGE_API_TOKEN",
     ],
     censor: "[REDACTED]",
   },
@@ -42,6 +47,19 @@ const storage =
   storageConfig.provider === "b2"
     ? new B2Storage(storageConfig.b2)
     : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
+const mediaEffectsConfig = loadMediaEffectsConfig();
+const mediaEffects = mediaEffectsConfig
+  ? new MediaEffectProcessor(
+      new DrizzleMediaEffectRepository(database.db),
+      new CloudflareCdnInvalidationAdapter(
+        mediaEffectsConfig.CLOUDFLARE_ZONE_ID,
+        mediaEffectsConfig.CLOUDFLARE_PURGE_API_TOKEN,
+      ),
+      storage,
+      logger,
+    )
+  : null;
+mediaEffects?.start();
 const repository = new DrizzleProcessingRepository(database.db);
 const deletion = new ChapterDeletionService(
   new DrizzleChapterDeletionRepository(database.db),
@@ -146,10 +164,12 @@ worker.on("failed", (job, error) => {
   );
 });
 process.once("SIGTERM", async () => {
+  mediaEffects?.stop();
   await worker.close();
   await database.sql.end();
 });
 process.once("SIGINT", async () => {
+  mediaEffects?.stop();
   await worker.close();
   await database.sql.end();
 });

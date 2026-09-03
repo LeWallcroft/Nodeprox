@@ -1,4 +1,6 @@
 import {
+  type AnyPgColumn,
+  check,
   index,
   integer,
   jsonb,
@@ -9,6 +11,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import type { MediaWarning } from "../../packages/types/src/index.js";
 import { chapters } from "./chapters.js";
 export const images = pgTable(
@@ -29,6 +32,11 @@ export const images = pgTable(
       .$type<readonly MediaWarning[]>()
       .notNull()
       .default([]),
+    currentVersionId: uuid("current_version_id")
+      .notNull()
+      .references((): AnyPgColumn => imageVersions.id, {
+        onDelete: "restrict",
+      }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -43,5 +51,37 @@ export const images = pgTable(
     ),
     index("images_chapter_idx").on(table.chapterId),
     index("images_chapter_sort_order_idx").on(table.chapterId, table.sortOrder),
+  ],
+);
+
+export const imageVersions = pgTable(
+  "image_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    imageId: uuid("image_id")
+      .notNull()
+      .references(() => images.id, { onDelete: "cascade" }),
+    version: integer("version").notNull(),
+    physicalFilename: varchar("physical_filename", { length: 255 }).notNull(),
+    storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    extension: varchar("extension", { length: 10 }).notNull(),
+    contentType: varchar("content_type", { length: 128 }).notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    checksum: text("checksum").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("image_versions_image_version_unique").on(
+      table.imageId,
+      table.version,
+    ),
+    uniqueIndex("image_versions_storage_key_unique").on(table.storageKey),
+    index("image_versions_image_idx").on(table.imageId),
+    check("image_versions_version_positive", sql`${table.version} > 0`),
   ],
 );

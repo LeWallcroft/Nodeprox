@@ -1,11 +1,20 @@
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import { randomUUID } from "node:crypto";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import {
+  PostgreSqlContainer,
+  type StartedPostgreSqlContainer,
+} from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
-import { auditLogs, chapters, images, series, users } from "../../database/schema/index.js";
+import {
+  auditLogs,
+  chapters,
+  series,
+  users,
+} from "../../database/schema/index.js";
+import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const password = "overview-endpoint-password";
 const adminId = randomUUID();
@@ -77,17 +86,19 @@ beforeAll(async () => {
     publicKey: "1",
     createdBy: adminId,
   });
-  await database.db.insert(images).values({
-    id: randomUUID(),
-    chapterId,
-    filename: "01.jpg",
-    storageKey: "Media/overview/1/01.jpg",
-    extension: "jpg",
-    contentType: "image/jpeg",
-    sizeBytes: 256,
-    sortOrder: 1,
-    checksum: "overview-endpoint-image",
-  });
+  await insertImagesWithInitialVersions(database.db, [
+    {
+      id: randomUUID(),
+      chapterId,
+      filename: "01.jpg",
+      storageKey: "Media/overview/1/01.jpg",
+      extension: "jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 256,
+      sortOrder: 1,
+      checksum: "overview-endpoint-image",
+    },
+  ]);
   await database.db.insert(auditLogs).values({
     id: randomUUID(),
     actorId: adminId,

@@ -8,7 +8,7 @@ export {
   helperSeriesCooldowns,
 } from "./chapters.js";
 export { uploads } from "./uploads.js";
-export { images } from "./images.js";
+export { images, imageVersions } from "./images.js";
 export {
   chapterImportBatches,
   chapterImportItems,
@@ -21,3 +21,8 @@ export {
   chapterDeletionOutbox,
   chapterDeletionOutboxStatusEnum,
 } from "./chapter-deletion-outbox.js";
+export {
+  mediaEffectOutbox,
+  mediaEffectStatusEnum,
+  mediaEffectTypeEnum,
+} from "./media-effect-outbox.js";

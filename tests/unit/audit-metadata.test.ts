@@ -5,6 +5,12 @@ import {
 } from "../../apps/api/src/modules/authorization/infrastructure/audit/audit-metadata.js";
 
 describe("audit metadata boundary", () => {
+  it("allows non-sensitive media version transitions", () => {
+    expect(
+      sanitizeAuditMetadata({ previousVersion: 1, currentVersion: 2 }),
+    ).toEqual({ previousVersion: 1, currentVersion: 2 });
+  });
+
   it("keeps the approved non-sensitive metadata only", () => {
     expect(
       sanitizeAuditMetadata({ requestId: "req-1", result: "denied" }),

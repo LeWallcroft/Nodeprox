@@ -3,6 +3,7 @@ import type { NodeProxDatabase } from "../../../../../../../../database/client.j
 import {
   chapters,
   images,
+  imageVersions,
   series,
 } from "../../../../../../../../database/schema/index.js";
 import type { PublishedChapterRepositoryPort } from "../../../application/ports/published-chapter.repository.js";
@@ -35,14 +36,15 @@ export class DrizzlePublishedChapterRepository
       .select({
         id: images.id,
         chapterId: images.chapterId,
-        filename: images.filename,
-        storageKey: images.storageKey,
-        extension: images.extension,
-        contentType: images.contentType,
-        sizeBytes: images.sizeBytes,
+        filename: imageVersions.physicalFilename,
+        storageKey: imageVersions.storageKey,
+        extension: imageVersions.extension,
+        contentType: imageVersions.contentType,
+        sizeBytes: imageVersions.sizeBytes,
         sortOrder: images.sortOrder,
       })
       .from(images)
+      .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
       .where(eq(images.chapterId, chapterId))
       .orderBy(asc(images.sortOrder));
   }

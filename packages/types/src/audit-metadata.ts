@@ -13,6 +13,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "configKey",
   "result",
   "imageCount",
+  "previousVersion",
+  "currentVersion",
 ]);
 
 const SENSITIVE_KEY_PATTERN =
