@@ -25,6 +25,9 @@ export const queryKeys = {
     helperCandidates: (chapterId: string) =>
       ["chapters", chapterId, "helper-candidates"] as const,
   },
+  ingestion: {
+    batch: (batchId: string) => ["ingestion", "batch", batchId] as const,
+  },
   publication: {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,
   },

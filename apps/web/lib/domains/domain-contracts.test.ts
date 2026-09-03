@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { normalizeApiError } from "../api/types";
 import { createChapter, listChapters } from "./chapters/api";
+import { getPublicChapter } from "./publication/api";
 import { queryKeys } from "./query-keys";
 import { deleteSeries, listSeries } from "./series/api";
 import { uploadChapter } from "./uploads/api";
-import { getPublicChapter } from "./publication/api";
 
 describe("frontend domain contract adapters", () => {
   it("keeps domain query keys stable", () => {
@@ -23,6 +23,11 @@ describe("frontend domain contract adapters", () => {
       "chapters",
       "detail",
       "chapter-1",
+    ]);
+    expect(queryKeys.ingestion.batch("batch-1")).toEqual([
+      "ingestion",
+      "batch",
+      "batch-1",
     ]);
     expect(queryKeys.publication.chapter("chapter-1")).toEqual([
       "public",
@@ -132,7 +137,9 @@ describe("frontend domain contract adapters", () => {
     const file = new File(["PK\x03\x04"], "chapter.zip", {
       type: "application/x-zip-compressed",
     });
-    await uploadChapter("chapter-1", file);
+    const initiated = vi.fn(() => expect(directRequests).toHaveLength(0));
+    await uploadChapter("chapter-1", file, undefined, initiated);
+    expect(initiated).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       "/api/chapters/chapter-1/uploads/initiate",
       "/api/chapters/chapter-1/uploads/upload-1/complete",

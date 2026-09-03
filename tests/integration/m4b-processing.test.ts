@@ -1,9 +1,16 @@
-import { eq, inArray } from "drizzle-orm";
-import { mkdtemp, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
-import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import type {
+  ProcessingAuditPort,
+  ZipExtractorPort,
+} from "../../apps/worker/src/processing/application/ports.js";
+import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
+import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
@@ -14,13 +21,6 @@ import {
   users,
 } from "../../database/schema/index.js";
 import { FilesystemStorage } from "../../packages/storage/src/adapters.js";
-import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
-import type {
-  ProcessingAuditPort,
-  ZipExtractorPort,
-} from "../../apps/worker/src/processing/application/ports.js";
-import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
-import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -208,6 +208,11 @@ describe("M4-B processing integration", () => {
     };
     await expect(service.process(input)).rejects.toThrow("transient");
     await expect(storage.exists(fixture.storageKey)).resolves.toBe(true);
+    const [afterTransientFailure] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, fixture.chapterId));
+    expect(afterTransientFailure?.status).toBe("uploaded");
     await service.process(input);
     const rows = await database.db
       .select()

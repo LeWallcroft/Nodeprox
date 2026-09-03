@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { queryKeys } from "../query-keys";
+import { invalidateChapterLifecycle } from "../chapters/lifecycle-invalidation";
 import { uploadChapter } from "./api";
 
 export function useUploadChapter(seriesId: string, chapterId: string) {
@@ -11,22 +11,24 @@ export function useUploadChapter(seriesId: string, chapterId: string) {
   const mutation = useMutation({
     mutationFn: (file: File) => {
       setProgress(0);
-      return uploadChapter(chapterId, file, ({ loadedBytes, totalBytes }) => {
-        setProgress(
-          totalBytes > 0 ? Math.round((loadedBytes / totalBytes) * 100) : 0,
-        );
-      });
+      return uploadChapter(
+        chapterId,
+        file,
+        ({ loadedBytes, totalBytes }) => {
+          setProgress(
+            totalBytes > 0 ? Math.round((loadedBytes / totalBytes) * 100) : 0,
+          );
+        },
+        async () => {
+          await invalidateChapterLifecycle(queryClient, {
+            seriesId,
+            chapterId,
+          });
+        },
+      );
     },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.chapters.detail(chapterId),
-        }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.series.chapters(seriesId),
-        }),
-      ]);
-    },
+    onSuccess: () =>
+      invalidateChapterLifecycle(queryClient, { seriesId, chapterId }),
   });
   return { ...mutation, progress };
 }

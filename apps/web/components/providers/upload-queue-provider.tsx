@@ -1,7 +1,18 @@
 "use client";
 
-import { useProductSettings } from "../../lib/domains/settings/hooks";
-import { queryKeys } from "../../lib/domains/query-keys";
+import { type Query, useQueries, useQueryClient } from "@tanstack/react-query";
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { isImportBatchLifecycleActive } from "../../lib/domains/chapters/lifecycle";
+import { invalidateChapterLifecycle } from "../../lib/domains/chapters/lifecycle-invalidation";
 import {
   abortImportItem,
   completeImportItem,
@@ -10,11 +21,11 @@ import {
   retryImportItem,
 } from "../../lib/domains/ingestion/api";
 import {
-  safeBulkUploadConcurrency,
   canEnqueueDirectUpload,
   MAX_DIRECT_UPLOAD_CONCURRENCY,
-  sanitizeTrackedBatches,
   type PersistedTrackedBatch,
+  safeBulkUploadConcurrency,
+  sanitizeTrackedBatches,
 } from "../../lib/domains/ingestion/orchestration";
 import type {
   CreatedImportBatch,
@@ -22,18 +33,9 @@ import type {
   ImportCandidate,
   RetriedImportItem,
 } from "../../lib/domains/ingestion/types";
+import { queryKeys } from "../../lib/domains/query-keys";
+import { useProductSettings } from "../../lib/domains/settings/hooks";
 import { putDirectUpload } from "../../lib/domains/uploads/api";
-import { useQueryClient } from "@tanstack/react-query";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
 
 const STORAGE_KEY = "nodeprox:upload-queue:v1";
 const TRACKED_BATCH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -95,18 +97,17 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [tracked, setTracked] = useState<TrackedBatch[]>([]);
   const [hydrated, setHydrated] = useState(false);
-  const [projections, setProjections] = useState<
-    Readonly<Record<string, ImportBatchProjection>>
-  >({});
   const [progress, setProgress] = useState<Readonly<Record<string, number>>>(
     {},
   );
   const [activeTransfers, setActiveTransfers] = useState(0);
   const [queuedTransfers, setQueuedTransfers] = useState(0);
-  const trackedRef = useRef<TrackedBatch[]>([]);
   const queue = useRef<TransferJob[]>([]);
   const active = useRef(0);
   const drain = useRef<() => void>(() => undefined);
+  const previousProjections = useRef<
+    Readonly<Record<string, ImportBatchProjection>>
+  >({});
 
   const concurrency = useMemo(() => {
     const value = settings.data?.sections
@@ -117,24 +118,44 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
     );
   }, [settings.data]);
 
+  const batchQueries = useQueries({
+    queries: tracked.map((batch) => ({
+      queryKey: queryKeys.ingestion.batch(batch.batchId),
+      queryFn: () => getImportBatch(batch.batchId),
+      retry: false,
+      refetchOnMount: "always" as const,
+      refetchInterval: (
+        query: Query<
+          ImportBatchProjection,
+          Error,
+          ImportBatchProjection,
+          readonly unknown[]
+        >,
+      ) => (isImportBatchLifecycleActive(query.state.data) ? 2000 : false),
+    })),
+  });
+
+  const projections = useMemo<Readonly<Record<string, ImportBatchProjection>>>(
+    () =>
+      Object.fromEntries(
+        tracked.flatMap((batch, index) => {
+          const projection = batchQueries[index]?.data;
+          return projection ? [[batch.batchId, projection]] : [];
+        }),
+      ),
+    [batchQueries, tracked],
+  );
+
   const refreshBatch = useCallback(
     async (batchId: string) => {
-      const projection = await getImportBatch(batchId);
-      setProjections((current) => ({ ...current, [batchId]: projection }));
-      const trackedBatch = trackedRef.current.find(
-        (candidate) => candidate.batchId === batchId,
-      );
-      if (trackedBatch && isTerminalBatch(projection))
-        await queryClient.invalidateQueries({
-          queryKey: queryKeys.series.chapters(trackedBatch.seriesId),
-        });
+      await queryClient.fetchQuery({
+        queryKey: queryKeys.ingestion.batch(batchId),
+        queryFn: () => getImportBatch(batchId),
+        staleTime: 0,
+      });
     },
     [queryClient],
   );
-
-  useEffect(() => {
-    trackedRef.current = tracked;
-  }, [tracked]);
 
   const executeTransfer = useCallback(
     async (job: TransferJob) => {
@@ -205,20 +226,18 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   }, [hydrated, tracked]);
 
   useEffect(() => {
-    const activeBatchIds = tracked
-      .filter((batch) => !isTerminalBatch(projections[batch.batchId]))
-      .map((batch) => batch.batchId);
-    if (!activeBatchIds.length) return;
-    const poll = () =>
-      void Promise.all(
-        activeBatchIds.map((batchId) =>
-          refreshBatch(batchId).catch(() => undefined),
-        ),
-      );
-    poll();
-    const timer = window.setInterval(poll, 2000);
-    return () => window.clearInterval(timer);
-  }, [projections, refreshBatch, tracked]);
+    for (const batch of tracked) {
+      const current = projections[batch.batchId];
+      const previous = previousProjections.current[batch.batchId];
+      if (!current || sameImportItemLifecycle(previous, current)) continue;
+      for (const item of current.items)
+        void invalidateChapterLifecycle(queryClient, {
+          seriesId: batch.seriesId,
+          chapterId: item.chapterId,
+        });
+    }
+    previousProjections.current = projections;
+  }, [projections, queryClient, tracked]);
 
   const track = useCallback((batch: TrackedBatch) => {
     setTracked((current) => {
@@ -252,10 +271,18 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
         seriesTitle: input.seriesTitle,
         trackedAt: Date.now(),
       });
-      setProjections((current) => ({
-        ...current,
-        [batch.batchId]: projection,
-      }));
+      queryClient.setQueryData(
+        queryKeys.ingestion.batch(batch.batchId),
+        projection,
+      );
+      await Promise.all(
+        projection.items.map((item) =>
+          invalidateChapterLifecycle(queryClient, {
+            seriesId: input.seriesId,
+            chapterId: item.chapterId,
+          }),
+        ),
+      );
       for (const item of batch.items) {
         if (
           !canEnqueueDirectUpload({
@@ -284,7 +311,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       }
       return batch;
     },
-    [enqueue, track],
+    [enqueue, queryClient, track],
   );
 
   const retryWithFile = useCallback(
@@ -416,9 +443,21 @@ function progressKey(batchId: string, itemId: string) {
   return `${batchId}:${itemId}`;
 }
 
-function isTerminalBatch(projection: ImportBatchProjection | undefined) {
-  return (
-    projection?.status === "completed" ||
-    projection?.status === "completed_with_errors"
+function sameImportItemLifecycle(
+  previous: ImportBatchProjection | undefined,
+  current: ImportBatchProjection,
+) {
+  if (!previous || previous.items.length !== current.items.length) return false;
+  const previousById = new Map(
+    previous.items.map((item) => [item.itemId, item]),
   );
+  return current.items.every((item) => {
+    const previousItem = previousById.get(item.itemId);
+    return (
+      previousItem?.status === item.status &&
+      previousItem.resolution === item.resolution &&
+      previousItem.errorCode === item.errorCode &&
+      previousItem.chapterId === item.chapterId
+    );
+  });
 }

@@ -1019,6 +1019,11 @@ describe("ChapterImportBatch metadata orchestration", () => {
     });
     expect(partial.statusCode).toBe(200);
     expect(partial.json().status).toBe("completed_with_errors");
+    const [failedChapter] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, item26.chapterId));
+    expect(failedChapter?.status).toBe("failed");
     expect(partial.json().items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ clientId: "item-25", status: "ready" }),
