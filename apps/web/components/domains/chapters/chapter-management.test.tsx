@@ -2,10 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
-import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { UploadForm } from "../uploads/upload-form";
 import {
   BulkChapterUploadDialog,
@@ -108,7 +108,7 @@ describe("Chapter management presentation", () => {
     );
     expect(markup).toContain('type="file"');
     expect(markup).toContain("sr-only");
-    expect(markup).toContain("Arrastra tu ZIP aquí");
+    expect(markup).toContain("Arrastra un ZIP aquí");
     expect(markup).toContain("Subir ZIP");
   });
 
@@ -122,7 +122,7 @@ describe("Chapter management presentation", () => {
       />,
     );
     expect(markup).toContain("Subir capítulos");
-    expect(markup).toContain("Seleccionar archivos ZIP");
+    expect(markup).toContain("Arrastra uno o varios ZIP aquí");
     expect(markup).toContain('type="file"');
     expect(markup).toContain("multiple");
     expect(markup).not.toContain("Continuar con ZIP");
