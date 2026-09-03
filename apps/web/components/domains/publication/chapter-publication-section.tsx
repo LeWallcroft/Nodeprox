@@ -1,51 +1,21 @@
 "use client";
 
-import { useState } from "react";
 import { ApiError } from "../../../lib/api/types";
-import { errorMessage } from "../feedback";
-import { Button } from "../../ui/button";
-import { ErrorState } from "../../ui/error-state";
-import { Skeleton } from "../../ui/skeleton";
 import { usePublicChapter } from "../../../lib/domains/publication/hooks";
+import type { PublicImage } from "../../../lib/domains/publication/types";
 import {
   publicImageUrlsText,
   sortPublicImages,
 } from "../../../lib/domains/publication/utils";
-import type { PublicImage } from "../../../lib/domains/publication/types";
+import { Button } from "../../ui/button";
+import { CopyButton } from "../../ui/copy-button";
+import { ErrorState } from "../../ui/error-state";
+import { Skeleton } from "../../ui/skeleton";
+import { errorMessage } from "../feedback";
 
 function formatBytes(sizeBytes: number) {
   if (sizeBytes < 1024) return `${sizeBytes} B`;
   return `${(sizeBytes / 1024).toFixed(1)} KB`;
-}
-
-function CopyUrlButton({ url }: { url: string }) {
-  const [copied, setCopied] = useState(false);
-  const [failed, setFailed] = useState(false);
-
-  async function copy() {
-    setFailed(false);
-    try {
-      if (!navigator.clipboard) throw new Error("clipboard-unavailable");
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setFailed(true);
-    }
-  }
-
-  return (
-    <div className="grid justify-items-start gap-1">
-      <Button type="button" onClick={() => void copy()}>
-        {copied ? "Copiado" : "Copiar URL"}
-      </Button>
-      {failed ? (
-        <span className="text-xs text-danger" role="alert">
-          No se pudo copiar la URL.
-        </span>
-      ) : null}
-    </div>
-  );
 }
 
 function ImageListItem({ image }: { image: PublicImage }) {
@@ -67,7 +37,7 @@ function ImageListItem({ image }: { image: PublicImage }) {
         </p>
         <code className="block break-all text-xs text-muted">{image.url}</code>
       </div>
-      <CopyUrlButton url={image.url} />
+      <CopyButton value={image.url} />
     </li>
   );
 }
@@ -80,18 +50,6 @@ export function ChapterPublicationSection({
   chapterStatus: string;
 }) {
   const query = usePublicChapter(chapterId, chapterStatus === "ready");
-  const [copyFailed, setCopyFailed] = useState(false);
-
-  async function copyAll(images: readonly PublicImage[]) {
-    setCopyFailed(false);
-    try {
-      if (!navigator.clipboard) throw new Error("clipboard-unavailable");
-      await navigator.clipboard.writeText(publicImageUrlsText(images));
-    } catch {
-      setCopyFailed(true);
-    }
-  }
-
   if (chapterStatus !== "ready")
     return (
       <section
@@ -189,15 +147,12 @@ export function ChapterPublicationSection({
             {query.data?.title || `Chapter ${query.data?.chapterNumber}`}
           </p>
         </div>
-        <div className="grid justify-items-start gap-1 sm:justify-items-end">
-          <Button type="button" onClick={() => void copyAll(images)}>
-            Copiar todas las URLs
-          </Button>
-          {copyFailed ? (
-            <span className="text-xs text-danger" role="alert">
-              No se pudieron copiar las URLs.
-            </span>
-          ) : null}
+        <div className="sm:justify-self-end">
+          <CopyButton
+            value={publicImageUrlsText(images)}
+            label="Copiar todas las URLs"
+            failureMessage="No se pudieron copiar las URLs."
+          />
         </div>
       </div>
       <ol className="grid gap-3" aria-label="Imágenes publicadas">

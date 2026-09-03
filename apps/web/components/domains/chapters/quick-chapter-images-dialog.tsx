@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { usePublicChapter } from "../../../lib/domains/publication/hooks";
 import {
   publicImageUrlsText,
@@ -9,6 +8,7 @@ import {
 } from "../../../lib/domains/publication/utils";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
+import { CopyButton } from "../../ui/copy-button";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
 
@@ -28,17 +28,7 @@ export function QuickChapterImagesDialog({
   chapterNumber: number;
 }) {
   const query = usePublicChapter(chapterId, open);
-  const [copyError, setCopyError] = useState<string | null>(null);
   const images = sortPublicImages(query.data?.images ?? []);
-  async function copy(value: string) {
-    setCopyError(null);
-    try {
-      if (!navigator.clipboard) throw new Error("clipboard-unavailable");
-      await navigator.clipboard.writeText(value);
-    } catch {
-      setCopyError("No se pudo copiar la URL.");
-    }
-  }
   return (
     <AppDialog
       description={seriesTitle}
@@ -57,13 +47,11 @@ export function QuickChapterImagesDialog({
           >
             Cerrar
           </Button>
-          <Button
-            type="button"
-            disabled={!images.length}
-            onClick={() => void copy(publicImageUrlsText(images))}
-          >
-            Copiar todas las URLs
-          </Button>
+          <CopyButton
+            value={images.length ? publicImageUrlsText(images) : null}
+            label="Copiar todas las URLs"
+            failureMessage="No se pudieron copiar las URLs."
+          />
           <Link
             className="inline-flex min-h-control items-center justify-center rounded-control bg-primary px-3.5 font-medium text-primary-foreground"
             href={`/series/${seriesId}/chapters/${chapterId}/images`}
@@ -103,21 +91,13 @@ export function QuickChapterImagesDialog({
                   {image.contentType} · {image.url}
                 </p>
               </div>
-              <Button
+              <CopyButton
                 className="border-border bg-surface text-text hover:bg-surface-hover"
-                type="button"
-                onClick={() => void copy(image.url)}
-              >
-                Copiar URL
-              </Button>
+                value={image.url}
+              />
             </li>
           ))}
         </ol>
-      ) : null}
-      {copyError ? (
-        <p className="mt-3 text-sm text-danger" role="alert">
-          {copyError}
-        </p>
       ) : null}
     </AppDialog>
   );
