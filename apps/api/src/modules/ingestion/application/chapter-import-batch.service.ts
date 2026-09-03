@@ -6,11 +6,15 @@ import {
   type ChapterTargetResolver,
 } from "./chapter-target.resolver.js";
 import type {
+  ImportAdmissionLimitReason,
   ImportBatchRepositoryPort,
   ImportItemInput,
   ImportSeriesAccessPort,
   ImportUploadPort,
 } from "./ports.js";
+
+export const IMPORT_BATCH_ITEM_LIMIT = 15;
+export const IMPORT_BATCH_TOTAL_SIZE_LIMIT = 3 * 1024 * 1024 * 1024;
 
 export class ChapterImportBatchService {
   constructor(
@@ -18,6 +22,7 @@ export class ChapterImportBatchService {
     private readonly access: ImportSeriesAccessPort,
     private readonly targets: ChapterTargetResolver,
     private readonly uploads: ImportUploadPort,
+    private readonly maxItemSizeBytes: number,
   ) {}
 
   async create(input: {
@@ -25,78 +30,130 @@ export class ChapterImportBatchService {
     seriesId: string;
     items: readonly ImportItemInput[];
   }) {
+    validateBatchInput(input.items, this.maxItemSizeBytes);
     const access = await this.access.check(input.actor, input.seriesId);
     if (access === "denied") throw new ImportBatchDeniedError();
     if (access === "not-found") throw new ImportBatchNotFoundError();
     const batchId = randomUUID();
-    await this.repository.create({
+    const reservation = await this.repository.reserve({
       id: batchId,
       seriesId: input.seriesId,
       createdBy: input.actor.userId,
+      items: input.items,
     });
+    if (reservation.outcome === "limited")
+      throw new ImportBatchLimitError(reservation.reason);
+    const itemIds = new Map(
+      reservation.items.map((item) => [item.clientId, item.itemId]),
+    );
 
     const items = [];
-    for (const candidate of input.items) {
-      let target: Awaited<ReturnType<ChapterTargetResolver["resolve"]>>;
-      try {
-        target = await this.targets.resolve({
-          actor: input.actor,
-          seriesId: input.seriesId,
-          chapterNumber: candidate.chapterNumber,
-        });
-      } catch (error) {
-        if (error instanceof ChapterTargetDeniedError)
-          throw new ImportBatchDeniedError();
-        if (error instanceof ChapterTargetNotFoundError)
-          throw new ImportBatchNotFoundError();
-        throw error;
-      }
-      if (target.kind === "conflict") {
-        const itemId = await this.repository.addItem({
-          batchId,
-          clientId: candidate.clientId,
-          chapterNumber: candidate.chapterNumber,
-          filename: candidate.filename,
-          ...(target.chapterId ? { chapterId: target.chapterId } : {}),
-          status: "failed",
-          resolution: "conflict",
-          errorCode: target.reason,
-        });
-        items.push({
-          itemId,
-          clientId: candidate.clientId,
-          chapterNumber: candidate.chapterNumber,
-          ...(target.chapterId ? { chapterId: target.chapterId } : {}),
-          status: "failed" as const,
-          resolution: "conflict" as const,
-          errorCode: target.reason,
-        });
-        continue;
-      }
-      const itemId = await this.repository.addItem({
-        batchId,
-        clientId: candidate.clientId,
-        chapterNumber: candidate.chapterNumber,
-        filename: candidate.filename,
-        chapterId: target.chapterId,
-        status: "pending",
-        resolution: target.kind,
-      });
-      try {
-        const upload = await this.uploads.initiate({
-          actor: input.actor,
-          chapterId: target.chapterId,
-          filename: candidate.filename,
-          contentType: candidate.contentType,
-          sizeBytes: candidate.sizeBytes,
-        });
-        if (upload.outcome === "conflict") {
+    try {
+      for (const candidate of input.items) {
+        const itemId = itemIds.get(candidate.clientId);
+        if (!itemId) throw new Error("import-batch-reservation-incomplete");
+        let target: Awaited<ReturnType<ChapterTargetResolver["resolve"]>>;
+        try {
+          target = await this.targets.resolve({
+            actor: input.actor,
+            seriesId: input.seriesId,
+            chapterNumber: candidate.chapterNumber,
+          });
+        } catch (error) {
+          if (error instanceof ChapterTargetDeniedError)
+            throw new ImportBatchDeniedError();
+          if (error instanceof ChapterTargetNotFoundError)
+            throw new ImportBatchNotFoundError();
+          throw error;
+        }
+        if (target.kind === "conflict") {
           await this.repository.updateResolution({
             itemId,
-            chapterId: target.chapterId,
+            ...(target.chapterId ? { chapterId: target.chapterId } : {}),
             resolution: "conflict",
             status: "failed",
-            errorCode: "chapter-upload-active",
+            errorCode: target.reason,
+          });
+          items.push({
+            itemId,
+            clientId: candidate.clientId,
+            chapterNumber: candidate.chapterNumber,
+            ...(target.chapterId ? { chapterId: target.chapterId } : {}),
+            status: "failed" as const,
+            resolution: "conflict" as const,
+            errorCode: target.reason,
+          });
+          continue;
+        }
+        if (
+          !(await this.repository.updateResolution({
+            itemId,
+            chapterId: target.chapterId,
+            resolution: target.kind,
+          }))
+        )
+          throw new ImportBatchConflictError("import-batch-item-conflict");
+        try {
+          const upload = await this.uploads.initiate({
+            actor: input.actor,
+            chapterId: target.chapterId,
+            filename: candidate.filename,
+            contentType: candidate.contentType,
+            sizeBytes: candidate.sizeBytes,
+          });
+          if (upload.outcome === "conflict") {
+            await this.repository.updateResolution({
+              itemId,
+              chapterId: target.chapterId,
+              resolution: "conflict",
+              status: "failed",
+              errorCode: "chapter-upload-active",
+            });
+            items.push({
+              itemId,
+              clientId: candidate.clientId,
+              chapterNumber: candidate.chapterNumber,
+              chapterId: target.chapterId,
+              status: "failed" as const,
+              resolution: "conflict" as const,
+              errorCode: "chapter-upload-active",
+            });
+            continue;
+          }
+          if (
+            !(await this.repository.attachUpload({
+              itemId,
+              uploadId: upload.uploadId,
+            }))
+          ) {
+            await this.uploads
+              .abort({
+                actor: input.actor,
+                chapterId: target.chapterId,
+                uploadId: upload.uploadId,
+              })
+              .catch(() => undefined);
+            await this.repository.failItem({
+              itemId,
+              errorCode: "import-batch-item-conflict",
+            });
+            throw new ImportBatchConflictError();
+          }
+          items.push({
+            itemId,
+            clientId: candidate.clientId,
+            chapterNumber: candidate.chapterNumber,
+            chapterId: target.chapterId,
+            uploadId: upload.uploadId,
+            status: "uploading" as const,
+            resolution: target.kind,
+            transfer: upload.transfer,
+          });
+        } catch (error) {
+          const errorCode = safeImportErrorCode(error);
+          await this.repository.failItem({
+            itemId,
+            errorCode,
           });
           items.push({
             itemId,
@@ -104,58 +161,21 @@ export class ChapterImportBatchService {
             chapterNumber: candidate.chapterNumber,
             chapterId: target.chapterId,
             status: "failed" as const,
-            resolution: "conflict" as const,
-            errorCode: "chapter-upload-active",
+            resolution: target.kind,
+            errorCode,
           });
-          continue;
         }
-        if (
-          !(await this.repository.attachUpload({
-            itemId,
-            uploadId: upload.uploadId,
-          }))
-        ) {
-          await this.uploads
-            .abort({
-              actor: input.actor,
-              chapterId: target.chapterId,
-              uploadId: upload.uploadId,
-            })
-            .catch(() => undefined);
-          await this.repository.failItem({
-            itemId,
-            errorCode: "import-batch-item-conflict",
-          });
-          throw new ImportBatchConflictError();
-        }
-        items.push({
-          itemId,
-          clientId: candidate.clientId,
-          chapterNumber: candidate.chapterNumber,
-          chapterId: target.chapterId,
-          uploadId: upload.uploadId,
-          status: "uploading" as const,
-          resolution: target.kind,
-          transfer: upload.transfer,
-        });
-      } catch (error) {
-        const errorCode = safeImportErrorCode(error);
-        await this.repository.failItem({
-          itemId,
-          errorCode,
-        });
-        items.push({
-          itemId,
-          clientId: candidate.clientId,
-          chapterNumber: candidate.chapterNumber,
-          chapterId: target.chapterId,
-          status: "failed" as const,
-          resolution: target.kind,
-          errorCode,
-        });
       }
+      return { batchId, status: projectBatchStatus(items), items };
+    } catch (error) {
+      await this.repository
+        .failReservation({
+          batchId,
+          errorCode: "import-batch-reservation-failed",
+        })
+        .catch(() => undefined);
+      throw error;
     }
-    return { batchId, status: projectBatchStatus(items), items };
   }
 
   async get(actor: AuthorizationContext, batchId: string) {
@@ -307,5 +327,35 @@ export class ImportBatchNotFoundError extends Error {}
 export class ImportBatchConflictError extends Error {
   constructor(readonly reason = "import-batch-item-conflict") {
     super(reason);
+  }
+}
+
+export class ImportBatchLimitError extends Error {
+  constructor(
+    readonly reason:
+      | ImportAdmissionLimitReason
+      | "bulk-item-limit"
+      | "bulk-batch-size-limit"
+      | "bulk-item-size-limit",
+  ) {
+    super(reason);
+  }
+}
+
+function validateBatchInput(
+  items: readonly ImportItemInput[],
+  maxItemSizeBytes: number,
+) {
+  if (items.length > IMPORT_BATCH_ITEM_LIMIT)
+    throw new ImportBatchLimitError("bulk-item-limit");
+  let total = 0;
+  for (const item of items) {
+    if (!Number.isSafeInteger(item.sizeBytes) || item.sizeBytes <= 0)
+      throw new ImportBatchLimitError("bulk-item-size-limit");
+    if (item.sizeBytes > maxItemSizeBytes)
+      throw new ImportBatchLimitError("bulk-item-size-limit");
+    total += item.sizeBytes;
+    if (!Number.isSafeInteger(total) || total > IMPORT_BATCH_TOTAL_SIZE_LIMIT)
+      throw new ImportBatchLimitError("bulk-batch-size-limit");
   }
 }

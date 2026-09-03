@@ -56,6 +56,7 @@ export type ImportBatchProjection = {
     itemId: string;
     clientId: string;
     chapterNumber: number;
+    filename: string;
     chapterId: string | null;
     uploadId: string | null;
     status: ImportCandidate["status"];

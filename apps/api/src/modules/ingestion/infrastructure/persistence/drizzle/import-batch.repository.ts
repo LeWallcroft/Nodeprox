@@ -19,31 +19,81 @@ export class DrizzleImportBatchRepository
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
-  async create(input: { id: string; seriesId: string; createdBy: string }) {
-    await this.db.insert(chapterImportBatches).values(input);
-  }
+  async reserve(input: {
+    id: string;
+    seriesId: string;
+    createdBy: string;
+    items: readonly {
+      clientId: string;
+      chapterNumber: number;
+      filename: string;
+    }[];
+  }): ReturnType<ImportBatchRepositoryPort["reserve"]> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${input.createdBy}, 0))`,
+      );
+      const activeStatuses = [
+        "pending",
+        "uploading",
+        "uploaded",
+        "processing",
+      ] as const;
+      const [usage] = await tx
+        .select({
+          activeItems: sql<number>`count(${chapterImportItems.id})::int`,
+          activeSeries: sql<number>`count(distinct ${chapterImportBatches.seriesId})::int`,
+          currentSeriesActive: sql<boolean>`coalesce(bool_or(${chapterImportBatches.seriesId} = ${input.seriesId}), false)`,
+        })
+        .from(chapterImportItems)
+        .innerJoin(
+          chapterImportBatches,
+          eq(chapterImportBatches.id, chapterImportItems.batchId),
+        )
+        .where(
+          and(
+            eq(chapterImportBatches.createdBy, input.createdBy),
+            inArray(chapterImportItems.status, activeStatuses),
+          ),
+        );
+      const activeItems = usage?.activeItems ?? 0;
+      const activeSeries = usage?.activeSeries ?? 0;
+      if (!usage?.currentSeriesActive && activeSeries >= 3)
+        return {
+          outcome: "limited" as const,
+          reason: "bulk-active-series-limit" as const,
+        };
+      if (activeItems + input.items.length > 45)
+        return {
+          outcome: "limited" as const,
+          reason: "bulk-active-item-limit" as const,
+        };
 
-  async addItem(input: {
-    batchId: string;
-    clientId: string;
-    chapterNumber: number;
-    filename: string;
-    chapterId?: string;
-    uploadId?: string;
-    status: ImportItemProjection["status"];
-    errorCode?: string;
-    resolution?: ImportItemProjection["resolution"];
-  }) {
-    const [item] = await this.db
-      .insert(chapterImportItems)
-      .values({
-        ...input,
-        targetResolution: input.resolution,
-        chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
-      })
-      .returning({ id: chapterImportItems.id });
-    if (!item) throw new Error("import-batch-item-create-failed");
-    return item.id;
+      await tx.insert(chapterImportBatches).values({
+        id: input.id,
+        seriesId: input.seriesId,
+        createdBy: input.createdBy,
+      });
+      const rows = await tx
+        .insert(chapterImportItems)
+        .values(
+          input.items.map((item) => ({
+            batchId: input.id,
+            clientId: item.clientId,
+            chapterNumber: ChapterNumber.parse(item.chapterNumber).toNumber(),
+            filename: item.filename,
+            status: "pending" as const,
+          })),
+        )
+        .returning({
+          id: chapterImportItems.id,
+          clientId: chapterImportItems.clientId,
+        });
+      return {
+        outcome: "reserved" as const,
+        items: rows.map((row) => ({ itemId: row.id, clientId: row.clientId })),
+      };
+    });
   }
 
   async attachUpload(input: { itemId: string; uploadId: string }) {
@@ -63,6 +113,18 @@ export class DrizzleImportBatchRepository
       )
       .returning({ id: chapterImportItems.id });
     return Boolean(item);
+  }
+
+  async failReservation(input: { batchId: string; errorCode: string }) {
+    await this.db
+      .update(chapterImportItems)
+      .set({ status: "failed", errorCode: input.errorCode })
+      .where(
+        and(
+          eq(chapterImportItems.batchId, input.batchId),
+          eq(chapterImportItems.status, "pending"),
+        ),
+      );
   }
 
   async updateResolution(input: {

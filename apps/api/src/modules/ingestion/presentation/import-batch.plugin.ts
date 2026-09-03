@@ -17,6 +17,7 @@ import {
   ChapterImportBatchService,
   ImportBatchConflictError,
   ImportBatchDeniedError,
+  ImportBatchLimitError,
   ImportBatchNotFoundError,
 } from "../application/chapter-import-batch.service.js";
 import { ChapterTargetResolver } from "../application/chapter-target.resolver.js";
@@ -32,12 +33,12 @@ const createSchema = z
             chapterNumber: z.number().finite().refine(ChapterNumber.isValid),
             filename: z.string().trim().min(1).max(255),
             contentType: z.string().trim().min(1).max(128),
-            sizeBytes: z.number().int().positive(),
+            sizeBytes: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
           })
           .strict(),
       )
       .min(1)
-      .max(50),
+      .max(100),
   })
   .strict()
   .refine(
@@ -66,6 +67,7 @@ export function registerImportBatchPlugin(
   authentication: { service: SessionService; cookies: SessionCookieAdapter },
   series: SeriesService,
   uploads: ChapterUploadService,
+  maxItemSizeBytes: number,
 ) {
   const repository = new DrizzleImportBatchRepository(db);
   const targets = new ChapterTargetResolver(repository, {
@@ -124,6 +126,7 @@ export function registerImportBatchPlugin(
         });
       },
     },
+    maxItemSizeBytes,
   );
   const session = requireSession(
     authentication.service,
@@ -217,7 +220,30 @@ function mapError(error: unknown): unknown {
       "The Chapter cannot accept a new upload in its current state.",
       409,
     );
+  if (error instanceof ImportBatchLimitError)
+    return problem(
+      error.reason,
+      detailForLimit(error.reason),
+      error.reason === "bulk-active-series-limit" ||
+        error.reason === "bulk-active-item-limit"
+        ? 409
+        : 422,
+    );
   return error;
+}
+
+function detailForLimit(reason: ImportBatchLimitError["reason"]) {
+  return (
+    {
+      "bulk-item-limit": "A batch can contain at most 15 ZIP files.",
+      "bulk-batch-size-limit": "The batch exceeds the 3 GiB limit.",
+      "bulk-item-size-limit": "A ZIP exceeds the configured upload limit.",
+      "bulk-active-series-limit":
+        "You already have active uploads in the maximum number of Series.",
+      "bulk-active-item-limit":
+        "You already have the maximum active upload items.",
+    }[reason] ?? "The import batch exceeds an operational limit."
+  );
 }
 
 function problem(code: string, detail: string, statusCode: number) {

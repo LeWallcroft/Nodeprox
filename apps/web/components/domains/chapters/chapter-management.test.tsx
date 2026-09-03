@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
+import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { UploadForm } from "../uploads/upload-form";
 import {
   BulkChapterUploadDialog,
@@ -32,7 +33,9 @@ function renderWithQueryClient(element: ReactNode) {
     defaultOptions: { queries: { retry: false } },
   });
   return renderToStaticMarkup(
-    <QueryClientProvider client={queryClient}>{element}</QueryClientProvider>,
+    <QueryClientProvider client={queryClient}>
+      <UploadQueueProvider>{element}</UploadQueueProvider>
+    </QueryClientProvider>,
   );
 }
 
