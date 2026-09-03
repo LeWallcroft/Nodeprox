@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { eq, inArray, sql } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  inject,
+  it,
+} from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
@@ -131,43 +139,182 @@ beforeAll(async () => {
   ]);
 });
 
+describe("ChapterImportBatch admission control", () => {
+  it("accepts exactly fifteen items", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Fifteen items");
+    const response = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie },
+      payload: {
+        items: Array.from({ length: 15 }, (_, index) => ({
+          clientId: `accepted-${index}`,
+          chapterNumber: index,
+          filename: `${index}.zip`,
+          contentType: "application/zip",
+          sizeBytes: 4,
+        })),
+      },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    expect(response.json().items).toHaveLength(15);
+  });
+
+  it("rejects a sixteenth item and an item over the server hard limit", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Admission limits");
+    const items = Array.from({ length: 16 }, (_, index) => ({
+      clientId: `too-many-${index}`,
+      chapterNumber: 100 + index,
+      filename: `${index}.zip`,
+      contentType: "application/zip",
+      sizeBytes: 4,
+    }));
+    const tooMany = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie },
+      payload: { items },
+    });
+    expect(tooMany.statusCode).toBe(422);
+    expect(tooMany.json()).toMatchObject({ code: "bulk-item-limit" });
+
+    const tooLarge = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie },
+      payload: {
+        items: [
+          {
+            clientId: "too-large",
+            chapterNumber: 200,
+            filename: "large.zip",
+            contentType: "application/zip",
+            sizeBytes: 1025,
+          },
+        ],
+      },
+    });
+    expect(tooLarge.statusCode).toBe(422);
+    expect(tooLarge.json()).toMatchObject({ code: "bulk-item-size-limit" });
+  });
+
+  it("enforces active Series and items without counting another batch in the same Series twice", async () => {
+    const cookie = await login(ownerEmail);
+    const first = await createSeries(cookie, "Active A");
+    const second = await createSeries(cookie, "Active B");
+    const third = await createSeries(cookie, "Active C");
+    const fourth = await createSeries(cookie, "Active D");
+    await Promise.all([
+      seedActiveBatch(first, 1),
+      seedActiveBatch(second, 1),
+      seedActiveBatch(third, 1),
+    ]);
+    const sameSeries = await app.inject({
+      method: "POST",
+      url: `/series/${first}/import-batches`,
+      headers: { cookie },
+      payload: { items: [candidate("same-series", 300)] },
+    });
+    expect(sameSeries.statusCode, sameSeries.body).toBe(201);
+    const blocked = await app.inject({
+      method: "POST",
+      url: `/series/${fourth}/import-batches`,
+      headers: { cookie },
+      payload: { items: [candidate("fourth-series", 301)] },
+    });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({ code: "bulk-active-series-limit" });
+  });
+
+  it("serializes concurrent reservations so active item capacity is never exceeded", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Concurrent capacity");
+    await seedActiveBatch(seriesId, 30);
+    const payload = (prefix: string) => ({
+      items: Array.from({ length: 10 }, (_, index) =>
+        candidate(`${prefix}-${index}`, 400 + index),
+      ),
+    });
+    const responses = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/import-batches`,
+        headers: { cookie },
+        payload: payload("first"),
+      }),
+      app.inject({
+        method: "POST",
+        url: `/series/${seriesId}/import-batches`,
+        headers: { cookie },
+        payload: payload("second"),
+      }),
+    ]);
+    expect(responses.map((response) => response.statusCode).sort()).toEqual([
+      201, 409,
+    ]);
+    expect(
+      responses.find((response) => response.statusCode === 409)?.json(),
+    ).toMatchObject({ code: "bulk-active-item-limit" });
+  });
+
+  it("rejects a forty-sixth active item", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Full active capacity");
+    await seedActiveBatch(seriesId, 45);
+    const response = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie },
+      payload: { items: [candidate("forty-six", 500)] },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ code: "bulk-active-item-limit" });
+  });
+});
+
+afterEach(async () => {
+  const ids = createdSeriesIds.splice(0);
+  await cleanupSeries(ids);
+});
+
 afterAll(async () => {
+  await cleanupSeries(createdSeriesIds.splice(0));
   await database.db
     .delete(auditLogs)
     .where(inArray(auditLogs.actorId, [ownerId, unrelatedId, supportGestorId]));
-  if (createdSeriesIds.length) {
-    const createdChapters = await database.db
-      .select({ id: chapters.id })
-      .from(chapters)
-      .where(inArray(chapters.seriesId, createdSeriesIds));
-    await database.db
-      .delete(chapterImportBatches)
-      .where(inArray(chapterImportBatches.seriesId, createdSeriesIds));
-    if (createdChapters.length) {
-      const chapterIds = createdChapters.map((chapter) => chapter.id);
-      await database.db
-        .delete(processingOutbox)
-        .where(inArray(processingOutbox.chapterId, chapterIds));
-      await database.db
-        .delete(images)
-        .where(inArray(images.chapterId, chapterIds));
-      await database.db
-        .delete(uploads)
-        .where(inArray(uploads.chapterId, chapterIds));
-      await database.db
-        .delete(chapters)
-        .where(inArray(chapters.id, chapterIds));
-    }
-    await database.db
-      .delete(series)
-      .where(inArray(series.id, createdSeriesIds));
-  }
   await database.db
     .delete(users)
     .where(inArray(users.id, [ownerId, unrelatedId, supportGestorId]));
   await app.close();
   await database.sql.end();
 });
+
+async function cleanupSeries(seriesIds: readonly string[]) {
+  if (!seriesIds.length) return;
+  const createdChapters = await database.db
+    .select({ id: chapters.id })
+    .from(chapters)
+    .where(inArray(chapters.seriesId, seriesIds));
+  await database.db
+    .delete(chapterImportBatches)
+    .where(inArray(chapterImportBatches.seriesId, seriesIds));
+  if (createdChapters.length) {
+    const chapterIds = createdChapters.map((chapter) => chapter.id);
+    await database.db
+      .delete(processingOutbox)
+      .where(inArray(processingOutbox.chapterId, chapterIds));
+    await database.db
+      .delete(images)
+      .where(inArray(images.chapterId, chapterIds));
+    await database.db
+      .delete(uploads)
+      .where(inArray(uploads.chapterId, chapterIds));
+    await database.db.delete(chapters).where(inArray(chapters.id, chapterIds));
+  }
+  await database.db.delete(series).where(inArray(series.id, seriesIds));
+}
 
 async function login(email: string) {
   const response = await app.inject({
@@ -208,6 +355,34 @@ async function createChapter(
   });
   expect(response.statusCode, response.body).toBe(201);
   return response.json() as { id: string; chapterNumber: number };
+}
+
+function candidate(clientId: string, chapterNumber: number) {
+  return {
+    clientId,
+    chapterNumber,
+    filename: `${chapterNumber}.zip`,
+    contentType: "application/zip",
+    sizeBytes: 4,
+  };
+}
+
+async function seedActiveBatch(seriesId: string, count: number) {
+  const batchId = randomUUID();
+  await database.db.insert(chapterImportBatches).values({
+    id: batchId,
+    seriesId,
+    createdBy: ownerId,
+  });
+  await database.db.insert(chapterImportItems).values(
+    Array.from({ length: count }, (_, index) => ({
+      batchId,
+      clientId: `reserved-${batchId}-${index}`,
+      chapterNumber: index,
+      filename: `reserved-${index}.zip`,
+      status: "pending" as const,
+    })),
+  );
 }
 
 describe("ChapterImportBatch metadata orchestration", () => {
@@ -841,18 +1016,18 @@ describe("ChapterImportBatch metadata orchestration", () => {
       headers: { cookie: ownerCookie },
     });
     expect(partial.statusCode).toBe(200);
-    expect(partial.json()).toMatchObject({
-      status: "completed_with_errors",
-      items: [
-        { clientId: "item-25", status: "ready" },
-        {
+    expect(partial.json().status).toBe("completed_with_errors");
+    expect(partial.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientId: "item-25", status: "ready" }),
+        expect.objectContaining({
           clientId: "item-0.5",
           status: "failed",
           errorCode: "processing-failed",
-        },
-        { clientId: "item-30", status: "ready" },
-      ],
-    });
+        }),
+        expect.objectContaining({ clientId: "item-30", status: "ready" }),
+      ]),
+    );
     const failed = item26;
     const retryUrl = `/series/${seriesId}/import-batches/${batch.batchId}/items/${failed.itemId}/retry`;
 
@@ -913,14 +1088,18 @@ describe("ChapterImportBatch metadata orchestration", () => {
       headers: { cookie: ownerCookie },
     });
     expect(completed.statusCode).toBe(200);
-    expect(completed.json()).toMatchObject({
-      status: "completed",
-      items: [
-        { clientId: "item-25", status: "ready" },
-        { clientId: "item-0.5", status: "ready", errorCode: null },
-        { clientId: "item-30", status: "ready" },
-      ],
-    });
+    expect(completed.json().status).toBe("completed");
+    expect(completed.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ clientId: "item-25", status: "ready" }),
+        expect.objectContaining({
+          clientId: "item-0.5",
+          status: "ready",
+          errorCode: null,
+        }),
+        expect.objectContaining({ clientId: "item-30", status: "ready" }),
+      ]),
+    );
     expect(
       completed
         .json()

@@ -145,6 +145,7 @@ export function buildApp(
       authentication,
       seriesRuntime.seriesService,
       uploadService,
+      storageConfig.uploadMaxSizeBytes,
     );
     const imageStorage =
       storageConfig.provider === "b2"

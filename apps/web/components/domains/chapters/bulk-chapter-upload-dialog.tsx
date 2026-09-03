@@ -1,30 +1,17 @@
-"use client";
-
-import { useQueryClient } from "@tanstack/react-query";
 import { FileArchive, Upload, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
-import {
-  abortImportItem,
-  completeImportItem,
-  createImportBatch,
-  getImportBatch,
-  retryImportItem,
-} from "../../../lib/domains/ingestion/api";
-import {
-  mediaWarningLabel,
-  runPool,
-  safeBulkUploadConcurrency,
-} from "../../../lib/domains/ingestion/orchestration";
+import { mediaWarningLabel } from "../../../lib/domains/ingestion/orchestration";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
-import { queryKeys } from "../../../lib/domains/query-keys";
-import { useProductSettings } from "../../../lib/domains/settings/hooks";
-import { putDirectUpload } from "../../../lib/domains/uploads/api";
+import { useUploadQueue } from "../../providers/upload-queue-provider";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { StatusBadge } from "../../ui/status-badge";
 import { errorMessage } from "../feedback";
+
+const DEFAULT_MAX_ZIP_SIZE_BYTES = 512 * 1024 * 1024;
+const MAX_BATCH_SIZE_BYTES = 3 * 1024 ** 3;
 
 export function BulkChapterUploadDialog({
   open,
@@ -37,70 +24,28 @@ export function BulkChapterUploadDialog({
   seriesId: string;
   seriesTitle: string;
 }) {
-  const queryClient = useQueryClient();
-  const settings = useProductSettings();
+  const queue = useUploadQueue();
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<ImportCandidate[]>([]);
-  const [batchId, setBatchId] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = useMemo(
     () =>
       items.length > 0 &&
+      items.length <= 15 &&
+      items.reduce((total, item) => total + item.file.size, 0) <=
+        MAX_BATCH_SIZE_BYTES &&
       items.every(
         (item) =>
           item.chapterNumber !== null &&
           Number.isFinite(item.chapterNumber) &&
           item.chapterNumber >= 0 &&
-          item.file.size > 0,
+          item.file.size > 0 &&
+          item.file.size <= DEFAULT_MAX_ZIP_SIZE_BYTES,
       ) &&
       new Set(items.map((item) => item.chapterNumber)).size === items.length,
     [items],
   );
-
-  useEffect(() => {
-    if (!batchId || running) return;
-    const timer = window.setInterval(
-      () =>
-        void getImportBatch(batchId)
-          .then((projection) => {
-            setItems((current) =>
-              current.map((item) => {
-                const projected = projection.items.find(
-                  (candidate) => candidate.clientId === item.clientId,
-                );
-                if (!projected) return item;
-                const next: ImportCandidate = {
-                  ...item,
-                  itemId: projected.itemId,
-                  status: projected.status,
-                  warnings: projected.warnings,
-                };
-                if (projected.chapterId) next.chapterId = projected.chapterId;
-                else delete next.chapterId;
-                if (projected.uploadId) next.uploadId = projected.uploadId;
-                else delete next.uploadId;
-                if (projected.errorCode) next.error = projected.errorCode;
-                else delete next.error;
-                if (projected.resolution)
-                  next.resolution = projected.resolution;
-                else delete next.resolution;
-                return next;
-              }),
-            );
-            if (
-              projection.status === "completed" ||
-              projection.status === "completed_with_errors"
-            )
-              void queryClient.invalidateQueries({
-                queryKey: queryKeys.series.chapters(seriesId),
-              });
-          })
-          .catch(() => undefined),
-      2000,
-    );
-    return () => window.clearInterval(timer);
-  }, [batchId, queryClient, running, seriesId]);
 
   function update(clientId: string, mutation: Partial<ImportCandidate>) {
     setItems((current) =>
@@ -121,140 +66,25 @@ export function BulkChapterUploadDialog({
         progress: 0,
       }));
     setItems(selected);
-    setBatchId(null);
     setError(
       selected.length ? null : "Selecciona uno o más archivos ZIP válidos.",
     );
-  }
-  async function transfer(
-    candidate: ImportCandidate,
-    session: {
-      chapterId: string;
-      uploadId: string;
-      resolution: "created" | "reused";
-      transfer: Parameters<typeof putDirectUpload>[1];
-    },
-  ) {
-    update(candidate.clientId, {
-      chapterId: session.chapterId,
-      uploadId: session.uploadId,
-      status: "uploading",
-      resolution: session.resolution,
-      progress: 0,
-    });
-    setItems((current) =>
-      current.map((item) => {
-        if (item.clientId !== candidate.clientId || !item.error) return item;
-        const next = { ...item };
-        delete next.error;
-        return next;
-      }),
-    );
-    try {
-      await putDirectUpload(candidate.file, session.transfer, (progress) =>
-        update(candidate.clientId, {
-          progress: Math.round(
-            (progress.loadedBytes / progress.totalBytes) * 100,
-          ),
-        }),
-      );
-      await completeImportItem(session.chapterId, session.uploadId);
-      update(candidate.clientId, { status: "uploaded", progress: 100 });
-    } catch (cause) {
-      await abortImportItem(session.chapterId, session.uploadId).catch(
-        () => undefined,
-      );
-      update(candidate.clientId, {
-        status: "failed",
-        error: errorMessage(cause),
-      });
-    }
   }
   async function start() {
     if (!valid || running) return;
     setRunning(true);
     setError(null);
     try {
-      const batch = await createImportBatch(
-        seriesId,
-        items.map((item) => ({
-          clientId: item.clientId,
-          chapterNumber: item.chapterNumber as number,
-          filename: item.file.name,
-          contentType: canonicalZipMime(item.file),
-          sizeBytes: item.file.size,
-        })),
-      );
-      setBatchId(batch.batchId);
-      for (const item of batch.items) {
-        const mutation: Partial<ImportCandidate> = {
-          itemId: item.itemId,
-          status: item.status,
-          resolution: item.resolution,
-        };
-        if (item.chapterId) mutation.chapterId = item.chapterId;
-        if ("uploadId" in item) mutation.uploadId = item.uploadId;
-        if ("errorCode" in item) mutation.error = item.errorCode;
-        update(item.clientId, mutation);
-      }
-      await runPool(
-        batch.items
-          .filter(
-            (item): item is Extract<typeof item, { status: "uploading" }> =>
-              item.status === "uploading",
-          )
-          .map((item) => async () => {
-            const candidate = items.find(
-              (source) => source.clientId === item.clientId,
-            );
-            if (candidate && "transfer" in item)
-              await transfer(candidate, item);
-          }),
-        safeBulkUploadConcurrency(
-          (() => {
-            const value = settings.data?.sections
-              .flatMap((section) => section.fields)
-              .find((field) => field.key === "bulk_upload_concurrency")?.value;
-            return typeof value === "number" ? value : undefined;
-          })(),
-        ),
-      );
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.series.chapters(seriesId),
-      });
+      await queue.startBatch({ seriesId, seriesTitle, items });
+      setItems([]);
+      onOpenChange(false);
     } catch (cause) {
       setError(errorMessage(cause, "No se pudo iniciar la carga."));
     } finally {
       setRunning(false);
     }
   }
-  async function retry(candidate: ImportCandidate) {
-    if (
-      !batchId ||
-      !candidate.itemId ||
-      !candidate.chapterId ||
-      candidate.status !== "failed"
-    )
-      return;
-    try {
-      const session = await retryImportItem(
-        seriesId,
-        batchId,
-        candidate.itemId,
-        {
-          contentType: canonicalZipMime(candidate.file),
-          sizeBytes: candidate.file.size,
-        },
-      );
-      await transfer(candidate, session);
-    } catch (cause) {
-      update(candidate.clientId, {
-        status: "failed",
-        error: errorMessage(cause),
-      });
-    }
-  }
-  const busy = running || items.some((item) => item.status === "uploading");
+  const busy = running;
   return (
     <AppDialog
       open={open}
@@ -356,33 +186,22 @@ export function BulkChapterUploadDialog({
                 <ProgressBar value={item.progress} />
               ) : null}
             </div>
-            {item.status === "failed" ? (
-              <Button
-                type="button"
-                disabled={busy}
-                onClick={() => void retry(item)}
-              >
-                Reintentar
-              </Button>
-            ) : (
-              <Button
-                aria-label={`Quitar ${item.file.name}`}
-                variant="secondary"
-                type="button"
-                disabled={busy}
-                onClick={() => {
-                  setItems((current) =>
-                    current.filter(
-                      (candidate) => candidate.clientId !== item.clientId,
-                    ),
-                  );
-                  setBatchId(null);
-                }}
-              >
-                <X aria-hidden="true" className="size-4" />
-                Quitar
-              </Button>
-            )}
+            <Button
+              aria-label={`Quitar ${item.file.name}`}
+              variant="secondary"
+              type="button"
+              disabled={busy}
+              onClick={() =>
+                setItems((current) =>
+                  current.filter(
+                    (candidate) => candidate.clientId !== item.clientId,
+                  ),
+                )
+              }
+            >
+              <X aria-hidden="true" className="size-4" />
+              Quitar
+            </Button>
             {item.error ? (
               <p className="m-0 text-sm text-danger md:col-span-4">
                 {importErrorLabel(item.error)}
@@ -409,6 +228,22 @@ export function BulkChapterUploadDialog({
             Cada ZIP debe tener un número de capítulo único.
           </p>
         ) : null}
+        {items.length > 15 ? (
+          <p className="m-0 text-sm text-danger">
+            Un batch admite como máximo 15 archivos ZIP.
+          </p>
+        ) : null}
+        {items.reduce((total, item) => total + item.file.size, 0) >
+        MAX_BATCH_SIZE_BYTES ? (
+          <p className="m-0 text-sm text-danger">
+            El tamaño total del batch no puede superar 3 GiB.
+          </p>
+        ) : null}
+        {items.some((item) => item.file.size > DEFAULT_MAX_ZIP_SIZE_BYTES) ? (
+          <p className="m-0 text-sm text-danger">
+            Cada ZIP debe pesar como máximo 512 MiB.
+          </p>
+        ) : null}
         {error ? (
           <p role="alert" className="m-0 text-sm text-danger">
             {error}
@@ -426,11 +261,6 @@ function isZipFile(file: File) {
       file.type === "application/zip" ||
       file.type === "application/x-zip-compressed")
   );
-}
-function canonicalZipMime(file: File) {
-  return file.type === "application/x-zip-compressed"
-    ? "application/zip"
-    : "application/zip";
 }
 function inferChapterNumber(filename: string): number | null {
   const match = /^(\d+(?:\.\d{1,3})?)\.zip$/i.exec(filename.trim());

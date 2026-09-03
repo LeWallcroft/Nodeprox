@@ -10,6 +10,10 @@ export type ImportItemInput = {
   sizeBytes: number;
 };
 
+export type ImportAdmissionLimitReason =
+  | "bulk-active-series-limit"
+  | "bulk-active-item-limit";
+
 export type ChapterTargetResolutionKind = "created" | "reused" | "conflict";
 
 export type ChapterConflictReason =
@@ -66,22 +70,22 @@ export type ImportItemProjection = {
 };
 
 export interface ImportBatchRepositoryPort {
-  create(input: {
+  reserve(input: {
     id: string;
     seriesId: string;
     createdBy: string;
-  }): Promise<void>;
-  addItem(input: {
-    batchId: string;
-    clientId: string;
-    chapterNumber: number;
-    filename: string;
-    chapterId?: string;
-    uploadId?: string;
-    status: ImportItemProjection["status"];
-    errorCode?: string;
-    resolution?: ChapterTargetResolutionKind;
-  }): Promise<string>;
+    items: readonly Pick<
+      ImportItemInput,
+      "clientId" | "chapterNumber" | "filename"
+    >[];
+  }): Promise<
+    | {
+        outcome: "reserved";
+        items: readonly { itemId: string; clientId: string }[];
+      }
+    | { outcome: "limited"; reason: ImportAdmissionLimitReason }
+  >;
+  failReservation(input: { batchId: string; errorCode: string }): Promise<void>;
   attachUpload(input: { itemId: string; uploadId: string }): Promise<boolean>;
   updateResolution(input: {
     itemId: string;
