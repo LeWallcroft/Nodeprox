@@ -39,13 +39,13 @@ export function ZipDropzone({
   const [message, setMessage] = useState<string | null>(null);
   const dragActive = dragDepth > 0;
 
-  function select(files: Iterable<File>) {
+  function select(files: Iterable<File> | ArrayLike<File>) {
     if (disabled) return;
-    const selection = normalizeSelectedZipFiles(files, {
+    const selection = normalizeSelectedZipFiles(Array.from(files), {
       mode,
-      maxFiles,
-      maxItemSizeBytes,
-      maxTotalSizeBytes,
+      ...(maxFiles !== undefined ? { maxFiles } : {}),
+      ...(maxItemSizeBytes !== undefined ? { maxItemSizeBytes } : {}),
+      ...(maxTotalSizeBytes !== undefined ? { maxTotalSizeBytes } : {}),
     });
     if (!selection.files.length) {
       if (!selection.message) return;
