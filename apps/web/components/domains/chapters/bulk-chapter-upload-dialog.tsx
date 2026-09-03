@@ -1,17 +1,20 @@
 import { FileArchive, Upload, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import { mediaWarningLabel } from "../../../lib/domains/ingestion/orchestration";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
+import {
+  DEFAULT_MAX_ZIP_SIZE_BYTES,
+  MAX_BULK_ZIP_FILES,
+  MAX_BULK_ZIP_TOTAL_SIZE_BYTES,
+} from "../../../lib/domains/uploads/utils";
 import { useUploadQueue } from "../../providers/upload-queue-provider";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { StatusBadge } from "../../ui/status-badge";
 import { errorMessage } from "../feedback";
-
-const DEFAULT_MAX_ZIP_SIZE_BYTES = 512 * 1024 * 1024;
-const MAX_BATCH_SIZE_BYTES = 3 * 1024 ** 3;
+import { ZipDropzone } from "../uploads/zip-dropzone";
 
 export function BulkChapterUploadDialog({
   open,
@@ -25,16 +28,15 @@ export function BulkChapterUploadDialog({
   seriesTitle: string;
 }) {
   const queue = useUploadQueue();
-  const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<ImportCandidate[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const valid = useMemo(
     () =>
       items.length > 0 &&
-      items.length <= 15 &&
+      items.length <= MAX_BULK_ZIP_FILES &&
       items.reduce((total, item) => total + item.file.size, 0) <=
-        MAX_BATCH_SIZE_BYTES &&
+        MAX_BULK_ZIP_TOTAL_SIZE_BYTES &&
       items.every(
         (item) =>
           item.chapterNumber !== null &&
@@ -54,21 +56,16 @@ export function BulkChapterUploadDialog({
       ),
     );
   }
-  function select(files: FileList | null) {
-    if (!files) return;
-    const selected = Array.from(files)
-      .filter(isZipFile)
-      .map((file) => ({
-        clientId: crypto.randomUUID(),
-        file,
-        chapterNumber: inferChapterNumber(file.name),
-        status: "pending" as const,
-        progress: 0,
-      }));
+  function select(files: File[]) {
+    const selected = files.map((file) => ({
+      clientId: crypto.randomUUID(),
+      file,
+      chapterNumber: inferChapterNumber(file.name),
+      status: "pending" as const,
+      progress: 0,
+    }));
     setItems(selected);
-    setError(
-      selected.length ? null : "Selecciona uno o más archivos ZIP válidos.",
-    );
+    setError(null);
   }
   async function start() {
     if (!valid || running) return;
@@ -115,30 +112,16 @@ export function BulkChapterUploadDialog({
       }
     >
       <div className="grid gap-4">
-        <input
-          ref={inputRef}
-          className="sr-only"
-          type="file"
-          multiple
-          accept=".zip,application/zip,application/x-zip-compressed"
-          onChange={(event) => select(event.target.files)}
-        />
-        <button
-          type="button"
-          className="grid min-h-36 place-items-center rounded-panel border border-dashed border-border bg-surface p-5 text-center text-secondary hover:bg-surface-hover"
+        <ZipDropzone
+          mode="bulk"
           disabled={busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          <span className="grid gap-2">
-            <Upload aria-hidden="true" className="mx-auto size-5" />
-            <span className="font-medium text-text">
-              Seleccionar archivos ZIP
-            </span>
-            <span className="text-sm">
-              Uno o varios archivos · ZIP compatible
-            </span>
-          </span>
-        </button>
+          selectedFiles={items.map((item) => item.file)}
+          maxFiles={MAX_BULK_ZIP_FILES}
+          maxItemSizeBytes={DEFAULT_MAX_ZIP_SIZE_BYTES}
+          maxTotalSizeBytes={MAX_BULK_ZIP_TOTAL_SIZE_BYTES}
+          onFilesSelected={select}
+          onSelectionRejected={setError}
+        />
         {items.length ? (
           <div className="hidden grid-cols-[minmax(0,1fr)_130px_130px_auto] gap-2 px-3 text-xs font-medium uppercase tracking-wide text-muted md:grid">
             <span>Archivo ZIP</span>
@@ -228,13 +211,13 @@ export function BulkChapterUploadDialog({
             Cada ZIP debe tener un número de capítulo único.
           </p>
         ) : null}
-        {items.length > 15 ? (
+        {items.length > MAX_BULK_ZIP_FILES ? (
           <p className="m-0 text-sm text-danger">
             Un batch admite como máximo 15 archivos ZIP.
           </p>
         ) : null}
         {items.reduce((total, item) => total + item.file.size, 0) >
-        MAX_BATCH_SIZE_BYTES ? (
+        MAX_BULK_ZIP_TOTAL_SIZE_BYTES ? (
           <p className="m-0 text-sm text-danger">
             El tamaño total del batch no puede superar 3 GiB.
           </p>
@@ -254,14 +237,6 @@ export function BulkChapterUploadDialog({
   );
 }
 
-function isZipFile(file: File) {
-  return (
-    /\.zip$/i.test(file.name) &&
-    (!file.type ||
-      file.type === "application/zip" ||
-      file.type === "application/x-zip-compressed")
-  );
-}
 function inferChapterNumber(filename: string): number | null {
   const match = /^(\d+(?:\.\d{1,3})?)\.zip$/i.exec(filename.trim());
   const value = match?.[1];
