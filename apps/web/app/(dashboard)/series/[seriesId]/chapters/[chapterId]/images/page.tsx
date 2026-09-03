@@ -3,7 +3,7 @@
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { PageHeader } from "../../../../../../../components/layout/page-header";
-import { Button } from "../../../../../../../components/ui/button";
+import { CopyButton } from "../../../../../../../components/ui/copy-button";
 import { EmptyState } from "../../../../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../../../components/ui/loading-state";
@@ -30,11 +30,6 @@ export default function ChapterImagesPage() {
     [publication.data],
   );
   const selectedImages = images.filter((image) => selected.has(image.id));
-  async function copy(imagesToCopy = images) {
-    if (navigator.clipboard)
-      await navigator.clipboard.writeText(publicImageUrlsText(imagesToCopy));
-  }
-
   return (
     <>
       <PageHeader
@@ -55,21 +50,21 @@ export default function ChapterImagesPage() {
         description="URLs públicas y orden canónico de imágenes."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button
+            <CopyButton
               className="border-border bg-surface text-text hover:bg-surface-hover"
-              type="button"
-              disabled={!selectedImages.length}
-              onClick={() => void copy(selectedImages)}
-            >
-              Copiar seleccionadas
-            </Button>
-            <Button
-              type="button"
-              disabled={!images.length}
-              onClick={() => void copy()}
-            >
-              Copiar todas
-            </Button>
+              value={
+                selectedImages.length
+                  ? publicImageUrlsText(selectedImages)
+                  : null
+              }
+              label="Copiar seleccionadas"
+              failureMessage="No se pudieron copiar las URLs seleccionadas."
+            />
+            <CopyButton
+              value={images.length ? publicImageUrlsText(images) : null}
+              label="Copiar todas"
+              failureMessage="No se pudieron copiar las URLs."
+            />
           </div>
         }
       />
