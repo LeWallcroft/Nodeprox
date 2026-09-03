@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sanitizeAuditMetadata } from "@nodeprox/types";
 import { and, eq, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
@@ -15,7 +16,6 @@ import type {
   ProcessingAuditPort,
   ProcessingRepositoryPort,
 } from "../../../application/ports.js";
-import { sanitizeAuditMetadata } from "@nodeprox/types";
 export class DrizzleProcessingRepository
   implements ProcessingRepositoryPort, ProcessingAuditPort
 {
@@ -125,17 +125,21 @@ export class DrizzleProcessingRepository
     await this.db.transaction(async (tx) => {
       await tx
         .update(chapters)
-        .set({ status: "failed", updatedAt: new Date() })
+        .set({
+          // A retryable BullMQ failure has not reached the terminal Chapter
+          // lifecycle: the uploaded ZIP remains queued for the next attempt.
+          status: terminal ? "failed" : "uploaded",
+          updatedAt: new Date(),
+        })
         .where(eq(chapters.id, chapterId));
-      if (terminal)
-        await tx
-          .update(chapterImportItems)
-          .set({
-            status: "failed",
-            errorCode: "processing-failed",
-            updatedAt: new Date(),
-          })
-          .where(eq(chapterImportItems.uploadId, uploadId));
+      await tx
+        .update(chapterImportItems)
+        .set({
+          status: terminal ? "failed" : "uploaded",
+          errorCode: terminal ? "processing-failed" : null,
+          updatedAt: new Date(),
+        })
+        .where(eq(chapterImportItems.uploadId, uploadId));
     });
   }
   async append(input: {

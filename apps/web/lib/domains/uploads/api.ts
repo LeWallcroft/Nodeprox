@@ -6,6 +6,7 @@ export async function uploadChapter(
   chapterId: string,
   file: File,
   onProgress?: (progress: UploadProgress) => void,
+  onInitiated?: () => void | Promise<void>,
 ): Promise<UploadResult> {
   const initiated = await apiRequestBrowser<InitiatedUpload>(
     `/chapters/${chapterId}/uploads/initiate`,
@@ -19,6 +20,7 @@ export async function uploadChapter(
       }),
     },
   );
+  await onInitiated?.();
 
   try {
     await putDirectUpload(file, initiated.transfer, onProgress);
