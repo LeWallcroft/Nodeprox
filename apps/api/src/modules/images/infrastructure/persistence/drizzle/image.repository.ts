@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   images,
@@ -7,7 +7,10 @@ import {
 import type { ImageRepositoryPort } from "../../../application/ports.js";
 import type { ImageRecord } from "../../../domain/image.types.js";
 
-type ImageRow = typeof images.$inferSelect & {
+type ImageRow = Omit<
+  typeof images.$inferSelect,
+  "retiredAt" | "retiredByChapterReplacementId"
+> & {
   physicalFilename: string;
   physicalStorageKey: string;
   physicalExtension: string;
@@ -41,7 +44,7 @@ export class DrizzleImageRepository implements ImageRepositoryPort {
       })
       .from(images)
       .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
-      .where(eq(images.chapterId, chapterId))
+      .where(and(eq(images.chapterId, chapterId), isNull(images.retiredAt)))
       .orderBy(asc(images.sortOrder));
     return rows.map(toImage);
   }
@@ -53,7 +56,7 @@ export class DrizzleImageRepository implements ImageRepositoryPort {
       })
       .from(images)
       .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
-      .where(eq(images.id, imageId))
+      .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
       .limit(1);
     return row ? toImage(row) : null;
   }

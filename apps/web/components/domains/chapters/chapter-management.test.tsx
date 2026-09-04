@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -40,6 +41,42 @@ function renderWithQueryClient(element: ReactNode) {
 }
 
 describe("Chapter management presentation", () => {
+  it("keeps the global Chapters master-detail contract and contextual actions", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/chapters/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toContain("xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]");
+    expect(page).toContain("Buscar capítulos...");
+    expect(page).toContain('aria-label="Serie"');
+    expect(page).toContain('aria-label="Estado"');
+    expect(page).toContain("didInitializeSelection");
+    expect(page).toContain("setSelectedChapterId(initialChapterId)");
+    expect(page).toContain("Crear capítulo");
+    expect(page).toContain("setUploading(true)");
+    expect(page).toContain("Asignar colaborador");
+    expect(page).toContain("<AssignChapterCollaboratorDialog");
+    expect(page).toContain("h-52 overflow-y-auto");
+    expect(page).toContain("remainingImages > 0");
+    expect(page).toContain("Ver todas");
+    expect(page).toContain("Sin actividad reciente");
+    expect(page).not.toContain("proyección actual");
+    expect(page).not.toContain('role === "admin"');
+    expect(page).not.toContain('role === "gestor"');
+  });
+
+  it("uses the existing collaborator grant boundary for the selected Chapter", () => {
+    const dialog = readFileSync(
+      "apps/web/components/domains/chapters/assign-chapter-collaborator-dialog.tsx",
+      "utf8",
+    );
+
+    expect(dialog).toContain("useHelperCandidates(chapterId, open)");
+    expect(dialog).toContain("useGrantChapterHelper(chapterId)");
+    expect(dialog).toContain("Asignar colaborador");
+  });
+
   it("renders a selectable Chapter list with contract fields", () => {
     const markup = renderWithQueryClient(
       <ChapterList
@@ -69,7 +106,7 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("Editar capítulo");
     expect(markup).toContain("Eliminar capítulo");
     expect(markup).toContain("Subir ZIP");
-    expect(markup).toContain("Gestionar imágenes");
+    expect(markup).toContain("Gestionar capítulo");
     expect(markup).not.toContain("Publicación e imágenes");
     expect(markup).toContain("bg-destructive-surface");
   });

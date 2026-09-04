@@ -50,4 +50,21 @@ describe("PublicMediaUrl", () => {
     expect(value).not.toContain("backblazeb2.com");
     expect(value).not.toContain("B2");
   });
+
+  it("projects opaque and historical version-shaped physical filenames", () => {
+    expect(
+      PublicMediaUrl.fromImage("https://media.nodeprox.org", {
+        ...image,
+        filename: "7d4f02e8-2df2-47a0-a8bd-a46938aa2fab.png",
+      }).toString(),
+    ).toBe(
+      "https://media.nodeprox.org/raven/25/7d4f02e8-2df2-47a0-a8bd-a46938aa2fab.png",
+    );
+    expect(
+      PublicMediaUrl.fromImage("https://media.nodeprox.org", {
+        ...image,
+        filename: "01_v2.png",
+      }).toString(),
+    ).toBe("https://media.nodeprox.org/raven/25/01_v2.png");
+  });
 });

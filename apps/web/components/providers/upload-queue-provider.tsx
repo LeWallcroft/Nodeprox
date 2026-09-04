@@ -88,6 +88,7 @@ type UploadQueueContextValue = {
     uploadId: string;
   }): Promise<void>;
   refreshBatch(batchId: string): Promise<void>;
+  refresh(): Promise<void>;
 };
 
 const UploadQueueContext = createContext<UploadQueueContextValue | null>(null);
@@ -156,6 +157,10 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
     },
     [queryClient],
   );
+
+  const refresh = useCallback(async () => {
+    await Promise.all(tracked.map((batch) => refreshBatch(batch.batchId)));
+  }, [refreshBatch, tracked]);
 
   const executeTransfer = useCallback(
     async (job: TransferJob) => {
@@ -365,6 +370,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       retryWithFile,
       abortTransfer,
       refreshBatch,
+      refresh,
     }),
     [
       abortTransfer,
@@ -373,6 +379,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       progress,
       queuedTransfers,
       refreshBatch,
+      refresh,
       retryWithFile,
       startBatch,
     ],

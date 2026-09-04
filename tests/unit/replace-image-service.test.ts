@@ -1,10 +1,10 @@
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
-import { ReplaceImageService } from "../../apps/api/src/modules/images/application/services/replace-image.service.js";
 import type {
   MediaReplacementRepositoryPort,
   MediaReplacementTransactionPort,
 } from "../../apps/api/src/modules/images/application/media-replacement.ports.js";
+import { ReplaceImageService } from "../../apps/api/src/modules/images/application/services/replace-image.service.js";
 import type { StoragePort } from "../../packages/storage/src/port.js";
 
 const context = {
@@ -35,6 +35,7 @@ function transaction(version = 1): MediaReplacementTransactionPort {
     cutover: vi.fn(async () => ({
       versionId: "66666666-6666-4666-8666-666666666666",
     })),
+    completeReplacementOperation: vi.fn(async () => undefined),
   };
 }
 
@@ -42,7 +43,11 @@ function repository(
   tx: MediaReplacementTransactionPort,
 ): MediaReplacementRepositoryPort {
   return {
-    findChapterId: vi.fn(async () => tx.image.chapterId),
+    findCandidateContext: vi.fn(async () => ({
+      chapterId: tx.image.chapterId,
+      currentStorageKey: tx.image.current.storageKey,
+      currentContentType: tx.image.current.contentType,
+    })),
     withLockedImage: vi.fn(async (_id, work) => work(tx)),
     enqueueOrphanCleanup: vi.fn(async () => undefined),
   };
@@ -65,6 +70,7 @@ function storage(overrides: Partial<StoragePort> = {}): StoragePort {
 function service(
   repo: MediaReplacementRepositoryPort,
   objectStorage: StoragePort,
+  activator?: ConstructorParameters<typeof ReplaceImageService>[5],
 ) {
   return new ReplaceImageService(
     repo,
@@ -72,6 +78,7 @@ function service(
     objectStorage,
     "https://media.nodeprox.org",
     { orphanCandidate: vi.fn() },
+    activator,
   );
 }
 
@@ -89,25 +96,36 @@ function input() {
 
 describe("ReplaceImageService", () => {
   it.each([
-    [1, 2, "00_v2.jpg"],
-    [2, 3, "00_v3.jpg"],
+    [1, 2],
+    [2, 3],
   ])(
     "cuts over v%d to v%d while preserving image identity",
-    async (from, to, filename) => {
+    async (from, to) => {
       const tx = transaction(from);
       const repo = repository(tx);
       const objectStorage = storage();
       const result = await service(repo, objectStorage).execute(input());
 
-      expect(result).toMatchObject({ imageId, version: to, filename });
+      expect(result).toMatchObject({ imageId, version: to });
+      expect(result.filename).toMatch(/^[0-9a-f-]{36}-[0-9a-f-]{36}\.jpg$/);
+      expect(result.filename).not.toMatch(/_v\d+(?:\.|$)/);
+      expect(result.publicUrl).toBe(
+        `https://media.nodeprox.org/raven/1-5/${result.filename}`,
+      );
       expect(tx.cutover).toHaveBeenCalledWith(
         expect.objectContaining({
           oldPublicUrl: `https://media.nodeprox.org/raven/1-5/${from === 1 ? "00.jpg" : `00_v${from}.jpg`}`,
           next: expect.objectContaining({
             version: to,
-            physicalFilename: filename,
-            storageKey: `Media/raven/1-5/${filename}`,
+            physicalFilename: result.filename,
+            storageKey: `Media/raven/1-5/${result.filename}`,
           }),
+        }),
+      );
+      expect(objectStorage.put).toHaveBeenCalledOnce();
+      expect(objectStorage.put).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: `Media/raven/1-5/${result.filename}`,
         }),
       );
       expect(objectStorage.delete).not.toHaveBeenCalled();
@@ -121,11 +139,94 @@ describe("ReplaceImageService", () => {
         throw new Error("b2-unavailable");
       }),
     });
+    const repo = repository(tx);
+    const activator = { execute: vi.fn() };
     await expect(
-      service(repository(tx), objectStorage).execute(input()),
+      service(repo, objectStorage, activator).execute(input()),
     ).rejects.toThrow("b2-unavailable");
     expect(tx.cutover).not.toHaveBeenCalled();
+    expect(repo.withLockedImage).not.toHaveBeenCalled();
+    expect(activator.execute).not.toHaveBeenCalled();
     expect(objectStorage.delete).not.toHaveBeenCalled();
+  });
+
+  it("puts the final-compatible candidate before activation", async () => {
+    const tx = transaction();
+    const repo = repository(tx);
+    const order: string[] = [];
+    const objectStorage = storage({
+      put: vi.fn(async (storedInput) => {
+        order.push("put");
+        return {
+          key: storedInput.key,
+          sizeBytes: storedInput.sizeBytes,
+          contentType: storedInput.contentType,
+        };
+      }),
+    });
+    const expected = {
+      imageId,
+      versionId: "version-2",
+      version: 2,
+      filename: "opaque.jpg",
+      storageKey: "Media/raven/1-5/opaque.jpg",
+      publicUrl: "https://media.nodeprox.org/raven/1-5/opaque.jpg",
+    };
+    const activator = {
+      execute: vi.fn(async () => {
+        order.push("activate");
+        return expected;
+      }),
+    };
+
+    await expect(
+      service(repo, objectStorage, activator).execute(input()),
+    ).resolves.toEqual(expected);
+    expect(order).toEqual(["put", "activate"]);
+    expect(objectStorage.put).toHaveBeenCalledOnce();
+    expect(activator.execute).toHaveBeenCalledOnce();
+    const putKey = vi.mocked(objectStorage.put).mock.calls[0]?.[0].key;
+    expect(putKey).toMatch(/^Media\/raven\/1-5\//);
+    expect(putKey).not.toMatch(/_v2(?:\.|$)/);
+    expect(activator.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateStorageKey: putKey,
+        contentType: "image/jpeg",
+        sizeBytes: 20,
+      }),
+    );
+  });
+
+  it("completes storage put before entering the image activation lock", async () => {
+    const tx = transaction();
+    const order: string[] = [];
+    const originalCutover = tx.cutover;
+    tx.cutover = vi.fn(async (cutoverInput) => {
+      order.push("cutover");
+      return originalCutover(cutoverInput);
+    });
+    const repo = repository(tx);
+    repo.withLockedImage = vi.fn(async (_id, work) => {
+      order.push("lock");
+      return work(tx);
+    });
+    const objectStorage = storage({
+      put: vi.fn(async (storedInput) => {
+        order.push("put");
+        return {
+          key: storedInput.key,
+          sizeBytes: storedInput.sizeBytes,
+          contentType: storedInput.contentType,
+        };
+      }),
+    });
+
+    await service(repo, objectStorage).execute(input());
+
+    expect(order).toEqual(["put", "lock", "cutover"]);
+    expect(objectStorage.put).toHaveBeenCalledOnce();
+    expect(repo.withLockedImage).toHaveBeenCalledOnce();
+    expect(tx.cutover).toHaveBeenCalledOnce();
   });
 
   it("deletes the new orphan candidate when DB cutover fails", async () => {
@@ -135,9 +236,9 @@ describe("ReplaceImageService", () => {
     await expect(
       service(repository(tx), objectStorage).execute(input()),
     ).rejects.toThrow("db-cutover-failed");
-    expect(objectStorage.delete).toHaveBeenCalledWith(
-      "Media/raven/1-5/00_v2.jpg",
-    );
+    const orphanKey = vi.mocked(objectStorage.delete).mock.calls[0]?.[0];
+    expect(orphanKey).toMatch(/^Media\/raven\/1-5\//);
+    expect(orphanKey).not.toMatch(/_v2(?:\.|$)/);
     expect(objectStorage.delete).not.toHaveBeenCalledWith(
       "Media/raven/1-5/00.jpg",
     );
@@ -155,11 +256,9 @@ describe("ReplaceImageService", () => {
     await expect(service(repo, objectStorage).execute(input())).rejects.toThrow(
       "db-cutover-failed",
     );
-    expect(repo.enqueueOrphanCleanup).toHaveBeenCalledWith(
-      expect.objectContaining({
-        imageId,
-        storageKey: "Media/raven/1-5/00_v2.jpg",
-      }),
-    );
+    const cleanup = vi.mocked(repo.enqueueOrphanCleanup).mock.calls[0]?.[0];
+    expect(cleanup).toMatchObject({ imageId });
+    expect(cleanup?.storageKey).toMatch(/^Media\/raven\/1-5\//);
+    expect(cleanup?.storageKey).not.toMatch(/_v2(?:\.|$)/);
   });
 });

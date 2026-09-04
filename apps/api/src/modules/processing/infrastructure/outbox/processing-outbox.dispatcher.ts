@@ -1,7 +1,9 @@
 import type {
   ChapterDeletionQueuePort,
+  ChapterReplacementQueuePort,
   ProcessingQueuePort,
 } from "@nodeprox/types";
+import type { ChapterReplacementProcessingOutboxPort } from "../../../chapter-replacements/application/ports/chapter-replacement-upload.repository.js";
 import type { ChapterDeletionOutboxPort } from "../../../chapters/application/ports/chapter-deletion-outbox.ports.js";
 import type { ProcessingOutboxPort } from "../../application/ports.js";
 
@@ -15,6 +17,7 @@ export class ProcessingOutboxDispatcher {
       Partial<ChapterDeletionQueuePort>,
     private readonly deletions?: ChapterDeletionOutboxPort,
     private readonly intervalMs = 1000,
+    private readonly replacements?: ChapterReplacementProcessingOutboxPort,
   ) {}
 
   async dispatchOnce(): Promise<void> {
@@ -39,6 +42,22 @@ export class ProcessingOutboxDispatcher {
           await this.deletions?.markEnqueued(deletion.deletionId);
         } catch {
           // The durable request remains pending and is dispatched again.
+        }
+      }
+      const replacements = await this.replacements?.findPending(20);
+      for (const replacement of replacements ?? []) {
+        try {
+          const replacementQueue = this.queue as ProcessingQueuePort &
+            Partial<ChapterReplacementQueuePort>;
+          if (!replacementQueue.enqueueChapterReplacement)
+            throw new Error("chapter-replacement-queue-unavailable");
+          await replacementQueue.enqueueChapterReplacement({
+            replacementId: replacement.replacementId,
+            chapterId: replacement.chapterId,
+          });
+          await this.replacements?.markEnqueued(replacement.id);
+        } catch {
+          // The durable replacement intent remains pending for a later dispatch.
         }
       }
     } finally {

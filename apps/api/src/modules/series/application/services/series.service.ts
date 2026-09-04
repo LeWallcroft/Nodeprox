@@ -2,8 +2,8 @@ import type { AuthorizationService } from "../../../authorization/application/se
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
-import { SeriesSlug } from "../../domain/series-slug.js";
 import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
+import { SeriesSlug } from "../../domain/series-slug.js";
 import type {
   ChapterCoreRepositoryPort,
   SeriesAssignmentRepositoryPort,
@@ -89,6 +89,11 @@ export class SeriesService {
     const chapterOperation = await this.findChapterOperational(context, id);
     if (chapterOperation && !("forbidden" in chapterOperation))
       capabilities.push(PERMISSIONS.CHAPTERS_CREATE);
+    const importUpload = await this.authorization.authorize(
+      context,
+      PERMISSIONS.IMAGES_UPLOAD,
+    );
+    if (importUpload.allowed) capabilities.push(PERMISSIONS.IMAGES_UPLOAD);
     const assignment = await this.findManaged(
       context,
       id,

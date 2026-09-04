@@ -1,12 +1,17 @@
-import { Queue } from "bullmq";
 import type {
   ChapterDeletionQueuePort,
+  ChapterReplacementQueuePort,
   DeleteChapterStorageInput,
   ProcessChapterInput,
+  ProcessChapterReplacementInput,
   ProcessingQueuePort,
 } from "@nodeprox/types";
+import { Queue } from "bullmq";
 export class BullMQProcessingQueue
-  implements ProcessingQueuePort, ChapterDeletionQueuePort
+  implements
+    ProcessingQueuePort,
+    ChapterDeletionQueuePort,
+    ChapterReplacementQueuePort
 {
   private readonly queue: Queue;
   constructor(redisUrl: string, queueName = "chapter-processing") {
@@ -40,6 +45,24 @@ export class BullMQProcessingQueue
       removeOnFail: 100,
     });
   }
+
+  async enqueueChapterReplacement(
+    input: ProcessChapterReplacementInput,
+  ): Promise<void> {
+    await this.queue.add("chapter.replacement.process", input, {
+      jobId: replacementProcessingJobId(input),
+      attempts: 3,
+      backoff: { type: "exponential", delay: 1000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    });
+  }
+}
+
+export function replacementProcessingJobId(
+  input: Pick<ProcessChapterReplacementInput, "replacementId">,
+): string {
+  return `chapter-replacement-${input.replacementId}`;
 }
 
 export function processingJobId(

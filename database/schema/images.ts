@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   check,
@@ -11,8 +12,8 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import type { MediaWarning } from "../../packages/types/src/index.js";
+import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 import { chapters } from "./chapters.js";
 export const images = pgTable(
   "images",
@@ -37,6 +38,12 @@ export const images = pgTable(
       .references((): AnyPgColumn => imageVersions.id, {
         onDelete: "restrict",
       }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    retiredByChapterReplacementId: uuid(
+      "retired_by_chapter_replacement_id",
+    ).references(() => chapterReplacementOperations.id, {
+      onDelete: "restrict",
+    }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -51,6 +58,14 @@ export const images = pgTable(
     ),
     index("images_chapter_idx").on(table.chapterId),
     index("images_chapter_sort_order_idx").on(table.chapterId, table.sortOrder),
+    uniqueIndex("images_active_chapter_sort_order_unique")
+      .on(table.chapterId, table.sortOrder)
+      .where(sql`${table.retiredAt} is null`),
+    check(
+      "images_retirement_pair",
+      sql`(${table.retiredAt} is null and ${table.retiredByChapterReplacementId} is null)
+        or (${table.retiredAt} is not null and ${table.retiredByChapterReplacementId} is not null)`,
+    ),
   ],
 );
 

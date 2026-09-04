@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -8,13 +9,14 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
-import { createDatabase } from "../../database/client.js";
 import { DrizzleImageRepository } from "../../apps/api/src/modules/images/infrastructure/persistence/drizzle/image.repository.js";
+import { DrizzleImageReplacementOperationRepository } from "../../apps/api/src/modules/images/infrastructure/persistence/drizzle/image-replacement-operation.repository.js";
+import { DrizzleImageVersionResultRepository } from "../../apps/api/src/modules/images/infrastructure/persistence/drizzle/image-version-result.repository.js";
 import { DrizzleMediaReplacementRepository } from "../../apps/api/src/modules/images/infrastructure/persistence/drizzle/media-replacement.repository.js";
+import { createDatabase } from "../../database/client.js";
 
 const infrastructure = inject("infrastructure");
 const databaseName = `nodeprox_media_${randomUUID().replaceAll("-", "")}`;
@@ -24,6 +26,8 @@ const seriesId = randomUUID();
 const chapterId = randomUUID();
 const imageId = randomUUID();
 let database: ReturnType<typeof createDatabase>;
+let durableVersionId: string;
+let durableOperationId: string;
 
 function databaseUrl(): string {
   const value = new URL(infrastructure.databaseUrl);
@@ -95,6 +99,67 @@ afterAll(async () => {
 });
 
 describe("CASE-V1-MEDIA-01 persistence", () => {
+  it("persists durable replacement operations with CAS and immutable completion", async () => {
+    const repository = new DrizzleImageReplacementOperationRepository(
+      database.db,
+    );
+    const operationId = randomUUID();
+    const [currentVersion] = await database.sql<{ id: string }[]>`
+      select current_version_id as id from images where id = ${imageId}
+    `;
+    if (!currentVersion) throw new Error("missing-current-image-version");
+    const firstVersionId = currentVersion.id;
+    const now = new Date();
+    const created = await repository.create({
+      id: operationId,
+      imageId,
+      chapterId,
+      requestedByUserId: userId,
+      candidateStorageKey: `replacement/${operationId}`,
+      originalFilename: "replacement.jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 123,
+      status: "pending_upload",
+    });
+    expect(created.status).toBe("pending_upload");
+    expect(await repository.findById(randomUUID())).toBeNull();
+    expect((await repository.markUploaded(operationId, now))?.status).toBe(
+      "uploaded",
+    );
+    const attempts = await Promise.all([
+      repository.tryBeginCompletion(operationId, now),
+      repository.tryBeginCompletion(operationId, now),
+    ]);
+    expect(attempts.filter((item) => item.acquired)).toHaveLength(1);
+    expect(
+      attempts.every((item) => item.operation?.status === "completing"),
+    ).toBe(true);
+    const completed = await repository.markCompleted({
+      operationId,
+      resultImageVersionId: firstVersionId,
+      completedAt: now,
+    });
+    expect(completed?.resultImageVersionId).toBe(firstVersionId);
+    expect(
+      (
+        await repository.markCompleted({
+          operationId,
+          resultImageVersionId: firstVersionId,
+          completedAt: now,
+        })
+      )?.resultImageVersionId,
+    ).toBe(firstVersionId);
+    await expect(
+      repository.markCompleted({
+        operationId,
+        resultImageVersionId: randomUUID(),
+        completedAt: now,
+      }),
+    ).rejects.toThrow("image-replacement-operation-result-conflict");
+    expect((await repository.findById(operationId))?.resultImageVersionId).toBe(
+      firstVersionId,
+    );
+  });
   it("backfills exactly one unchanged v1 and assigns the current pointer", async () => {
     const [counts] = await database.sql<
       { images: number; versions: number; missing_pointers: number }[]
@@ -251,14 +316,284 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     ).rejects.toMatchObject({ code: "23505" });
   });
 
+  it("commits CASE8 cutover and durable operation completion atomically", async () => {
+    const operations = new DrizzleImageReplacementOperationRepository(
+      database.db,
+    );
+    const repository = new DrizzleMediaReplacementRepository(database.db);
+    const operationId = randomUUID();
+    const completedAt = new Date();
+    await operations.create({
+      id: operationId,
+      imageId,
+      chapterId,
+      requestedByUserId: userId,
+      candidateStorageKey: `Media/media-series/1/${operationId}.jpg`,
+      originalFilename: "replacement.jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 400,
+      status: "pending_upload",
+    });
+    await operations.tryBeginCompletion(operationId, completedAt);
+    const [beforeAudit] = await database.sql<{ count: number }[]>`
+      select count(*)::int as count from audit_log
+      where resource_type = 'image' and resource_id = ${imageId}
+        and action = 'image.replaced'
+    `;
+
+    const activated = await repository.withLockedImage(
+      imageId,
+      async (transaction) => {
+        const version = transaction.image.current.version + 1;
+        const cutover = await transaction.cutover({
+          operationId,
+          actorId: userId,
+          oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
+          next: {
+            version,
+            physicalFilename: `${operationId}.jpg`,
+            storageKey: `Media/media-series/1/${operationId}.jpg`,
+            extension: "jpg",
+            contentType: "image/jpeg",
+            sizeBytes: 400,
+            checksum: "atomic-v4",
+          },
+        });
+        await transaction.completeReplacementOperation({
+          operationId,
+          imageId,
+          resultImageVersionId: cutover.versionId,
+          completedAt,
+        });
+        return { version, versionId: cutover.versionId };
+      },
+    );
+    if (!activated) throw new Error("missing-atomic-activation");
+    durableVersionId = activated.versionId;
+    durableOperationId = operationId;
+
+    const operation = await operations.findById(operationId);
+    expect(operation).toMatchObject({
+      status: "completed",
+      resultImageVersionId: activated.versionId,
+      completedAt,
+      lastErrorCode: null,
+    });
+    const [current] = await database.sql<
+      { current_version_id: string; version: number }[]
+    >`
+      select images.current_version_id, versions.version
+      from images
+      join image_versions versions on versions.id = images.current_version_id
+      where images.id = ${imageId}
+    `;
+    expect(current).toEqual({
+      current_version_id: activated.versionId,
+      version: activated.version,
+    });
+    const effects = await database.sql<{ effect_type: string }[]>`
+      select effect_type from media_effect_outbox
+      where replacement_operation_id = ${operationId}
+      order by effect_type
+    `;
+    expect(effects).toEqual([
+      { effect_type: "cdn_purge" },
+      { effect_type: "storage_delete" },
+    ]);
+    const [afterAudit] = await database.sql<{ count: number }[]>`
+      select count(*)::int as count from audit_log
+      where resource_type = 'image' and resource_id = ${imageId}
+        and action = 'image.replaced'
+    `;
+    expect(afterAudit?.count).toBe((beforeAudit?.count ?? 0) + 1);
+  });
+
+  it("does not overwrite a durable operation with another version result", async () => {
+    const repository = new DrizzleMediaReplacementRepository(database.db);
+    const [before] = await database.sql<
+      { versions: number; current_version_id: string }[]
+    >`
+      select
+        (select count(*)::int from image_versions where image_id = ${imageId}) as versions,
+        (select current_version_id from images where id = ${imageId}) as current_version_id
+    `;
+
+    await expect(
+      repository.withLockedImage(imageId, async (transaction) => {
+        const version = transaction.image.current.version + 1;
+        const filename = `${randomUUID()}.jpg`;
+        const cutover = await transaction.cutover({
+          operationId: randomUUID(),
+          actorId: userId,
+          oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
+          next: {
+            version,
+            physicalFilename: filename,
+            storageKey: `Media/media-series/1/${filename}`,
+            extension: "jpg",
+            contentType: "image/jpeg",
+            sizeBytes: 450,
+            checksum: "conflicting-result",
+          },
+        });
+        await transaction.completeReplacementOperation({
+          operationId: durableOperationId,
+          imageId,
+          resultImageVersionId: cutover.versionId,
+          completedAt: new Date(),
+        });
+      }),
+    ).rejects.toThrow("image-replacement-operation-result-conflict");
+
+    const [after] = await database.sql<
+      { versions: number; current_version_id: string }[]
+    >`
+      select
+        (select count(*)::int from image_versions where image_id = ${imageId}) as versions,
+        (select current_version_id from images where id = ${imageId}) as current_version_id
+    `;
+    expect(after).toEqual(before);
+    expect(
+      (
+        await new DrizzleImageReplacementOperationRepository(
+          database.db,
+        ).findById(durableOperationId)
+      )?.resultImageVersionId,
+    ).toBe(durableVersionId);
+  });
+
+  it("rolls back cutover, effects, and audit when durable completion fails", async () => {
+    const operations = new DrizzleImageReplacementOperationRepository(
+      database.db,
+    );
+    const repository = new DrizzleMediaReplacementRepository(database.db);
+    const operationId = randomUUID();
+    const completedAt = new Date();
+    await operations.create({
+      id: operationId,
+      imageId,
+      chapterId,
+      requestedByUserId: userId,
+      candidateStorageKey: `Media/media-series/1/${operationId}.jpg`,
+      originalFilename: "rollback.jpg",
+      contentType: "image/jpeg",
+      sizeBytes: 500,
+      status: "pending_upload",
+    });
+    await operations.tryBeginCompletion(operationId, completedAt);
+    const [before] = await database.sql<
+      { versions: number; audits: number; current_version_id: string }[]
+    >`
+      select
+        (select count(*)::int from image_versions where image_id = ${imageId}) as versions,
+        (select count(*)::int from audit_log where resource_type = 'image'
+          and resource_id = ${imageId} and action = 'image.replaced') as audits,
+        (select current_version_id from images where id = ${imageId}) as current_version_id
+    `;
+
+    await expect(
+      repository.withLockedImage(imageId, async (transaction) => {
+        const version = transaction.image.current.version + 1;
+        const cutover = await transaction.cutover({
+          operationId,
+          actorId: userId,
+          oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
+          next: {
+            version,
+            physicalFilename: `${operationId}.jpg`,
+            storageKey: `Media/media-series/1/${operationId}.jpg`,
+            extension: "jpg",
+            contentType: "image/jpeg",
+            sizeBytes: 500,
+            checksum: "must-rollback",
+          },
+        });
+        await transaction.completeReplacementOperation({
+          operationId,
+          imageId: randomUUID(),
+          resultImageVersionId: cutover.versionId,
+          completedAt,
+        });
+      }),
+    ).rejects.toThrow("image-replacement-operation-completion-conflict");
+
+    const [after] = await database.sql<
+      { versions: number; audits: number; current_version_id: string }[]
+    >`
+      select
+        (select count(*)::int from image_versions where image_id = ${imageId}) as versions,
+        (select count(*)::int from audit_log where resource_type = 'image'
+          and resource_id = ${imageId} and action = 'image.replaced') as audits,
+        (select current_version_id from images where id = ${imageId}) as current_version_id
+    `;
+    expect(after).toEqual(before);
+    expect(
+      await database.sql`
+        select id from media_effect_outbox
+        where replacement_operation_id = ${operationId}
+      `,
+    ).toHaveLength(0);
+    expect(await operations.findById(operationId)).toMatchObject({
+      status: "completing",
+      resultImageVersionId: null,
+      completedAt: null,
+    });
+  });
+
+  it("projects an immutable historical result after a later version is current", async () => {
+    const repository = new DrizzleMediaReplacementRepository(database.db);
+    await repository.withLockedImage(imageId, async (transaction) => {
+      const version = transaction.image.current.version + 1;
+      const filename = `${randomUUID()}.jpg`;
+      await transaction.cutover({
+        operationId: randomUUID(),
+        actorId: userId,
+        oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
+        next: {
+          version,
+          physicalFilename: filename,
+          storageKey: `Media/media-series/1/${filename}`,
+          extension: "jpg",
+          contentType: "image/jpeg",
+          sizeBytes: 600,
+          checksum: "later-version",
+        },
+      });
+    });
+    const projection = new DrizzleImageVersionResultRepository(
+      database.db,
+      "https://media.nodeprox.org",
+    );
+    const result = await projection.findVersionResultById(durableVersionId);
+    expect(result).toMatchObject({
+      imageId,
+      versionId: durableVersionId,
+      version: 4,
+      storageKey: expect.stringContaining("Media/media-series/1/"),
+    });
+    expect(result?.publicUrl).toBe(
+      `https://media.nodeprox.org/media-series/1/${result?.filename}`,
+    );
+    expect(await projection.findVersionResultById(randomUUID())).toBeNull();
+    const [current] = await database.sql<{ current_version_id: string }[]>`
+      select current_version_id from images where id = ${imageId}
+    `;
+    expect(current?.current_version_id).not.toBe(durableVersionId);
+  });
+
   it("uses current_version_id rather than max(version) as canonical authority", async () => {
+    const [before] = await database.sql<
+      { filename: string; storage_key: string }[]
+    >`
+      select filename, storage_key from images where id = ${imageId}
+    `;
     await database.sql`
       insert into image_versions (
         image_id, version, physical_filename, storage_key, extension,
         content_type, size_bytes, checksum
       ) values (
-        ${imageId}, 4, '00_v4.jpg', 'Media/media-series/1/00_v4.jpg',
-        'jpg', 'image/jpeg', 400, 'orphan-v4'
+        ${imageId}, 100, 'orphan.jpg', 'Media/media-series/1/orphan.jpg',
+        'jpg', 'image/jpeg', 1000, 'orphan'
       )
     `;
     const image = await new DrizzleImageRepository(database.db).findById(
@@ -266,8 +601,8 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     );
     expect(image).toMatchObject({
       id: imageId,
-      filename: "00_v3.jpg",
-      storageKey: "Media/media-series/1/00_v3.jpg",
+      filename: before?.filename,
+      storageKey: before?.storage_key,
     });
   });
 });

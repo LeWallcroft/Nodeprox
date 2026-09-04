@@ -229,6 +229,117 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("PROXY-CHR4-01 accepts POST replacement-session", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", backend);
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+    const response = await POST(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/replacement-session`,
+        { method: "POST" },
+      ),
+      context(["chapters", chapterId, "replacement-session"]),
+    );
+    expect(response.status).toBe(201);
+    expect(backend).toHaveBeenCalledWith(
+      `http://localhost:3001/chapters/${chapterId}/replacement-session`,
+      expect.objectContaining({ method: "POST" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("PROXY-CHR4-02 accepts POST replacement completion", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", backend);
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+    const replacementId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+    const response = await POST(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/replacements/${replacementId}/complete`,
+        { method: "POST" },
+      ),
+      context([
+        "chapters",
+        chapterId,
+        "replacements",
+        replacementId,
+        "complete",
+      ]),
+    );
+    expect(response.status).toBe(202);
+    expect(backend).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("PROXY-CHR4-03 accepts GET replacement status", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+    const replacementId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+    const response = await GET(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/replacements/${replacementId}`,
+      ),
+      context(["chapters", chapterId, "replacements", replacementId]),
+    );
+    expect(response.status).toBe(200);
+    expect(backend).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("PROXY-CHR4-04 keeps arbitrary Chapter replacement paths blocked", async () => {
+    const backend = vi.fn();
+    vi.stubGlobal("fetch", backend);
+    const response = await GET(
+      new Request(
+        "http://localhost:3000/api/chapters/chapter-1/replacements/replacement-1/publish",
+      ),
+      context([
+        "chapters",
+        "chapter-1",
+        "replacements",
+        "replacement-1",
+        "publish",
+      ]),
+    );
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "invalid-proxy-path",
+    });
+    expect(backend).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("PROXY-CHR4-05 preserves method restrictions", async () => {
+    const backend = vi.fn();
+    vi.stubGlobal("fetch", backend);
+    const chapterId = "b95822d0-4a53-4fab-92b2-d04f7a594d6f";
+    const replacementId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+    const wrongPrepare = await GET(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/replacement-session`,
+      ),
+      context(["chapters", chapterId, "replacement-session"]),
+    );
+    const wrongStatus = await POST(
+      new Request(
+        `http://localhost:3000/api/chapters/${chapterId}/replacements/${replacementId}`,
+        { method: "POST" },
+      ),
+      context(["chapters", chapterId, "replacements", replacementId]),
+    );
+    expect(wrongPrepare.status).toBe(404);
+    expect(wrongStatus.status).toBe(404);
+    expect(backend).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("proxies only the contextual uploader assignment routes", async () => {
     const backend = vi
       .fn()

@@ -1,9 +1,10 @@
-import { and, eq, sql } from "drizzle-orm";
 import { sanitizeAuditMetadata } from "@nodeprox/types";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapters,
+  imageReplacementOperations,
   images,
   imageVersions,
   mediaEffectOutbox,
@@ -13,26 +14,41 @@ import type {
   MediaReplacementRepositoryPort,
   MediaReplacementTransactionPort,
 } from "../../../application/media-replacement.ports.js";
+import { acquireChapterMediaLock } from "./chapter-media-lock.js";
 
 export class DrizzleMediaReplacementRepository
   implements MediaReplacementRepositoryPort
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
-  async findChapterId(imageId: string): Promise<string | null> {
+  async findCandidateContext(imageId: string) {
     const [row] = await this.db
-      .select({ chapterId: images.chapterId })
+      .select({
+        chapterId: images.chapterId,
+        currentStorageKey: images.storageKey,
+        currentContentType: images.contentType,
+      })
       .from(images)
-      .where(eq(images.id, imageId))
+      .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
       .limit(1);
-    return row?.chapterId ?? null;
+    return row ?? null;
   }
 
   async withLockedImage<T>(
     imageId: string,
     work: (transaction: MediaReplacementTransactionPort) => Promise<T>,
   ): Promise<T | null> {
+    const [scope] = await this.db
+      .select({ chapterId: images.chapterId })
+      .from(images)
+      .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
+      .limit(1);
+    if (!scope) return null;
     return this.db.transaction(async (tx) => {
+      await acquireChapterMediaLock(tx, scope.chapterId);
+      await tx.execute(
+        sql`select id from chapters where id = ${scope.chapterId} for update`,
+      );
       await tx.execute(
         sql`select id from images where id = ${imageId} for update`,
       );
@@ -55,7 +71,7 @@ export class DrizzleMediaReplacementRepository
         .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
         .innerJoin(chapters, eq(chapters.id, images.chapterId))
         .innerJoin(series, eq(series.id, chapters.seriesId))
-        .where(eq(images.id, imageId))
+        .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
         .limit(1);
       if (!row) return null;
       const [initial] = await tx
@@ -140,6 +156,47 @@ export class DrizzleMediaReplacementRepository
             }),
           });
           return { versionId: version.id };
+        },
+        completeReplacementOperation: async (input) => {
+          const [completed] = await tx
+            .update(imageReplacementOperations)
+            .set({
+              status: "completed",
+              resultImageVersionId: input.resultImageVersionId,
+              completedAt: input.completedAt,
+              updatedAt: input.completedAt,
+              lastErrorCode: null,
+            })
+            .where(
+              and(
+                eq(imageReplacementOperations.id, input.operationId),
+                eq(imageReplacementOperations.imageId, input.imageId),
+                eq(imageReplacementOperations.status, "completing"),
+                sql`${imageReplacementOperations.resultImageVersionId} is null`,
+              ),
+            )
+            .returning({ id: imageReplacementOperations.id });
+          if (completed) return;
+
+          const [current] = await tx
+            .select({
+              status: imageReplacementOperations.status,
+              imageId: imageReplacementOperations.imageId,
+              resultImageVersionId:
+                imageReplacementOperations.resultImageVersionId,
+            })
+            .from(imageReplacementOperations)
+            .where(eq(imageReplacementOperations.id, input.operationId))
+            .limit(1);
+          if (
+            current?.status === "completed" &&
+            current.imageId === input.imageId &&
+            current.resultImageVersionId === input.resultImageVersionId
+          )
+            return;
+          if (current?.status === "completed")
+            throw new Error("image-replacement-operation-result-conflict");
+          throw new Error("image-replacement-operation-completion-conflict");
         },
       });
     });

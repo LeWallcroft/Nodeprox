@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
   images,
@@ -48,14 +48,16 @@ export class DrizzleMediaEffectRepository implements MediaEffectRepositoryPort {
   }
 
   async isCurrentStorageKey(
-    imageId: string,
+    _imageId: string,
     storageKey: string,
   ): Promise<boolean> {
     const [row] = await this.db
       .select({ storageKey: imageVersions.storageKey })
       .from(images)
       .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
-      .where(eq(images.id, imageId))
+      .where(
+        and(eq(imageVersions.storageKey, storageKey), isNull(images.retiredAt)),
+      )
       .limit(1);
     return row?.storageKey === storageKey;
   }
