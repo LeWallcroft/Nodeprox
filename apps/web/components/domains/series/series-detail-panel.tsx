@@ -1,10 +1,16 @@
 "use client";
 
-import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
+import {
+  ChartNoAxesColumn,
+  Images,
+  Pencil,
+  Trash2,
+  UserRoundPlus,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { hasCapability } from "../../../lib/auth/visibility";
-import type { Chapter } from "../../../lib/domains/chapters/types";
 import type {
   Series,
   SeriesInput,
@@ -14,10 +20,12 @@ import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { ConfirmationDialog } from "../../ui/confirmation-dialog";
+import { ContentImage } from "../../ui/content-image";
+import { CopyButton } from "../../ui/copy-button";
 import { EmptyState } from "../../ui/empty-state";
+import { StatusBadge } from "../../ui/status-badge";
 import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
-import { SeriesCoverPreview } from "./series-cover-preview";
 import { SeriesForm } from "./series-form";
 
 export function SeriesDetailPanel({
@@ -34,8 +42,6 @@ export function SeriesDetailPanel({
   onClearUploader,
   updatePending,
   deletePending,
-  chapters = [],
-  chaptersLoading = false,
 }: {
   series: Series | null;
   capabilities: readonly string[] | undefined;
@@ -52,8 +58,6 @@ export function SeriesDetailPanel({
   onClearUploader: () => Promise<void>;
   updatePending: boolean;
   deletePending: boolean;
-  chapters?: readonly Chapter[];
-  chaptersLoading?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -83,16 +87,9 @@ export function SeriesDetailPanel({
     hasCapability(capabilities, "chapters.helper.revoke");
 
   return (
-    <Card className="max-h-full overflow-y-auto xl:sticky xl:top-0">
+    <Card className="h-full overflow-y-auto p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="m-0 text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Series seleccionada
-          </p>
-          <h2 className="mb-0 mt-1 truncate text-xl font-semibold">
-            {series.title}
-          </h2>
-        </div>
+        <h2 className="m-0 text-base font-semibold">Detalle de la serie</h2>
         <button
           className="inline-flex h-8 w-8 items-center justify-center rounded-control border border-border bg-surface-elevated text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
           type="button"
@@ -102,15 +99,38 @@ export function SeriesDetailPanel({
           <X aria-hidden="true" className="size-4" />
         </button>
       </div>
-      <div className="mt-5">
-        <SeriesCoverPreview coverUrl={series.coverUrl} title={series.title} />
+      <div className="mt-4 flex items-start gap-3">
+        <ContentImage
+          alt={`Portada de ${series.title}`}
+          src={series.coverUrl}
+          variant="details"
+        />
+        <div className="min-w-0">
+          <h3 className="m-0 truncate text-lg font-semibold">{series.title}</h3>
+          <div className="mt-2">
+            <StatusBadge label="Activa" tone="success" />
+          </div>
+          <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-[0.08em] text-muted">
+            Slug
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="break-all text-sm font-medium text-text">
+              {series.slug}
+            </span>
+            <CopyButton
+              className="min-h-8 px-2 text-xs"
+              label="Copiar slug"
+              value={series.slug}
+            />
+          </div>
+        </div>
       </div>
-      <dl className="mt-5 grid gap-4 text-sm">
+      <dl className="mt-4 grid gap-3 text-sm">
         <div>
           <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Slug público
+            Estado
           </dt>
-          <dd className="mt-1 break-all font-semibold">{series.slug}</dd>
+          <dd className="mt-1 text-muted">Activa</dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
@@ -145,44 +165,7 @@ export function SeriesDetailPanel({
           </dd>
         </div>
       </dl>
-      <section aria-labelledby="series-contextual-chapters" className="mt-6">
-        <div className="flex items-center justify-between gap-3">
-          <h3
-            className="m-0 text-sm font-semibold"
-            id="series-contextual-chapters"
-          >
-            Chapters recientes
-          </h3>
-          {canViewChapters ? (
-            <Link
-              className="text-sm font-medium text-primary hover:underline"
-              href={`/series/${series.id}/chapters`}
-            >
-              Ver todos
-            </Link>
-          ) : null}
-        </div>
-        {chaptersLoading ? (
-          <p className="mt-2 text-sm text-muted">Cargando Chapters…</p>
-        ) : chapters.length ? (
-          <ul className="mt-2 grid gap-2 p-0" aria-label="Chapters de la serie">
-            {chapters.slice(0, 5).map((chapter) => (
-              <li
-                className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-elevated px-3 py-2 text-sm"
-                key={chapter.id}
-              >
-                <span className="font-medium">
-                  Capítulo {chapter.chapterNumber}
-                </span>
-                <span className="text-muted">{chapter.status}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-2 text-sm text-muted">No hay Chapters todavía.</p>
-        )}
-      </section>
-      <div className="mt-5 grid gap-2">
+      <div className="mt-4 grid gap-2">
         {canViewChapters ? (
           <Link
             className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -195,7 +178,7 @@ export function SeriesDetailPanel({
         {canEdit ? (
           <Button type="button" onClick={() => setEditing((value) => !value)}>
             <Pencil aria-hidden="true" className="size-4" />
-            {editing ? "Cerrar edición" : "Editar series"}
+            {editing ? "Cerrar edición" : "Editar serie"}
           </Button>
         ) : null}
         {canManageAssignment ? (
@@ -233,6 +216,12 @@ export function SeriesDetailPanel({
           </Button>
         ) : null}
       </div>
+      <section className="mt-4 rounded-control border border-border bg-surface-elevated p-3 text-muted">
+        <ChartNoAxesColumn aria-hidden="true" className="size-5" />
+        <h3 className="mb-1 mt-2 text-sm font-semibold text-text">Métricas</h3>
+        <p className="mb-1 text-sm font-medium">Muy pronto</p>
+        <p className="mb-0 text-xs">Disponible en una próxima versión.</p>
+      </section>
       {assignmentError ? (
         <p className="mt-3 text-sm text-danger" role="alert">
           {assignmentError}

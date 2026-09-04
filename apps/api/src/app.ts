@@ -12,6 +12,14 @@ import { requireSession } from "./modules/authentication/presentation/session-gu
 import { registerAuditPlugin } from "./modules/authorization/presentation/audit.plugin.js";
 import { registerAuthorization } from "./modules/authorization/presentation/authorization.plugin.js";
 import { registerSettingsPlugin } from "./modules/authorization/presentation/settings.plugin.js";
+import { ChapterMediaActivationService } from "./modules/chapter-replacements/application/chapter-media-activation.service.js";
+import { CompleteChapterReplacementUploadService } from "./modules/chapter-replacements/application/complete-chapter-replacement-upload.service.js";
+import { FinalizeChapterReplacementService } from "./modules/chapter-replacements/application/finalize-chapter-replacement.service.js";
+import { PrepareChapterReplacementService } from "./modules/chapter-replacements/application/prepare-chapter-replacement.service.js";
+import { DrizzleChapterMediaReplacementRepository } from "./modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-media-replacement.repository.js";
+import { DrizzleChapterReplacementRepository } from "./modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement.repository.js";
+import { DrizzleChapterReplacementProcessingRepository } from "./modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
+import { registerChapterReplacementPlugin } from "./modules/chapter-replacements/presentation/chapter-replacement.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -137,6 +145,43 @@ export function buildApp(
       (storageConfig.provider === "b2"
         ? new B2UploadTransfer(storageConfig.b2)
         : new UnavailableUploadTransfer());
+    const chapterReplacementRepository =
+      new DrizzleChapterReplacementProcessingRepository(dependencies.database);
+    const chapterReplacementOperations =
+      new DrizzleChapterReplacementRepository(dependencies.database);
+    const chapterReplacementActivation = new ChapterMediaActivationService(
+      chapterReplacementOperations,
+      new DrizzleChapterMediaReplacementRepository(
+        dependencies.database,
+        dependencies.publicMediaOrigin ?? DEFAULT_PUBLIC_MEDIA_ORIGIN,
+      ),
+      chapterPermissions,
+    );
+    const chapterReplacementServices = {
+      prepare: new PrepareChapterReplacementService(
+        chapterPermissions,
+        chapterReplacementRepository,
+        uploadTransfer,
+        storageConfig.uploadMaxSizeBytes,
+      ),
+      completeUpload: new CompleteChapterReplacementUploadService(
+        chapterReplacementRepository,
+        uploadTransfer,
+        chapterPermissions,
+      ),
+      finalize: new FinalizeChapterReplacementService(
+        chapterReplacementOperations,
+        chapterReplacementActivation,
+        chapterPermissions,
+      ),
+    };
+    registerChapterReplacementPlugin(app, {
+      ...chapterReplacementServices,
+      sessionGuard: requireSession(
+        authentication.service,
+        authentication.cookies,
+      ),
+    });
     const uploadService = registerUploadPlugin(
       app,
       dependencies.database,

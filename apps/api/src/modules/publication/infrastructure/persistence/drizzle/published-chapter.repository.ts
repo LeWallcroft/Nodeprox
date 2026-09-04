@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapters,
@@ -45,7 +45,7 @@ export class DrizzlePublishedChapterRepository
       })
       .from(images)
       .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
-      .where(eq(images.chapterId, chapterId))
+      .where(and(eq(images.chapterId, chapterId), isNull(images.retiredAt)))
       .orderBy(asc(images.sortOrder));
   }
 }

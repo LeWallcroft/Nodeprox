@@ -39,7 +39,7 @@ export function sanitizeTrackedBatches(
 export function safeBulkUploadConcurrency(value?: number): number {
   if (value === undefined || !Number.isInteger(value))
     return MAX_DIRECT_UPLOAD_CONCURRENCY;
-  return Math.min(5, Math.max(1, value));
+  return Math.min(MAX_DIRECT_UPLOAD_CONCURRENCY, Math.max(1, value));
 }
 
 export function canEnqueueDirectUpload(input: {
@@ -58,15 +58,19 @@ export async function runPool(
   jobs: readonly (() => Promise<void>)[],
   concurrency = MAX_DIRECT_UPLOAD_CONCURRENCY,
 ) {
+  const effectiveConcurrency = safeBulkUploadConcurrency(concurrency);
   let cursor = 0;
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, jobs.length) }, async () => {
-      while (cursor < jobs.length) {
-        const job = jobs[cursor];
-        cursor += 1;
-        if (job) await job();
-      }
-    }),
+    Array.from(
+      { length: Math.min(effectiveConcurrency, jobs.length) },
+      async () => {
+        while (cursor < jobs.length) {
+          const job = jobs[cursor];
+          cursor += 1;
+          if (job) await job();
+        }
+      },
+    ),
   );
 }
 

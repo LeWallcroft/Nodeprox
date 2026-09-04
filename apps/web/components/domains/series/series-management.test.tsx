@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { EmptyState } from "../../ui/empty-state";
@@ -21,6 +22,69 @@ const series = {
 };
 
 describe("Series management presentation", () => {
+  it("keeps the final compact master-detail layout contract", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/series/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toContain('placeholder="Buscar series..."');
+    expect(page).toContain('aria-label="Estado"');
+    expect(page).toContain('aria-label="Responsable"');
+    expect(page).not.toContain("Género");
+    expect(page).not.toContain("Más filtros");
+    expect(page).toContain("lg:flex-nowrap");
+    expect(page).toContain("max-w-xs shrink");
+    expect(page).toContain("w-36 shrink-0");
+    expect(page).toContain("w-48 shrink-0");
+    expect(page).toContain("Estado: Activa");
+    expect(page).toContain("Responsable: Todos");
+    expect(page).toContain("<AppDialog");
+    expect(page).toContain('title="Nueva serie"');
+    expect(page).toContain("<SeriesForm");
+    expect(page).toContain("h-52 overflow-y-auto");
+    expect(page).toContain("Sin actividad reciente");
+    expect(page).not.toContain("proyección actual");
+    expect(page).toContain("<List aria-hidden");
+  });
+
+  it("reserves a metrics placeholder without inventing values", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesDetailPanel
+        series={series}
+        capabilities={["series.read"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+        candidates={[]}
+        candidatesLoading={false}
+        candidatesError={null}
+        assignmentPending={false}
+        updatePending={false}
+        deletePending={false}
+        onAssignUploader={async () => undefined}
+        onClearUploader={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Métricas");
+    expect(markup).toContain("Muy pronto");
+    expect(markup).toContain("Disponible en una próxima versión.");
+    expect(markup).not.toContain("12,450");
+  });
+
+  it("makes chapter management available from the initial real Series selection", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/series/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toContain("didInitializeSelection");
+    expect(page).toContain("listQuery.data.find((series) => series.id)?.id");
+    expect(page).toContain("setSelectedSeriesId(initialSeriesId)");
+    expect(page).toContain("selectedSeriesId}/chapters");
+  });
+
   it("keeps slug backend-owned in the Series form", () => {
     const markup = renderToStaticMarkup(
       <SeriesForm onSubmit={async () => undefined} />,
@@ -39,6 +103,14 @@ describe("Series management presentation", () => {
     );
     expect(markup).toContain("Raven");
     expect(markup).toContain("raven");
+    expect(markup).toContain("Portada");
+    expect(markup).toContain("Estado");
+    expect(markup).toContain("Capítulos");
+    expect(markup).toContain("Imágenes");
+    expect(markup).toContain("Última actualización");
+    expect(markup).toContain("Responsable");
+    expect(markup).toContain("Acciones");
+    expect(markup).toContain("Activa");
     expect(markup).toContain('aria-pressed="true"');
   });
 
@@ -66,32 +138,21 @@ describe("Series management presentation", () => {
         onClearUploader={async () => undefined}
       />,
     );
-    expect(markup).toContain("Editar series");
+    expect(markup).toContain("Detalle de la serie");
+    expect(markup).toContain("Editar serie");
     expect(markup).toContain("Eliminar serie");
     expect(markup).toContain("uploader@example.com");
+    expect(markup).toContain("Copiar slug");
     expect(markup).toContain("Cambiar responsable");
     expect(markup).toContain('href="/series/series-1/chapters"');
   });
 
-  it("renders a query-backed contextual Chapters summary inside the side panel", () => {
+  it("keeps the detail panel compact and reserves contextual Chapters for the main area", () => {
     const markup = renderToStaticMarkup(
       <SeriesContextPanel open>
         <SeriesDetailPanel
           series={series}
           capabilities={["series.read"]}
-          chapters={[
-            {
-              id: "chapter-0-5",
-              seriesId: series.id,
-              chapterNumber: 0.5,
-              publicKey: "0-5",
-              title: null,
-              status: "processing",
-              createdBy: "user-1",
-              createdAt: "2026-08-01T00:00:00.000Z",
-              updatedAt: "2026-08-02T00:00:00.000Z",
-            },
-          ]}
           onClose={() => undefined}
           onUpdate={async () => undefined}
           onDelete={async () => undefined}
@@ -107,8 +168,9 @@ describe("Series management presentation", () => {
       </SeriesContextPanel>,
     );
     expect(markup).toContain("Panel contextual de la serie");
-    expect(markup).toContain("Chapters recientes");
-    expect(markup).toContain("Capítulo 0.5");
+    expect(markup).not.toContain("Chapters recientes");
+    expect(markup).toContain("Activa");
+    expect(markup).toContain("object-contain");
     expect(markup).toContain('href="/series/series-1/chapters"');
   });
 

@@ -57,7 +57,7 @@ export default function ChapterDetailPage() {
     return (
       <EmptyState
         title="Chapter no encontrado"
-        description="El Chapter solicitado ya no está disponible."
+        description="El capítulo solicitado ya no está disponible."
       />
     );
   const currentChapter = chapter;
@@ -75,7 +75,7 @@ export default function ChapterDetailPage() {
   );
 
   async function deleteCurrent() {
-    if (!window.confirm("¿Eliminar este Chapter?")) return;
+    if (!window.confirm("¿Eliminar este Capítulo?")) return;
     setActionError(null);
     try {
       await remove.mutateAsync(chapterId);

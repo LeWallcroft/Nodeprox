@@ -24,6 +24,8 @@ export const queryKeys = {
     helpers: (chapterId: string) => ["chapters", chapterId, "helpers"] as const,
     helperCandidates: (chapterId: string) =>
       ["chapters", chapterId, "helper-candidates"] as const,
+    replacement: (chapterId: string, replacementId: string) =>
+      ["chapters", chapterId, "replacements", replacementId] as const,
   },
   ingestion: {
     batch: (batchId: string) => ["ingestion", "batch", batchId] as const,

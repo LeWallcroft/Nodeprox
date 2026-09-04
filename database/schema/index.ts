@@ -5,6 +5,15 @@ export {
   chapterDeletionOutbox,
   chapterDeletionOutboxStatusEnum,
 } from "./chapter-deletion-outbox.js";
+export { chapterReplacementItems } from "./chapter-replacement-items.js";
+export {
+  chapterReplacementOperationStatusEnum,
+  chapterReplacementOperations,
+} from "./chapter-replacement-operations.js";
+export {
+  chapterReplacementProcessingOutbox,
+  chapterReplacementProcessingOutboxStatusEnum,
+} from "./chapter-replacement-processing-outbox.js";
 export {
   chapterPermissions,
   chapters,
@@ -29,4 +38,9 @@ export {
   processingOutboxStatusEnum,
 } from "./processing-outbox.js";
 export { series, seriesAssignments } from "./series.js";
+export {
+  storageCleanupOutbox,
+  storageCleanupReasonEnum,
+  storageCleanupStatusEnum,
+} from "./storage-cleanup-outbox.js";
 export { uploads } from "./uploads.js";

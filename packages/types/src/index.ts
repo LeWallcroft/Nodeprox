@@ -1,9 +1,9 @@
 export type HealthStatus = "ok";
+export type { AuditMetadata } from "./audit-metadata.js";
 export {
   InvalidAuditMetadataError,
   sanitizeAuditMetadata,
 } from "./audit-metadata.js";
-export type { AuditMetadata } from "./audit-metadata.js";
 
 export interface RequestContext {
   requestId: string;
@@ -38,6 +38,17 @@ export type ProcessChapterInput = {
 };
 export interface ProcessingQueuePort {
   enqueueChapterProcessing(input: ProcessChapterInput): Promise<void>;
+}
+
+export type ProcessChapterReplacementInput = {
+  replacementId: string;
+  chapterId: string;
+};
+
+export interface ChapterReplacementQueuePort {
+  enqueueChapterReplacement(
+    input: ProcessChapterReplacementInput,
+  ): Promise<void>;
 }
 
 export type DeleteChapterStorageInput = {

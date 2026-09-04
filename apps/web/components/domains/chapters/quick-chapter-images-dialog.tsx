@@ -1,5 +1,6 @@
 "use client";
 
+import { Images } from "lucide-react";
 import Link from "next/link";
 import { usePublicChapter } from "../../../lib/domains/publication/hooks";
 import {
@@ -32,15 +33,18 @@ export function QuickChapterImagesDialog({
   const images = sortPublicImages(query.data?.images ?? []);
   return (
     <AppDialog
-      description={seriesTitle}
+      description={`Capítulo ${chapterNumber} · ${seriesTitle}`}
       open={open}
       size="lg"
-      title={`Imágenes del capítulo ${chapterNumber}`}
+      title="Imágenes del capítulo"
       onOpenChange={(next) => {
         if (!next) onClose();
       }}
       footer={
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-sm text-muted">
+            {images.length} de {images.length} imágenes
+          </span>
           <Button
             className="border-border bg-surface text-text hover:bg-surface-hover"
             type="button"
@@ -48,18 +52,6 @@ export function QuickChapterImagesDialog({
           >
             Cerrar
           </Button>
-          <CopyButton
-            value={images.length ? publicImageUrlsText(images) : null}
-            label="Copiar todas las URLs"
-            failureMessage="No se pudieron copiar las URLs."
-          />
-          <Link
-            className="inline-flex min-h-control items-center justify-center rounded-control bg-primary px-3.5 font-medium text-primary-foreground"
-            href={`/series/${seriesId}/chapters/${chapterId}/images`}
-            onClick={onClose}
-          >
-            Gestionar capítulo
-          </Link>
         </div>
       }
     >
@@ -73,14 +65,30 @@ export function QuickChapterImagesDialog({
       {query.isSuccess && !images.length ? (
         <p className="m-0 text-sm text-muted">No hay imágenes publicadas.</p>
       ) : null}
+      <div className="mb-3 flex flex-nowrap items-center justify-end gap-2">
+        <Link
+          aria-label="Gestionar capítulo"
+          className="inline-flex min-h-control shrink-0 items-center justify-center gap-2 rounded-control border border-primary bg-primary-soft px-3.5 font-medium text-primary transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          href={`/series/${seriesId}/chapters/${chapterId}/images`}
+          onClick={onClose}
+        >
+          <Images aria-hidden="true" className="size-4" /> Gestionar
+        </Link>
+        <CopyButton
+          className="shrink-0"
+          value={images.length ? publicImageUrlsText(images) : null}
+          label="Copiar todos los links"
+          successLabel="Todos los links copiados"
+          failureMessage="No se pudieron copiar los links."
+        />
+      </div>
       {images.length ? (
-        <div className="overflow-x-auto rounded-control border border-border">
+        <div className="max-h-[55vh] overflow-auto rounded-control border border-border">
           <table className="w-full min-w-[620px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted">
                 <th className="p-3">Imagen</th>
-                <th className="p-3">Número</th>
-                <th className="p-3">Estado</th>
+                <th className="p-3">Orden</th>
                 <th className="p-3">URL</th>
                 <th className="p-3">Acciones</th>
               </tr>
@@ -88,7 +96,7 @@ export function QuickChapterImagesDialog({
             <tbody>
               {images.map((image) => (
                 <tr
-                  className="border-b border-border last:border-0"
+                  className="h-20 border-b border-border last:border-0 [&>td]:align-middle"
                   key={image.id}
                 >
                   <td className="p-3">
@@ -99,7 +107,6 @@ export function QuickChapterImagesDialog({
                     />
                   </td>
                   <td className="p-3">{image.sortOrder}</td>
-                  <td className="p-3 text-muted">Listo</td>
                   <td
                     className="max-w-56 truncate p-3 text-muted"
                     title={image.url}
@@ -108,8 +115,9 @@ export function QuickChapterImagesDialog({
                   </td>
                   <td className="p-3">
                     <CopyButton
-                      className="border-border bg-surface text-text hover:bg-surface-hover"
+                      className="border-border bg-surface-elevated text-text hover:bg-surface-hover"
                       value={image.url}
+                      label="Copiar URL"
                     />
                   </td>
                 </tr>

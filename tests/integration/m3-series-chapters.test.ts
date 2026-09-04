@@ -1,11 +1,10 @@
-import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inject } from "vitest";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
-import { createDatabase } from "../../database/client.js";
 import { DrizzleChapterDeletionRepository } from "../../apps/worker/src/deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
+import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
@@ -206,6 +205,15 @@ describe("M3 Series and Chapters Core", () => {
     });
     expect(createdSeries.statusCode).toBe(201);
     const seriesId = createdSeries.json().id as string;
+    const emptySeriesCapabilities = await app.inject({
+      method: "GET",
+      url: `/series/${seriesId}/capabilities`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(emptySeriesCapabilities.statusCode).toBe(200);
+    expect(emptySeriesCapabilities.json().capabilities).toContain(
+      "images.upload",
+    );
     const createdChapter = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
@@ -227,6 +235,7 @@ describe("M3 Series and Chapters Core", () => {
         "series.edit",
         "series.delete",
         "chapters.create",
+        "images.upload",
         "series.assignment.manage",
       ]),
     );

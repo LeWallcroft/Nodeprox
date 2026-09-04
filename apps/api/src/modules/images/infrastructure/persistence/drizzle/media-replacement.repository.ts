@@ -1,5 +1,5 @@
 import { sanitizeAuditMetadata } from "@nodeprox/types";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
@@ -14,6 +14,7 @@ import type {
   MediaReplacementRepositoryPort,
   MediaReplacementTransactionPort,
 } from "../../../application/media-replacement.ports.js";
+import { acquireChapterMediaLock } from "./chapter-media-lock.js";
 
 export class DrizzleMediaReplacementRepository
   implements MediaReplacementRepositoryPort
@@ -28,7 +29,7 @@ export class DrizzleMediaReplacementRepository
         currentContentType: images.contentType,
       })
       .from(images)
-      .where(eq(images.id, imageId))
+      .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
       .limit(1);
     return row ?? null;
   }
@@ -37,7 +38,17 @@ export class DrizzleMediaReplacementRepository
     imageId: string,
     work: (transaction: MediaReplacementTransactionPort) => Promise<T>,
   ): Promise<T | null> {
+    const [scope] = await this.db
+      .select({ chapterId: images.chapterId })
+      .from(images)
+      .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
+      .limit(1);
+    if (!scope) return null;
     return this.db.transaction(async (tx) => {
+      await acquireChapterMediaLock(tx, scope.chapterId);
+      await tx.execute(
+        sql`select id from chapters where id = ${scope.chapterId} for update`,
+      );
       await tx.execute(
         sql`select id from images where id = ${imageId} for update`,
       );
@@ -60,7 +71,7 @@ export class DrizzleMediaReplacementRepository
         .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
         .innerJoin(chapters, eq(chapters.id, images.chapterId))
         .innerJoin(series, eq(series.id, chapters.seriesId))
-        .where(eq(images.id, imageId))
+        .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
         .limit(1);
       if (!row) return null;
       const [initial] = await tx

@@ -1,14 +1,23 @@
 "use client";
 
-import { ExternalLink, Eye } from "lucide-react";
+import {
+  ExternalLink,
+  Eye,
+  Image,
+  Images,
+  Info,
+  RefreshCw,
+} from "lucide-react";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SelectedImageReplacementAction } from "../../../../../../../components/domains/chapters/selected-image-replacement-action";
+import { WholeChapterReplacementDialog } from "../../../../../../../components/domains/chapters/whole-chapter-replacement-dialog";
 import { PageHeader } from "../../../../../../../components/layout/page-header";
 import { CopyButton } from "../../../../../../../components/ui/copy-button";
 import { EmptyState } from "../../../../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../../../components/ui/loading-state";
+import { hasCapability } from "../../../../../../../lib/auth/visibility";
 import {
   useChapter,
   useChapterCapabilities,
@@ -18,6 +27,7 @@ import {
   publicImageUrlsText,
   sortPublicImages,
 } from "../../../../../../../lib/domains/publication/utils";
+import { useSeries } from "../../../../../../../lib/domains/series/hooks";
 
 export default function ChapterImagesPage() {
   const { seriesId, chapterId } = useParams<{
@@ -25,23 +35,47 @@ export default function ChapterImagesPage() {
     chapterId: string;
   }>();
   const chapter = useChapter(chapterId);
+  const series = useSeries(seriesId);
   const capabilities = useChapterCapabilities(chapterId);
   const publication = usePublicChapter(
     chapterId,
     chapter.data?.status === "ready",
   );
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [replacingChapter, setReplacingChapter] = useState(false);
   const images = useMemo(
     () => sortPublicImages(publication.data?.images ?? []),
     [publication.data],
   );
-  const selectedImages = images.filter((image) => selected.has(image.id));
+  const selectedImages = images.filter((image) =>
+    selectedImageIds.has(image.id),
+  );
   const pageSize = 10;
   const pageImages = images.slice(page * pageSize, page * pageSize + pageSize);
   const selectedImage =
     images.find((image) => image.id === selectedImageId) ?? null;
+  const canReplaceChapter = hasCapability(
+    capabilities.data?.capabilities,
+    "chapters.replace",
+  );
+
+  useEffect(() => {
+    if (!publication.isSuccess) return;
+    const canonicalIds = new Set(images.map((image) => image.id));
+    setSelectedImageId((current) =>
+      current && canonicalIds.has(current) ? current : null,
+    );
+    setSelectedImageIds((current) => {
+      const retained = new Set(
+        [...current].filter((imageId) => canonicalIds.has(imageId)),
+      );
+      return retained.size === current.size ? current : retained;
+    });
+  }, [images, publication.isSuccess]);
   return (
     <>
       <PageHeader
@@ -62,6 +96,16 @@ export default function ChapterImagesPage() {
         description="URLs públicas y orden canónico de imágenes."
         actions={
           <div className="flex flex-wrap gap-2">
+            {canReplaceChapter && chapter.data ? (
+              <button
+                className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-border bg-surface px-3.5 font-medium text-text hover:bg-surface-hover"
+                type="button"
+                onClick={() => setReplacingChapter(true)}
+              >
+                <RefreshCw aria-hidden="true" className="size-4" /> Cambiar
+                capítulo entero
+              </button>
+            ) : null}
             <CopyButton
               className="border-border bg-surface text-text hover:bg-surface-hover"
               value={
@@ -96,8 +140,8 @@ export default function ChapterImagesPage() {
         />
       ) : null}
       {images.length ? (
-        <section className="grid gap-card xl:grid-cols-[minmax(0,3fr)_minmax(300px,1fr)]">
-          <div className="overflow-x-auto rounded-panel border border-border bg-surface">
+        <section className="grid min-h-0 gap-card xl:h-[calc(100vh-12rem)] xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-stretch">
+          <div className="flex min-h-0 flex-col overflow-x-auto rounded-panel border border-border bg-surface">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted">
@@ -105,9 +149,9 @@ export default function ChapterImagesPage() {
                     <input
                       aria-label="Seleccionar todas"
                       type="checkbox"
-                      checked={selected.size === images.length}
+                      checked={selectedImageIds.size === images.length}
                       onChange={(event) =>
-                        setSelected(
+                        setSelectedImageIds(
                           event.target.checked
                             ? new Set(images.map((image) => image.id))
                             : new Set(),
@@ -127,19 +171,30 @@ export default function ChapterImagesPage() {
                   <tr
                     className={`border-b border-border last:border-0 ${selectedImageId === image.id ? "bg-primary-soft" : ""}`}
                     key={image.id}
-                    onClick={() => setSelectedImageId(image.id)}
+                    onClick={() =>
+                      setSelectedImageId((current) =>
+                        current === image.id ? null : image.id,
+                      )
+                    }
                   >
                     <td className="p-3">
                       <input
                         aria-label={`Seleccionar ${image.filename}`}
                         type="checkbox"
-                        checked={selected.has(image.id)}
-                        onChange={() =>
-                          setSelected((current) => {
+                        checked={selectedImageIds.has(image.id)}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) =>
+                          setSelectedImageIds((current) => {
                             const next = new Set(current);
-                            next.has(image.id)
-                              ? next.delete(image.id)
-                              : next.add(image.id);
+                            if (event.target.checked) {
+                              next.add(image.id);
+                              setSelectedImageId(image.id);
+                            } else {
+                              next.delete(image.id);
+                              setSelectedImageId((focused) =>
+                                focused === image.id ? null : focused,
+                              );
+                            }
                             return next;
                           })
                         }
@@ -179,7 +234,7 @@ export default function ChapterImagesPage() {
                 ))}
               </tbody>
             </table>
-            <div className="flex items-center justify-between border-t border-border p-3 text-sm text-muted">
+            <div className="mt-auto flex items-center justify-between border-t border-border p-3 text-sm text-muted">
               <span>
                 {page * pageSize + 1}–
                 {Math.min((page + 1) * pageSize, images.length)} de{" "}
@@ -203,48 +258,89 @@ export default function ChapterImagesPage() {
               </div>
             </div>
           </div>
-          <aside className="max-h-[calc(100vh-12rem)] overflow-y-auto rounded-panel border border-border bg-surface p-5 text-sm text-muted xl:sticky xl:top-4">
+          <aside className="flex min-h-0 flex-col rounded-panel border border-border bg-surface p-4 text-sm text-muted xl:h-full">
             {selectedImage ? (
-              <section>
-                <h2 className="mt-0 text-base text-text">
+              <section className="mb-4 shrink-0">
+                <h2 className="m-0 flex items-center gap-2 text-sm font-semibold text-text xl:col-span-3">
+                  <Image aria-hidden="true" className="size-4 text-primary" />
                   Imagen seleccionada
                 </h2>
-                <img
-                  alt={selectedImage.filename}
-                  className="max-h-48 w-full rounded-control bg-surface-elevated object-contain"
-                  src={selectedImage.url}
-                />
-                <p>{selectedImage.filename}</p>
-                <p>Orden: {selectedImage.sortOrder}</p>
-                <p>{selectedImage.contentType}</p>
-                <SelectedImageReplacementAction
-                  capabilities={capabilities.data?.capabilities}
-                  chapterId={chapterId}
-                  image={selectedImage}
-                />
-                <a
-                  className="inline-flex items-center gap-2 text-primary"
-                  href={selectedImage.url}
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  <Eye aria-hidden="true" className="size-4" /> Abrir URL
-                  pública
-                </a>
+                <div className="grid grid-cols-1 items-start gap-3 xl:grid-cols-[5rem_minmax(0,1fr)_auto]">
+                  {/* biome-ignore lint/performance/noImgElement: canonical public URLs preserve the detail image aspect ratio. */}
+                  <img
+                    alt={selectedImage.filename}
+                    className="h-20 w-20 shrink-0 rounded-control bg-surface-elevated object-contain"
+                    src={selectedImage.url}
+                  />
+                  <div className="min-w-0">
+                    <p className="m-0 truncate font-semibold text-text">
+                      {selectedImage.filename}
+                    </p>
+                    <p className="mb-1 mt-2">
+                      Orden: {selectedImage.sortOrder}
+                    </p>
+                    <p className="mb-1">Formato: {selectedImage.contentType}</p>
+                    <p className="m-0">URL activa: Activa</p>
+                  </div>
+                  <div className="flex w-max flex-col items-stretch gap-2">
+                    <SelectedImageReplacementAction
+                      capabilities={capabilities.data?.capabilities}
+                      chapterId={chapterId}
+                      image={selectedImage}
+                      compact
+                    />
+                    <a
+                      className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-border bg-surface px-3.5 font-medium text-text hover:bg-surface-hover"
+                      href={selectedImage.url}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <Eye aria-hidden="true" className="size-4" /> Abrir URL
+                      pública
+                    </a>
+                  </div>
+                </div>
+                <div className="mt-3 flex gap-2 rounded-control border border-primary bg-primary-soft p-2.5 text-xs text-text xl:col-span-3">
+                  <Info
+                    aria-hidden="true"
+                    className="mt-0.5 size-4 shrink-0 text-primary"
+                  />
+                  <div>
+                    <p className="m-0">
+                      Al reemplazar esta imagen se creará una nueva versión y se
+                      actualizará automáticamente su URL pública.
+                    </p>
+                    <p className="mb-0 mt-1 text-muted">
+                      Formatos: JPG/JPEG, PNG, WEBP o GIF. No se permiten
+                      archivos ZIP.
+                    </p>
+                  </div>
+                </div>
               </section>
-            ) : (
-              <p>Selecciona una imagen en la tabla o el visor.</p>
-            )}
-            <section className="mt-6">
-              <h2 className="text-base text-text">Vista previa del capítulo</h2>
-              <div className="max-h-[55vh] overflow-y-auto rounded-control border border-border">
+            ) : null}
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="mb-3 flex flex-nowrap items-center justify-between gap-3">
+                <h2 className="m-0 flex items-center gap-2 text-sm font-semibold text-text">
+                  <Images aria-hidden="true" className="size-4 text-primary" />{" "}
+                  Vista previa del capítulo
+                </h2>
+                <span className="shrink-0 text-xs font-medium text-primary">
+                  Ajustar ancho ▾
+                </span>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto rounded-control border border-border">
                 {images.map((image) => (
                   <button
-                    className="block w-full border-b border-border p-1 last:border-0"
+                    className={`block w-full border-b border-border p-1 last:border-0 ${selectedImageId === image.id ? "ring-2 ring-inset ring-primary" : ""}`}
                     key={image.id}
                     type="button"
-                    onClick={() => setSelectedImageId(image.id)}
+                    onClick={() =>
+                      setSelectedImageId((current) =>
+                        current === image.id ? null : image.id,
+                      )
+                    }
                   >
+                    {/* biome-ignore lint/performance/noImgElement: canonical public URLs preserve the webtoon image aspect ratio. */}
                     <img
                       alt={image.filename}
                       className="h-auto w-full"
@@ -256,6 +352,16 @@ export default function ChapterImagesPage() {
             </section>
           </aside>
         </section>
+      ) : null}
+      {chapter.data ? (
+        <WholeChapterReplacementDialog
+          chapterId={chapterId}
+          chapterNumber={chapter.data.chapterNumber}
+          open={replacingChapter}
+          seriesId={seriesId}
+          seriesTitle={series.data?.title ?? "Serie"}
+          onOpenChange={setReplacingChapter}
+        />
       ) : null}
     </>
   );

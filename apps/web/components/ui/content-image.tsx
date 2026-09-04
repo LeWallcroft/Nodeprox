@@ -13,7 +13,7 @@ export type ContentImageVariant =
 const sizes: Record<ContentImageVariant, string> = {
   thumbnail: "h-10 w-10",
   cover: "aspect-[16/9] w-full",
-  details: "aspect-[4/3] w-full",
+  details: "h-24 w-28",
   avatar: "h-9 w-9 rounded-full",
   preview: "aspect-square w-full",
 };

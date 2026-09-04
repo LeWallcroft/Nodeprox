@@ -13,6 +13,11 @@ const ALLOWED_METADATA_KEYS = new Set([
   "configKey",
   "result",
   "imageCount",
+  "replacementId",
+  "previousImageCount",
+  "retainedImageCount",
+  "createdImageCount",
+  "retiredImageCount",
   "previousVersion",
   "currentVersion",
 ]);

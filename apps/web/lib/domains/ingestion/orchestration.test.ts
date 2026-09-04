@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  MAX_DIRECT_UPLOAD_CONCURRENCY,
   canEnqueueDirectUpload,
+  MAX_DIRECT_UPLOAD_CONCURRENCY,
   mediaWarningLabel,
   runPool,
   safeBulkUploadConcurrency,
@@ -63,9 +63,12 @@ describe("bulk upload orchestration", () => {
   it.each([
     [undefined, 3],
     [1, 1],
-    [5, 5],
+    [2, 2],
+    [3, 3],
+    [4, 3],
+    [5, 3],
     [0, 1],
-    [6, 5],
+    [6, 3],
     [2.5, 3],
   ])(
     "keeps browser concurrency within the approved range",
@@ -74,9 +77,13 @@ describe("bulk upload orchestration", () => {
     },
   );
 
-  it.each([1, 3, 5])(
+  it.each([
+    [1, 1],
+    [3, 3],
+    [5, 3],
+  ])(
     "observes at most %i simultaneous direct uploads",
-    async (concurrency) => {
+    async (configuredConcurrency, expectedConcurrency) => {
       let active = 0;
       let maximum = 0;
       const jobs = Array.from({ length: 12 }, () => async () => {
@@ -85,10 +92,51 @@ describe("bulk upload orchestration", () => {
         await Promise.resolve();
         active -= 1;
       });
-      await runPool(jobs, concurrency);
-      expect(maximum).toBe(concurrency);
+      await runPool(jobs, configuredConcurrency);
+      expect(maximum).toBe(expectedConcurrency);
     },
   );
+
+  it("starts exactly one queued transfer when a direct-upload slot is freed", async () => {
+    const started: number[] = [];
+    const releases: (() => void)[] = [];
+    const jobs = Array.from({ length: 4 }, (_, index) => async () => {
+      started.push(index);
+      await new Promise<void>((resolve) => releases.push(resolve));
+    });
+
+    const running = runPool(jobs, 3);
+    await vi.waitFor(() => expect(started).toEqual([0, 1, 2]));
+    releases.shift()?.();
+    await vi.waitFor(() => expect(started).toEqual([0, 1, 2, 3]));
+    while (releases.length) releases.shift()?.();
+    await running;
+  });
+
+  it("continues queued direct uploads after a failed transfer releases its slot", async () => {
+    const completed: number[] = [];
+    const jobs = [
+      async () => {
+        try {
+          throw new Error("direct-upload-failed");
+        } catch {
+          // UploadQueueProvider treats one failed item as terminal and frees its slot.
+        }
+      },
+      async () => {
+        completed.push(1);
+      },
+      async () => {
+        completed.push(2);
+      },
+      async () => {
+        completed.push(3);
+      },
+    ];
+
+    await runPool(jobs, 3);
+    expect(completed).toEqual([1, 2, 3]);
+  });
 
   it("rehydrates only minimal queue metadata and drops secrets or presigned URLs", () => {
     expect(

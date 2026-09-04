@@ -56,6 +56,12 @@ function isAllowedRoute(path: string[], method: string): boolean {
     return method === "DELETE";
   if (/^chapters\/[^/]+\/helper-candidates$/.test(value))
     return method === "GET";
+  if (/^chapters\/[^/]+\/replacement-session$/.test(value))
+    return method === "POST";
+  if (/^chapters\/[^/]+\/replacements\/[^/]+\/complete$/.test(value))
+    return method === "POST";
+  if (/^chapters\/[^/]+\/replacements\/[^/]+$/.test(value))
+    return method === "GET";
   if (/^chapters\/[^/]+\/uploads\/initiate$/.test(value))
     return method === "POST";
   if (/^chapters\/[^/]+\/uploads\/[^/]+\/(complete|abort)$/.test(value))

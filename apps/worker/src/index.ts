@@ -1,7 +1,5 @@
 import "dotenv/config";
 import { join } from "node:path";
-import { Worker } from "bullmq";
-import pino from "pino";
 import {
   loadConfig,
   loadMediaEffectsConfig,
@@ -9,17 +7,24 @@ import {
   loadStorageConfig,
 } from "@nodeprox/config";
 import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
+import { Worker } from "bullmq";
+import { inArray } from "drizzle-orm";
+import pino from "pino";
 import { createDatabase } from "../../../database/client.js";
 import { systemConfig } from "../../../database/schema/index.js";
-import { inArray } from "drizzle-orm";
-import { ChapterProcessingService } from "./processing/application/chapter-processing.service.js";
-import { UnzipperExtractor } from "./processing/infrastructure/zip/unzipper.extractor.js";
-import { DrizzleProcessingRepository } from "./processing/infrastructure/persistence/drizzle/processing.repository.js";
 import { ChapterDeletionService } from "./deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "./deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import { MediaEffectProcessor } from "./media-effects/application/media-effect.processor.js";
 import { CloudflareCdnInvalidationAdapter } from "./media-effects/infrastructure/cloudflare-cdn-invalidation.adapter.js";
 import { DrizzleMediaEffectRepository } from "./media-effects/infrastructure/persistence/drizzle/media-effect.repository.js";
+import { ChapterProcessingService } from "./processing/application/chapter-processing.service.js";
+import { ChapterReplacementProcessingService } from "./processing/chapter-replacements/application/chapter-replacement-processing.service.js";
+import { DrizzleChapterReplacementProcessingWorkerRepository } from "./processing/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
+import { DrizzleProcessingRepository } from "./processing/infrastructure/persistence/drizzle/processing.repository.js";
+import { UnzipperExtractor } from "./processing/infrastructure/zip/unzipper.extractor.js";
+import { StorageCleanupProcessor } from "./storage-cleanup/application/storage-cleanup.processor.js";
+import { DrizzleStorageCleanupRepository } from "./storage-cleanup/infrastructure/persistence/drizzle/storage-cleanup.repository.js";
+
 const config = loadConfig();
 const logger = pino({
   level: config.LOG_LEVEL,
@@ -61,6 +66,14 @@ const mediaEffects = mediaEffectsConfig
   : null;
 mediaEffects?.start();
 const repository = new DrizzleProcessingRepository(database.db);
+const replacementRepository =
+  new DrizzleChapterReplacementProcessingWorkerRepository(database.db);
+const storageCleanup = new StorageCleanupProcessor(
+  new DrizzleStorageCleanupRepository(database.db),
+  storage,
+  logger,
+);
+storageCleanup.start();
 const deletion = new ChapterDeletionService(
   new DrizzleChapterDeletionRepository(database.db),
   storage,
@@ -82,6 +95,8 @@ const worker = new Worker(
       originRequestId: job.data.originRequestId,
       chapterId: job.data.chapterId,
       uploadId: "uploadId" in job.data ? job.data.uploadId : undefined,
+      replacementId:
+        "replacementId" in job.data ? job.data.replacementId : undefined,
     };
     logger.info(correlation, "Worker job started");
     if (job.name === "chapter.delete") {
@@ -113,13 +128,22 @@ const worker = new Worker(
       warnWidthPx: warnings.get("upload_warning_width_px") ?? 4000,
       warnHeightPx: warnings.get("upload_warning_height_px") ?? 12000,
     });
-    const finalAttempt = job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1);
-    await new ChapterProcessingService(
-      repository,
-      storage,
-      extractor,
-      repository,
-    ).process(job.data, finalAttempt);
+    if (job.name === "chapter.replacement.process") {
+      await new ChapterReplacementProcessingService(
+        replacementRepository,
+        storage,
+        extractor,
+      ).process(job.data);
+    } else {
+      const finalAttempt =
+        job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1);
+      await new ChapterProcessingService(
+        repository,
+        storage,
+        extractor,
+        repository,
+      ).process(job.data, finalAttempt);
+    }
     logger.info(correlation, "Worker job completed");
   },
   { connection, concurrency: 1 },
@@ -157,6 +181,7 @@ worker.on("failed", (job, error) => {
       originRequestId: job?.data.originRequestId,
       chapterId: job?.data.chapterId,
       uploadId: job?.data.uploadId,
+      replacementId: job?.data.replacementId,
       errorName: error.name,
       errorMessage: sanitizeDiagnosticText(error.message),
     },
@@ -165,11 +190,13 @@ worker.on("failed", (job, error) => {
 });
 process.once("SIGTERM", async () => {
   mediaEffects?.stop();
+  storageCleanup.stop();
   await worker.close();
   await database.sql.end();
 });
 process.once("SIGINT", async () => {
   mediaEffects?.stop();
+  storageCleanup.stop();
   await worker.close();
   await database.sql.end();
 });

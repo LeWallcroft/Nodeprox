@@ -72,10 +72,12 @@ export function SelectedImageReplacementAction({
   chapterId,
   image,
   capabilities,
+  compact = false,
 }: {
   chapterId: string;
   image: SelectedImage | null;
   capabilities: readonly string[] | undefined;
+  compact?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -106,7 +108,7 @@ export function SelectedImageReplacementAction({
   }
 
   return (
-    <div className="mt-4 grid gap-2">
+    <div className={compact ? "grid gap-2" : "mt-4 grid gap-2"}>
       <input
         accept={acceptedImageContentTypes}
         aria-label="Seleccionar imagen de reemplazo"
@@ -121,7 +123,7 @@ export function SelectedImageReplacementAction({
         aria-label={`Cambiar imagen${image ? `: ${image.filename}` : ""}`}
         disabled={!canReplace || isBusy}
         type="button"
-        variant="secondary"
+        variant={compact ? "primary" : "secondary"}
         onClick={() => inputRef.current?.click()}
       >
         {isBusy ? (
@@ -131,6 +133,11 @@ export function SelectedImageReplacementAction({
         )}
         {replacementActionLabel(replacement.phase)}
       </Button>
+      {!compact ? (
+        <p className="m-0 text-xs text-muted">
+          Formatos: JPG/JPEG, PNG, WEBP o GIF. No se permiten archivos ZIP.
+        </p>
+      ) : null}
       {validationError ? (
         <p className="text-[13px] text-danger" role="alert">
           {validationError}
