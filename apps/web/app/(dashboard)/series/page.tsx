@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { errorMessage } from "../../../components/domains/feedback";
+import { SeriesContextPanel } from "../../../components/domains/series/series-context-panel";
 import { SeriesDetailPanel } from "../../../components/domains/series/series-detail-panel";
 import { SeriesForm } from "../../../components/domains/series/series-form";
 import { SeriesList } from "../../../components/domains/series/series-list";
@@ -15,10 +16,11 @@ import { PageSection } from "../../../components/ui/page-section";
 import { SearchInput } from "../../../components/ui/search-input";
 import { hasCapability } from "../../../lib/auth/visibility";
 import { useCapabilities } from "../../../lib/domains/auth/hooks";
+import { useChapterList } from "../../../lib/domains/chapters/hooks";
 import {
-  useCreateSeries,
   useAssignSeriesUploader,
   useClearSeriesUploader,
+  useCreateSeries,
   useDeleteSeries,
   useSeries,
   useSeriesCapabilities,
@@ -42,6 +44,7 @@ export default function SeriesPage() {
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const selectedQuery = useSeries(selectedId ?? "");
+  const contextualChaptersQuery = useChapterList(selectedId ?? "");
   const selectedCapabilities = useSeriesCapabilities(selectedId ?? "");
   const update = useUpdateSeries(selectedId ?? "");
   const canManageAssignment = hasCapability(
@@ -149,7 +152,7 @@ export default function SeriesPage() {
         />
       ) : null}
       {listQuery.isSuccess && listQuery.data.length > 0 ? (
-        <section className="grid items-start gap-card xl:grid-cols-[minmax(0,3fr)_minmax(320px,1fr)]">
+        <section className="grid min-h-0 items-start gap-card xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.38fr)]">
           <div>
             {items.length ? (
               <SeriesList
@@ -167,7 +170,7 @@ export default function SeriesPage() {
               />
             )}
           </div>
-          <aside aria-label="Detalle de la Series">
+          <SeriesContextPanel open={Boolean(selectedId)}>
             {selectedId && selectedQuery.isPending ? (
               <LoadingState label="Cargando detalle de la Series" />
             ) : null}
@@ -202,6 +205,8 @@ export default function SeriesPage() {
                     ? uploaderCandidates.error
                     : null
                 }
+                chapters={contextualChaptersQuery.data ?? []}
+                chaptersLoading={contextualChaptersQuery.isPending}
                 assignmentPending={
                   assignUploader.isPending || clearUploader.isPending
                 }
@@ -215,7 +220,7 @@ export default function SeriesPage() {
                 }}
               />
             ) : null}
-          </aside>
+          </SeriesContextPanel>
         </section>
       ) : null}
     </>

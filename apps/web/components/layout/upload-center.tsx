@@ -1,7 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { FileArchive, LoaderCircle, Upload, X } from "lucide-react";
+import Link from "next/link";
 import { useRef, useState } from "react";
 import type { ImportBatchProjection } from "../../lib/domains/ingestion/types";
 import { useUploadQueue } from "../providers/upload-queue-provider";
@@ -21,7 +21,7 @@ export function UploadCenter() {
       {open ? (
         <section
           aria-label="Centro de cargas"
-          className="mb-3 w-[min(30rem,calc(100vw-1.5rem))] rounded-panel border border-border bg-surface-elevated p-4 shadow-panel"
+          className="absolute bottom-[calc(100%+0.75rem)] right-0 w-[min(30rem,calc(100vw-1.5rem))] rounded-panel border border-border bg-surface-elevated p-4 shadow-panel"
         >
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>

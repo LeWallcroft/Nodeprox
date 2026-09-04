@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
+import { SeriesContextPanel } from "./series-context-panel";
 import { SeriesDetailPanel } from "./series-detail-panel";
 import { SeriesForm } from "./series-form";
 import { SeriesList } from "./series-list";
@@ -69,6 +70,45 @@ describe("Series management presentation", () => {
     expect(markup).toContain("Eliminar serie");
     expect(markup).toContain("uploader@example.com");
     expect(markup).toContain("Cambiar responsable");
+    expect(markup).toContain('href="/series/series-1/chapters"');
+  });
+
+  it("renders a query-backed contextual Chapters summary inside the side panel", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesContextPanel open>
+        <SeriesDetailPanel
+          series={series}
+          capabilities={["series.read"]}
+          chapters={[
+            {
+              id: "chapter-0-5",
+              seriesId: series.id,
+              chapterNumber: 0.5,
+              publicKey: "0-5",
+              title: null,
+              status: "processing",
+              createdBy: "user-1",
+              createdAt: "2026-08-01T00:00:00.000Z",
+              updatedAt: "2026-08-02T00:00:00.000Z",
+            },
+          ]}
+          onClose={() => undefined}
+          onUpdate={async () => undefined}
+          onDelete={async () => undefined}
+          candidates={[]}
+          candidatesLoading={false}
+          candidatesError={null}
+          assignmentPending={false}
+          updatePending={false}
+          deletePending={false}
+          onAssignUploader={async () => undefined}
+          onClearUploader={async () => undefined}
+        />
+      </SeriesContextPanel>,
+    );
+    expect(markup).toContain("Panel contextual de la serie");
+    expect(markup).toContain("Chapters recientes");
+    expect(markup).toContain("Capítulo 0.5");
     expect(markup).toContain('href="/series/series-1/chapters"');
   });
 

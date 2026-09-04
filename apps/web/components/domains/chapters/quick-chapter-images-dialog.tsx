@@ -8,6 +8,7 @@ import {
 } from "../../../lib/domains/publication/utils";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
+import { ContentImage } from "../../ui/content-image";
 import { CopyButton } from "../../ui/copy-button";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
@@ -57,7 +58,7 @@ export function QuickChapterImagesDialog({
             href={`/series/${seriesId}/chapters/${chapterId}/images`}
             onClick={onClose}
           >
-            Gestionar imágenes
+            Gestionar capítulo
           </Link>
         </div>
       }
@@ -73,31 +74,49 @@ export function QuickChapterImagesDialog({
         <p className="m-0 text-sm text-muted">No hay imágenes publicadas.</p>
       ) : null}
       {images.length ? (
-        <ol className="grid gap-2">
-          {images.map((image) => (
-            <li
-              className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)_auto] items-center gap-3 rounded-control border border-border p-2"
-              key={image.id}
-            >
-              {/* biome-ignore lint/performance/noImgElement: URL comes from the public projection. */}
-              <img
-                alt={image.filename}
-                className="h-12 w-12 rounded-control object-contain"
-                src={image.url}
-              />
-              <div className="min-w-0">
-                <p className="m-0 truncate text-sm">{image.filename}</p>
-                <p className="m-0 truncate text-xs text-muted">
-                  {image.contentType} · {image.url}
-                </p>
-              </div>
-              <CopyButton
-                className="border-border bg-surface text-text hover:bg-surface-hover"
-                value={image.url}
-              />
-            </li>
-          ))}
-        </ol>
+        <div className="overflow-x-auto rounded-control border border-border">
+          <table className="w-full min-w-[620px] text-sm">
+            <thead>
+              <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted">
+                <th className="p-3">Imagen</th>
+                <th className="p-3">Número</th>
+                <th className="p-3">Estado</th>
+                <th className="p-3">URL</th>
+                <th className="p-3">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {images.map((image) => (
+                <tr
+                  className="border-b border-border last:border-0"
+                  key={image.id}
+                >
+                  <td className="p-3">
+                    <ContentImage
+                      alt={image.filename}
+                      src={image.url}
+                      variant="thumbnail"
+                    />
+                  </td>
+                  <td className="p-3">{image.sortOrder}</td>
+                  <td className="p-3 text-muted">Listo</td>
+                  <td
+                    className="max-w-56 truncate p-3 text-muted"
+                    title={image.url}
+                  >
+                    {image.url}
+                  </td>
+                  <td className="p-3">
+                    <CopyButton
+                      className="border-border bg-surface text-text hover:bg-surface-hover"
+                      value={image.url}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : null}
     </AppDialog>
   );

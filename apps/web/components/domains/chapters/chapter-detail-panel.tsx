@@ -1,21 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
 import { Images, Pencil, Trash2, Upload, X } from "lucide-react";
+import Link from "next/link";
+import { useState } from "react";
 import { hasCapability } from "../../../lib/auth/visibility";
 import type {
   Chapter,
   ChapterInput,
 } from "../../../lib/domains/chapters/types";
+import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
+import { ConfirmationDialog } from "../../ui/confirmation-dialog";
 import { EmptyState } from "../../ui/empty-state";
 import { StatusBadge } from "../../ui/status-badge";
 import { UploadForm } from "../uploads/upload-form";
 import { ChapterForm } from "./chapter-form";
-import { AppDialog } from "../../ui/app-dialog";
-import { ConfirmationDialog } from "../../ui/confirmation-dialog";
 
 function toneForStatus(status: Chapter["status"]) {
   if (status === "ready") return "success" as const;
@@ -137,7 +137,7 @@ export function ChapterDetailPanel({
           className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-border bg-surface-elevated px-3.5 font-medium text-text hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
           href={`/series/${chapter.seriesId}/chapters/${chapter.id}/images`}
         >
-          <Images aria-hidden="true" className="size-4" /> Gestionar imágenes
+          <Images aria-hidden="true" className="size-4" /> Gestionar capítulo
         </Link>
         {canUpload && !deleting ? (
           <Button

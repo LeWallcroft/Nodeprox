@@ -1,23 +1,24 @@
 "use client";
 
+import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
 import { hasCapability } from "../../../lib/auth/visibility";
+import type { Chapter } from "../../../lib/domains/chapters/types";
 import type {
   Series,
   SeriesInput,
   SeriesUploaderCandidate,
 } from "../../../lib/domains/series/types";
+import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
-import { EmptyState } from "../../ui/empty-state";
-import { SeriesForm } from "./series-form";
-import { SeriesCoverPreview } from "./series-cover-preview";
-import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
-import { AppDialog } from "../../ui/app-dialog";
 import { ConfirmationDialog } from "../../ui/confirmation-dialog";
+import { EmptyState } from "../../ui/empty-state";
+import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
+import { SeriesCoverPreview } from "./series-cover-preview";
+import { SeriesForm } from "./series-form";
 
 export function SeriesDetailPanel({
   series,
@@ -33,6 +34,8 @@ export function SeriesDetailPanel({
   onClearUploader,
   updatePending,
   deletePending,
+  chapters = [],
+  chaptersLoading = false,
 }: {
   series: Series | null;
   capabilities: readonly string[] | undefined;
@@ -49,6 +52,8 @@ export function SeriesDetailPanel({
   onClearUploader: () => Promise<void>;
   updatePending: boolean;
   deletePending: boolean;
+  chapters?: readonly Chapter[];
+  chaptersLoading?: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -140,6 +145,43 @@ export function SeriesDetailPanel({
           </dd>
         </div>
       </dl>
+      <section aria-labelledby="series-contextual-chapters" className="mt-6">
+        <div className="flex items-center justify-between gap-3">
+          <h3
+            className="m-0 text-sm font-semibold"
+            id="series-contextual-chapters"
+          >
+            Chapters recientes
+          </h3>
+          {canViewChapters ? (
+            <Link
+              className="text-sm font-medium text-primary hover:underline"
+              href={`/series/${series.id}/chapters`}
+            >
+              Ver todos
+            </Link>
+          ) : null}
+        </div>
+        {chaptersLoading ? (
+          <p className="mt-2 text-sm text-muted">Cargando Chapters…</p>
+        ) : chapters.length ? (
+          <ul className="mt-2 grid gap-2 p-0" aria-label="Chapters de la serie">
+            {chapters.slice(0, 5).map((chapter) => (
+              <li
+                className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface-elevated px-3 py-2 text-sm"
+                key={chapter.id}
+              >
+                <span className="font-medium">
+                  Capítulo {chapter.chapterNumber}
+                </span>
+                <span className="text-muted">{chapter.status}</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-2 text-sm text-muted">No hay Chapters todavía.</p>
+        )}
+      </section>
       <div className="mt-5 grid gap-2">
         {canViewChapters ? (
           <Link

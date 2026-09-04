@@ -20,6 +20,15 @@ export type LockedLogicalImage = {
 
 export type NewMediaVersion = Omit<CurrentMediaVersion, "id">;
 
+export type CanonicalImageReplacementResult = {
+  imageId: string;
+  versionId: string;
+  version: number;
+  filename: string;
+  storageKey: string;
+  publicUrl: string;
+};
+
 export interface MediaReplacementTransactionPort {
   readonly image: LockedLogicalImage;
   cutover(input: {
@@ -29,10 +38,20 @@ export interface MediaReplacementTransactionPort {
     next: NewMediaVersion;
     oldPublicUrl: string;
   }): Promise<{ versionId: string }>;
+  completeReplacementOperation(input: {
+    operationId: string;
+    imageId: string;
+    resultImageVersionId: string;
+    completedAt: Date;
+  }): Promise<void>;
 }
 
 export interface MediaReplacementRepositoryPort {
-  findChapterId(imageId: string): Promise<string | null>;
+  findCandidateContext(imageId: string): Promise<{
+    chapterId: string;
+    currentStorageKey: string;
+    currentContentType: string;
+  } | null>;
   withLockedImage<T>(
     imageId: string,
     work: (transaction: MediaReplacementTransactionPort) => Promise<T>,

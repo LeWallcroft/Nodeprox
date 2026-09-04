@@ -2,14 +2,16 @@ import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { StoragePort } from "@nodeprox/storage/port";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
-import type { ChapterImageAuthorizationPort } from "../ports.js";
+import { createImageCandidateStorageKey } from "../../domain/image-candidate-storage-key.js";
 import type {
   MediaReplacementObservabilityPort,
   MediaReplacementRepositoryPort,
 } from "../media-replacement.ports.js";
-import { MediaStorageKey } from "../../domain/media-storage-key.js";
-import { MediaVersion } from "../../domain/media-version.js";
-import { PublicMediaUrl } from "../../domain/public-media-url.js";
+import type { ChapterImageAuthorizationPort } from "../ports.js";
+import {
+  ActivateImageCandidateService,
+  ImageCandidateActivationNotFoundError,
+} from "./activate-image-candidate.service.js";
 
 export class ImageReplacementNotFoundError extends Error {}
 export class ImageReplacementDeniedError extends Error {}
@@ -17,13 +19,20 @@ export class ImageReplacementInvalidError extends Error {}
 export class ImageReplacementStorageError extends Error {}
 
 export class ReplaceImageService {
+  private readonly activator: Pick<ActivateImageCandidateService, "execute">;
+
   constructor(
     private readonly repository: MediaReplacementRepositoryPort,
     private readonly authorization: ChapterImageAuthorizationPort,
     private readonly storage: StoragePort,
-    private readonly publicMediaOrigin: string,
+    publicMediaOrigin: string,
     private readonly observability: MediaReplacementObservabilityPort,
-  ) {}
+    activator?: Pick<ActivateImageCandidateService, "execute">,
+  ) {
+    this.activator =
+      activator ??
+      new ActivateImageCandidateService(repository, publicMediaOrigin);
+  }
 
   async execute(input: {
     context: AuthorizationContext;
@@ -41,11 +50,13 @@ export class ReplaceImageService {
     )
       throw new ImageReplacementInvalidError();
 
-    const chapterId = await this.repository.findChapterId(input.imageId);
-    if (!chapterId) throw new ImageReplacementNotFoundError();
+    const candidateContext = await this.repository.findCandidateContext(
+      input.imageId,
+    );
+    if (!candidateContext) throw new ImageReplacementNotFoundError();
     const decision = await this.authorization.check({
       context: input.context,
-      chapterId,
+      chapterId: candidateContext.chapterId,
       permission: "images.replace",
     });
     if (decision.reason === "not-found")
@@ -53,82 +64,44 @@ export class ReplaceImageService {
     if (!decision.allowed) throw new ImageReplacementDeniedError();
 
     const operationId = randomUUID();
-    let candidateKey: string | undefined;
+    const contentType = normalizeContentType(input.contentType);
+    if (contentType !== candidateContext.currentContentType)
+      throw new ImageReplacementInvalidError();
+    const candidateKey = createImageCandidateStorageKey({
+      replacementId: operationId,
+      currentStorageKey: candidateContext.currentStorageKey,
+      contentType,
+    });
     let objectWritten = false;
     try {
-      const result = await this.repository.withLockedImage(
-        input.imageId,
-        async (transaction) => {
-          const current = transaction.image.current;
-          if (normalizeContentType(input.contentType) !== current.contentType)
-            throw new ImageReplacementInvalidError();
+      const stored = await this.storage.put({
+        key: candidateKey,
+        body: input.body,
+        contentType,
+        sizeBytes: input.sizeBytes,
+      });
+      objectWritten = true;
+      const storedContentType = normalizeContentType(stored.contentType);
+      if (
+        stored.key !== candidateKey ||
+        stored.sizeBytes !== input.sizeBytes ||
+        storedContentType !== contentType ||
+        !(await this.storage.exists(candidateKey))
+      )
+        throw new ImageReplacementStorageError();
 
-          const nextVersion = MediaVersion.parse(current.version).next();
-          const candidate = MediaStorageKey.forVersion({
-            seriesSlug: transaction.image.seriesSlug,
-            chapterPublicKey: transaction.image.chapterPublicKey,
-            logicalFilename: transaction.image.logicalFilename,
-            version: nextVersion,
-          });
-          candidateKey = candidate.storageKey;
-          const stored = await this.storage.put({
-            key: candidate.storageKey,
-            body: input.body,
-            contentType: current.contentType,
-            sizeBytes: input.sizeBytes,
-          });
-          objectWritten = true;
-          if (
-            stored.key !== candidate.storageKey ||
-            stored.sizeBytes !== input.sizeBytes ||
-            normalizeContentType(stored.contentType) !== current.contentType ||
-            !(await this.storage.exists(candidate.storageKey))
-          )
-            throw new ImageReplacementStorageError();
-
-          const oldPublicUrl = PublicMediaUrl.fromImage(
-            this.publicMediaOrigin,
-            {
-              seriesPublicSlug: transaction.image.seriesSlug,
-              chapterPublicKey: transaction.image.chapterPublicKey,
-              filename: current.physicalFilename,
-              contentType: current.contentType,
-            },
-          ).toString();
-          const cutover = await transaction.cutover({
-            operationId,
-            actorId: input.context.userId,
-            ...(input.requestId ? { requestId: input.requestId } : {}),
-            oldPublicUrl,
-            next: {
-              version: nextVersion.toNumber(),
-              physicalFilename: candidate.physicalFilename,
-              storageKey: candidate.storageKey,
-              extension: current.extension,
-              contentType: current.contentType,
-              sizeBytes: input.sizeBytes,
-              checksum: input.checksum,
-            },
-          });
-          return {
-            imageId: transaction.image.id,
-            versionId: cutover.versionId,
-            version: nextVersion.toNumber(),
-            filename: candidate.physicalFilename,
-            storageKey: candidate.storageKey,
-            publicUrl: PublicMediaUrl.fromImage(this.publicMediaOrigin, {
-              seriesPublicSlug: transaction.image.seriesSlug,
-              chapterPublicKey: transaction.image.chapterPublicKey,
-              filename: candidate.physicalFilename,
-              contentType: current.contentType,
-            }).toString(),
-          };
-        },
-      );
-      if (!result) throw new ImageReplacementNotFoundError();
-      return result;
+      return await this.activator.execute({
+        context: input.context,
+        imageId: input.imageId,
+        candidateStorageKey: stored.key,
+        contentType: storedContentType,
+        sizeBytes: stored.sizeBytes,
+        checksum: input.checksum,
+        operationId,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+      });
     } catch (error) {
-      if (objectWritten && candidateKey) {
+      if (objectWritten) {
         try {
           await this.storage.delete(candidateKey);
         } catch (cleanupError) {
@@ -151,6 +124,8 @@ export class ReplaceImageService {
           }
         }
       }
+      if (error instanceof ImageCandidateActivationNotFoundError)
+        throw new ImageReplacementNotFoundError();
       throw error;
     }
   }

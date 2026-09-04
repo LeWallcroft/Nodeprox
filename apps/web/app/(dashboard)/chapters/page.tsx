@@ -1,12 +1,13 @@
 "use client";
 
+import { Eye, Images } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Eye, Images } from "lucide-react";
-import { errorMessage } from "../../../components/domains/feedback";
 import { QuickChapterImagesDialog } from "../../../components/domains/chapters/quick-chapter-images-dialog";
+import { errorMessage } from "../../../components/domains/feedback";
 import { PageHeader } from "../../../components/layout/page-header";
 import { Button } from "../../../components/ui/button";
+import { ContentImage } from "../../../components/ui/content-image";
 import { DataTable } from "../../../components/ui/data-table";
 import { EmptyState } from "../../../components/ui/empty-state";
 import { ErrorState } from "../../../components/ui/error-state";
@@ -15,8 +16,8 @@ import { SearchInput } from "../../../components/ui/search-input";
 import { StatusBadge } from "../../../components/ui/status-badge";
 import { useGlobalChapterList } from "../../../lib/domains/chapters/hooks";
 import {
-  chapterStatuses,
   type ChapterStatus,
+  chapterStatuses,
 } from "../../../lib/domains/chapters/types";
 
 function tone(status: ChapterStatus) {
@@ -130,7 +131,16 @@ export default function GlobalChaptersPage() {
                     {chapter.series.slug}
                   </span>
                 </td>
-                <td className="p-3">{chapter.chapterNumber}</td>
+                <td className="p-3">
+                  <div className="flex items-center gap-3">
+                    <ContentImage
+                      alt={`Vista previa del capítulo ${chapter.chapterNumber}`}
+                      src={null}
+                      variant="thumbnail"
+                    />
+                    <span>{chapter.chapterNumber}</span>
+                  </div>
+                </td>
                 <td className="p-3 text-muted">{chapter.title ?? "—"}</td>
                 <td className="p-3">
                   <StatusBadge

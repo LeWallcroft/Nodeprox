@@ -69,7 +69,7 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("Editar capítulo");
     expect(markup).toContain("Eliminar capítulo");
     expect(markup).toContain("Subir ZIP");
-    expect(markup).toContain("Gestionar imágenes");
+    expect(markup).toContain("Gestionar capítulo");
     expect(markup).not.toContain("Publicación e imágenes");
     expect(markup).toContain("bg-destructive-surface");
   });
