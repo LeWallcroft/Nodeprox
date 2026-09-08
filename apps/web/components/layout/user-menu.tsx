@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { AuthenticatedUserView } from "../../lib/api/types";
 import { useLogout } from "../../lib/domains/auth/hooks";
@@ -23,6 +24,12 @@ export function UserMenu({ user }: { user: AuthenticatedUserView | null }) {
         </p>
         <p className="m-0 text-xs text-muted">Cuenta activa</p>
       </div>
+      <Link
+        className="inline-flex min-h-control items-center justify-center rounded-control border border-border bg-surface-elevated px-3 font-semibold text-text transition-colors hover:bg-sidebar-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        href="/account/integrations"
+      >
+        Cuenta
+      </Link>
       <button
         className="inline-flex min-h-control items-center justify-center rounded-control border border-border bg-surface-elevated px-3 font-semibold text-text transition-colors hover:bg-sidebar-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-60"
         type="button"

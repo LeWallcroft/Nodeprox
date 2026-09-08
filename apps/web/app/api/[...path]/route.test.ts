@@ -118,6 +118,40 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("proxies the authenticated Discord link-code endpoint only for POST", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 201 }));
+    vi.stubGlobal("fetch", backend);
+
+    const allowed = await POST(
+      new Request("http://localhost:3000/api/me/discord/link-code", {
+        method: "POST",
+      }),
+      context(["me", "discord", "link-code"]),
+    );
+    const denied = await GET(
+      new Request("http://localhost:3000/api/me/discord/link-code"),
+      context(["me", "discord", "link-code"]),
+    );
+    const arbitrary = await POST(
+      new Request("http://localhost:3000/api/me/discord/raw", {
+        method: "POST",
+      }),
+      context(["me", "discord", "raw"]),
+    );
+
+    expect(allowed.status).toBe(201);
+    expect(denied.status).toBe(404);
+    expect(arbitrary.status).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(1);
+    expect(backend).toHaveBeenCalledWith(
+      "http://localhost:3001/me/discord/link-code",
+      expect.objectContaining({ method: "POST" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("supports PATCH, DELETE and upload metadata without proxying ZIP bytes", async () => {
     const backend = vi
       .fn()
