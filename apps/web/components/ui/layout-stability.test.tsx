@@ -26,6 +26,30 @@ describe("paginated master-detail layout stability", () => {
     expect(contextualChapters).toContain("mt-4 grid gap-4 lg:grid-cols-3");
   });
 
+  it("uses the shared non-expanding viewport and pagination across paginated master-detail tables", () => {
+    const dataTable = readFileSync(
+      "apps/web/components/ui/data-table.tsx",
+      "utf8",
+    );
+    const pagination = readFileSync(
+      "apps/web/components/ui/pagination.tsx",
+      "utf8",
+    );
+    const imageManagement = readFileSync(
+      "apps/web/app/(dashboard)/series/[seriesId]/chapters/[chapterId]/images/page.tsx",
+      "utf8",
+    );
+
+    expect(dataTable).toContain("data-paginated-table-viewport");
+    expect(dataTable).toContain("DataTableEmptyRow");
+    expect(dataTable).not.toContain("border-collapse ${minHeightClassName");
+    expect(pagination).toContain("totalItems");
+    expect(pagination).toContain("Página anterior");
+    expect(pagination).toContain("Página siguiente");
+    expect(imageManagement).toContain("<Pagination");
+    expect(imageManagement).not.toContain("page * pageSize + 1");
+  });
+
   it("keeps Global Chapters metrics visual-only", () => {
     const globalChapters = readFileSync(
       "apps/web/app/(dashboard)/chapters/page.tsx",

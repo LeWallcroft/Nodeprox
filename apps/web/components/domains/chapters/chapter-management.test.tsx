@@ -89,8 +89,29 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("25");
     expect(markup).toContain("Inicio");
     expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('role="button"');
+    expect(markup).toContain("cursor-pointer");
     expect(markup).toContain('aria-label="Vista rápida de imágenes"');
     expect(markup).toContain('title="Vista rápida de imágenes"');
+    expect(
+      readFileSync(
+        "apps/web/components/domains/chapters/chapter-list.tsx",
+        "utf8",
+      ),
+    ).toContain("hover:bg-surface-elevated");
+  });
+
+  it("keeps global Series titles readable while row actions stop selection propagation", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/chapters/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toContain("min-w-[14rem]");
+    expect(page).toContain("line-clamp-2");
+    expect(page).toContain("max-w-[18rem] truncate");
+    expect(page).toContain("stopTableRowSelection");
+    expect(page).toContain("getSelectableTableRowProps");
   });
 
   it("uses contextual capabilities for Chapter actions and direct upload", () => {

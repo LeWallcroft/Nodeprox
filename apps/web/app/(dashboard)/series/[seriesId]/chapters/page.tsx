@@ -255,35 +255,25 @@ export default function SeriesChaptersPage() {
                 <option>Responsable: No disponible</option>
               </select>
             </Card>
-            {items.length ? (
-              <>
-                <ChapterList
-                  items={items}
-                  selectedId={selectedChapterId}
-                  minTableHeightClassName="lg:min-h-[700px]"
-                  onSelect={(chapterId) => {
-                    setActionError(null);
-                    setSelectedChapterId(chapterId);
-                  }}
-                  onQuickImages={(chapter) => setQuickChapterId(chapter.id)}
-                />
-                <div className="mt-3 flex justify-end">
-                  <Pagination
-                    page={currentPage}
-                    totalPages={Math.max(
-                      1,
-                      Math.ceil(allItems.length / pageSize),
-                    )}
-                    onChange={setPage}
-                  />
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                title="Sin coincidencias"
-                description="No hay capítulos que coincidan con los filtros actuales."
+            <ChapterList
+              items={items}
+              selectedId={selectedChapterId}
+              minTableHeightClassName="lg:min-h-[700px]"
+              onSelect={(chapterId) => {
+                setActionError(null);
+                setSelectedChapterId(chapterId);
+              }}
+              onQuickImages={(chapter) => setQuickChapterId(chapter.id)}
+            />
+            <div className="mt-3">
+              <Pagination
+                page={currentPage}
+                totalPages={Math.max(1, Math.ceil(allItems.length / pageSize))}
+                totalItems={allItems.length}
+                onPrevious={() => setPage((current) => current - 1)}
+                onNext={() => setPage((current) => current + 1)}
               />
-            )}
+            </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               <Card className="h-52 overflow-y-auto p-4">
                 <h2 className="m-0 text-sm font-semibold">ACCIONES RÁPIDAS</h2>

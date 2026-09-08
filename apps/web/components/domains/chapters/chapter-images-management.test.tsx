@@ -39,5 +39,8 @@ describe("Chapter image management focus contract", () => {
     expect(page).toContain("flex flex-nowrap items-center justify-between");
     expect(page).toContain("Ajustar ancho ▾");
     expect(page).toContain("border border-primary bg-primary-soft");
+    expect(page).toContain("getSelectableTableRowProps");
+    expect(page).toContain("stopTableRowSelection");
+    expect(page).toContain("cursor-pointer");
   });
 });
