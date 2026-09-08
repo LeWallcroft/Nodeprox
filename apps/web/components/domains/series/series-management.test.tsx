@@ -112,6 +112,17 @@ describe("Series management presentation", () => {
     expect(markup).toContain("Acciones");
     expect(markup).toContain("Activa");
     expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('role="button"');
+    expect(markup).toContain("cursor-pointer");
+    expect(markup).toContain("line-clamp-2");
+    expect(markup).toContain("max-w-[18rem] truncate");
+    expect(markup).toContain("min-w-[14rem]");
+    expect(
+      readFileSync(
+        "apps/web/components/domains/series/series-list.tsx",
+        "utf8",
+      ),
+    ).toContain("hover:bg-surface-elevated");
   });
 
   it("uses contextual capabilities for detail actions and Chapters navigation", () => {

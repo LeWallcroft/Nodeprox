@@ -14,9 +14,14 @@ import { SelectedImageReplacementAction } from "../../../../../../../components/
 import { WholeChapterReplacementDialog } from "../../../../../../../components/domains/chapters/whole-chapter-replacement-dialog";
 import { PageHeader } from "../../../../../../../components/layout/page-header";
 import { CopyButton } from "../../../../../../../components/ui/copy-button";
+import {
+  getSelectableTableRowProps,
+  stopTableRowSelection,
+} from "../../../../../../../components/ui/data-table";
 import { EmptyState } from "../../../../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../../../components/ui/loading-state";
+import { Pagination } from "../../../../../../../components/ui/pagination";
 import { hasCapability } from "../../../../../../../lib/auth/visibility";
 import {
   useChapter,
@@ -169,20 +174,20 @@ export default function ChapterImagesPage() {
               <tbody>
                 {pageImages.map((image) => (
                   <tr
-                    className={`border-b border-border last:border-0 ${selectedImageId === image.id ? "bg-primary-soft" : ""}`}
-                    key={image.id}
-                    onClick={() =>
+                    {...getSelectableTableRowProps(() =>
                       setSelectedImageId((current) =>
                         current === image.id ? null : image.id,
-                      )
-                    }
+                      ),
+                    )}
+                    className={`cursor-pointer border-b border-border transition-colors last:border-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${selectedImageId === image.id ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
+                    key={image.id}
                   >
                     <td className="p-3">
                       <input
                         aria-label={`Seleccionar ${image.filename}`}
                         type="checkbox"
                         checked={selectedImageIds.has(image.id)}
-                        onClick={(event) => event.stopPropagation()}
+                        onClick={stopTableRowSelection}
                         onChange={(event) =>
                           setSelectedImageIds((current) => {
                             const next = new Set(current);
@@ -226,6 +231,7 @@ export default function ChapterImagesPage() {
                         href={image.url}
                         rel="noreferrer"
                         target="_blank"
+                        onClick={stopTableRowSelection}
                       >
                         <ExternalLink aria-hidden="true" className="size-4" />
                       </a>
@@ -234,28 +240,14 @@ export default function ChapterImagesPage() {
                 ))}
               </tbody>
             </table>
-            <div className="mt-auto flex items-center justify-between border-t border-border p-3 text-sm text-muted">
-              <span>
-                {page * pageSize + 1}–
-                {Math.min((page + 1) * pageSize, images.length)} de{" "}
-                {images.length}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  disabled={page === 0}
-                  type="button"
-                  onClick={() => setPage((current) => current - 1)}
-                >
-                  Anterior
-                </button>
-                <button
-                  disabled={(page + 1) * pageSize >= images.length}
-                  type="button"
-                  onClick={() => setPage((current) => current + 1)}
-                >
-                  Siguiente
-                </button>
-              </div>
+            <div className="mt-auto border-t border-border p-3">
+              <Pagination
+                page={page + 1}
+                totalPages={Math.max(1, Math.ceil(images.length / pageSize))}
+                totalItems={images.length}
+                onPrevious={() => setPage((current) => current - 1)}
+                onNext={() => setPage((current) => current + 1)}
+              />
             </div>
           </div>
           <aside className="flex min-h-0 flex-col rounded-panel border border-border bg-surface p-4 text-sm text-muted xl:h-full">

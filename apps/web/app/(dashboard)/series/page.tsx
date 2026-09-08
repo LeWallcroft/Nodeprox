@@ -219,28 +219,21 @@ export default function SeriesPage() {
                 ))}
               </select>
             </Card>
-            {pageItems.length ? (
-              <>
-                <SeriesList
-                  items={pageItems}
-                  selectedId={selectedSeriesId}
-                  minTableHeightClassName="lg:min-h-[700px]"
-                  onSelect={selectSeries}
-                />
-                <div className="mt-3 flex justify-end">
-                  <Pagination
-                    page={currentPage}
-                    totalPages={totalPages}
-                    onChange={setPage}
-                  />
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                title="Sin coincidencias"
-                description="No hay Series que coincidan con los filtros actuales."
+            <SeriesList
+              items={pageItems}
+              selectedId={selectedSeriesId}
+              minTableHeightClassName="lg:min-h-[700px]"
+              onSelect={selectSeries}
+            />
+            <div className="mt-3">
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                totalItems={items.length}
+                onPrevious={() => setPage((current) => current - 1)}
+                onNext={() => setPage((current) => current + 1)}
               />
-            )}
+            </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               <Card className="h-52 overflow-y-auto p-4">
                 <h2 className="m-0 text-sm font-semibold">ACCIONES RÁPIDAS</h2>

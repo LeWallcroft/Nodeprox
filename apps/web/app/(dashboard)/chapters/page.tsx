@@ -21,7 +21,12 @@ import { AppDialog } from "../../../components/ui/app-dialog";
 import { Button } from "../../../components/ui/button";
 import { Card } from "../../../components/ui/card";
 import { ContentImage } from "../../../components/ui/content-image";
-import { DataTable } from "../../../components/ui/data-table";
+import {
+  DataTable,
+  DataTableEmptyRow,
+  getSelectableTableRowProps,
+  stopTableRowSelection,
+} from "../../../components/ui/data-table";
 import { EmptyState } from "../../../components/ui/empty-state";
 import { ErrorState } from "../../../components/ui/error-state";
 import { LoadingState } from "../../../components/ui/loading-state";
@@ -251,119 +256,127 @@ export default function GlobalChaptersPage() {
                 ))}
               </select>
             </Card>
-            {pageItems.length ? (
-              <>
-                <DataTable
-                  label="Capítulos globales"
-                  minHeightClassName="lg:min-h-[700px]"
-                >
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted">
-                      <th className="p-3">Portada</th>
-                      <th className="p-3">Serie</th>
-                      <th className="p-3">Capítulo</th>
-                      <th className="p-3">Estado</th>
-                      <th className="p-3">Imágenes</th>
-                      <th className="p-3">Última actualización</th>
-                      <th className="p-3">Responsable</th>
-                      <th className="p-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageItems.map((chapter) => {
-                      const selected = selectedChapterId === chapter.id;
-                      return (
-                        <tr
-                          className={`border-b border-border transition-colors last:border-0 ${selected ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
-                          key={chapter.id}
-                        >
-                          <td className="p-3">
-                            <ContentImage
-                              alt={`Portada de ${chapter.series.title}`}
-                              src={chapter.series.coverUrl}
-                              variant="thumbnail"
-                            />
-                          </td>
-                          <td className="p-0 font-medium">
-                            <button
-                              aria-pressed={selected}
-                              className="w-full px-3 py-3 text-left text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                              type="button"
-                              onClick={() => selectChapter(chapter.id)}
-                            >
-                              {chapter.series.title}
-                              <span className="block text-xs text-muted">
-                                {chapter.series.slug}
-                              </span>
-                            </button>
-                          </td>
-                          <td className="p-3">
-                            {chapter.chapterNumber}
-                            {chapter.title ? (
-                              <span className="block max-w-40 truncate text-xs text-muted">
-                                {chapter.title}
-                              </span>
-                            ) : null}
-                          </td>
-                          <td className="p-3">
-                            <StatusBadge
-                              label={chapter.status}
-                              tone={tone(chapter.status)}
-                            />
-                          </td>
-                          <td className="p-3 text-muted">—</td>
-                          <td className="whitespace-nowrap p-3 text-muted">
-                            {new Date(chapter.updatedAt).toLocaleDateString(
-                              "es-PE",
-                            )}
-                          </td>
-                          <td className="p-3 text-muted">—</td>
-                          <td className="p-3">
-                            <div className="flex justify-end gap-2">
-                              <Link
-                                aria-label={`Gestionar capítulo ${chapter.chapterNumber}`}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface-elevated text-secondary hover:text-text"
-                                href={`/series/${chapter.series.id}/chapters/${chapter.id}/images`}
-                                title="Gestionar capítulo"
-                              >
-                                <Images aria-hidden="true" className="size-4" />
-                              </Link>
-                              <button
-                                aria-label={`Imágenes del capítulo ${chapter.chapterNumber}`}
-                                className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface-elevated text-secondary hover:text-text"
-                                title="Imágenes"
-                                type="button"
-                                onClick={() => {
-                                  selectChapter(chapter.id);
-                                  setQuickChapterId(chapter.id);
-                                }}
-                              >
-                                <ListPlus
-                                  aria-hidden="true"
-                                  className="size-4"
-                                />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </DataTable>
-                <div className="mt-3 flex justify-end">
-                  <Pagination
-                    page={currentPage}
-                    totalPages={totalPages}
-                    onChange={setPage}
+            <DataTable
+              label="Capítulos globales"
+              minHeightClassName="lg:min-h-[700px]"
+            >
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-[0.08em] text-muted">
+                  <th className="p-3">Portada</th>
+                  <th className="p-3">Serie</th>
+                  <th className="p-3">Capítulo</th>
+                  <th className="p-3">Estado</th>
+                  <th className="p-3">Imágenes</th>
+                  <th className="p-3">Última actualización</th>
+                  <th className="p-3">Responsable</th>
+                  <th className="p-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pageItems.length === 0 ? (
+                  <DataTableEmptyRow
+                    colSpan={8}
+                    title="No se encontraron resultados."
+                    description="No hay capítulos que coincidan con los filtros actuales."
                   />
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                title="Sin coincidencias"
-                description="No hay capítulos que coincidan con los filtros actuales."
+                ) : (
+                  pageItems.map((chapter) => {
+                    const selected = selectedChapterId === chapter.id;
+                    return (
+                      <tr
+                        {...getSelectableTableRowProps(() =>
+                          selectChapter(chapter.id),
+                        )}
+                        className={`cursor-pointer border-b border-border transition-colors last:border-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${selected ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
+                        key={chapter.id}
+                      >
+                        <td className="p-3">
+                          <ContentImage
+                            alt={`Portada de ${chapter.series.title}`}
+                            src={chapter.series.coverUrl}
+                            variant="thumbnail"
+                          />
+                        </td>
+                        <td className="min-w-[14rem] p-0 font-medium">
+                          <button
+                            aria-pressed={selected}
+                            className="w-full px-3 py-3 text-left text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                            type="button"
+                            onClick={(event) => {
+                              stopTableRowSelection(event);
+                              selectChapter(chapter.id);
+                            }}
+                          >
+                            <span className="line-clamp-2 font-semibold text-primary">
+                              {chapter.series.title}
+                            </span>
+                            <span className="block max-w-[18rem] truncate text-xs text-muted">
+                              {chapter.series.slug}
+                            </span>
+                          </button>
+                        </td>
+                        <td className="p-3">
+                          {chapter.chapterNumber}
+                          {chapter.title ? (
+                            <span className="block max-w-40 truncate text-xs text-muted">
+                              {chapter.title}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="p-3">
+                          <StatusBadge
+                            label={chapter.status}
+                            tone={tone(chapter.status)}
+                          />
+                        </td>
+                        <td className="p-3 text-muted">—</td>
+                        <td className="whitespace-nowrap p-3 text-muted">
+                          {new Date(chapter.updatedAt).toLocaleDateString(
+                            "es-PE",
+                          )}
+                        </td>
+                        <td className="p-3 text-muted">—</td>
+                        <td className="p-3">
+                          <div className="flex justify-end gap-2">
+                            <Link
+                              aria-label={`Gestionar capítulo ${chapter.chapterNumber}`}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface-elevated text-secondary hover:text-text"
+                              href={`/series/${chapter.series.id}/chapters/${chapter.id}/images`}
+                              title="Gestionar capítulo"
+                              onClick={stopTableRowSelection}
+                            >
+                              <Images aria-hidden="true" className="size-4" />
+                            </Link>
+                            <button
+                              aria-label={`Imágenes del capítulo ${chapter.chapterNumber}`}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-control border border-border bg-surface-elevated text-secondary hover:text-text"
+                              title="Imágenes"
+                              type="button"
+                              onClick={(event) => {
+                                stopTableRowSelection(event);
+                                selectChapter(chapter.id);
+                                setQuickChapterId(chapter.id);
+                              }}
+                            >
+                              <ListPlus aria-hidden="true" className="size-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </DataTable>
+            <div className="mt-3">
+              <Pagination
+                page={currentPage}
+                totalPages={totalPages}
+                totalItems={items.length}
+                onPrevious={() => setPage((current) => current - 1)}
+                onNext={() => setPage((current) => current + 1)}
               />
-            )}
+            </div>
             <div className="mt-4 grid gap-4 lg:grid-cols-3">
               <Card className="h-52 overflow-y-auto p-4">
                 <h2 className="m-0 text-sm font-semibold">ACCIONES RÁPIDAS</h2>
