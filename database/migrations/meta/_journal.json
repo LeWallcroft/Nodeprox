@@ -176,6 +176,20 @@
       "when": 1788533184937,
       "tag": "0024_rapid_devos",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788856699257,
+      "tag": "0025_careful_warstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788857937236,
+      "tag": "0026_smart_malcolm_colcord",
+      "breakpoints": true
     }
   ]
 }

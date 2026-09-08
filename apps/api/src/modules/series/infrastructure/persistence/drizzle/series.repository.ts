@@ -12,38 +12,40 @@ import {
 } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
-  chapterPermissions,
-  chapterDeletionOutbox,
   auditLogs,
+  chapterDeletionOutbox,
+  chapterPermissions,
   chapters,
   series,
   seriesAssignments,
+  seriesCreationGrants,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
+import {
+  PERMISSIONS,
+  type Permission,
+} from "../../../../authorization/domain/permissions.js";
 import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import {
   lockCurrentAuthorization,
   type NodeProxTransaction,
 } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
-import {
-  PERMISSIONS,
-  type Permission,
-} from "../../../../authorization/domain/permissions.js";
-import { canAdministerSeries } from "../../../domain/series.policy.js";
+import type { ChapterMutationBoundaryPort } from "../../../../chapters/application/ports/chapter-mutation.ports.js";
+import { evaluateChapterDelete } from "../../../../chapters/domain/chapter-delete.policy.js";
 import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
-import { evaluateChapterDelete } from "../../../../chapters/domain/chapter-delete.policy.js";
-import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
-import type { ChapterMutationBoundaryPort } from "../../../../chapters/application/ports/chapter-mutation.ports.js";
-import type {
-  ChapterCoreRecord,
-  SeriesRecord,
-} from "../../../domain/series.types.js";
+import type { DomainEventOutbox } from "../../../../events/application/domain-event-outbox.js";
 import type {
   ChapterCoreRepositoryPort,
   SeriesMutationBoundaryPort,
   SeriesRepositoryPort,
 } from "../../../application/ports/series.ports.js";
+import { canAdministerSeries } from "../../../domain/series.policy.js";
+import type {
+  ChapterCoreRecord,
+  SeriesRecord,
+} from "../../../domain/series.types.js";
 
 const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   id: row.id,
@@ -51,6 +53,8 @@ const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   slug: row.slug,
   description: row.description,
   coverUrl: row.coverUrl,
+  discordChannelId: row.discordChannelId,
+  discordChannelNameSnapshot: row.discordChannelNameSnapshot,
   principalUploader: null,
   createdBy: row.createdBy,
   createdAt: row.createdAt,
@@ -72,7 +76,10 @@ const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
 export class DrizzleSeriesRepository
   implements SeriesRepositoryPort, SeriesMutationBoundaryPort
 {
-  constructor(private readonly db: NodeProxDatabase) {}
+  constructor(
+    private readonly db: NodeProxDatabase,
+    private readonly events?: DomainEventOutbox,
+  ) {}
 
   async create(input: {
     title: string;
@@ -84,6 +91,129 @@ export class DrizzleSeriesRepository
     const [row] = await this.db.insert(series).values(input).returning();
     if (!row) throw new Error("series-create-failed");
     return toSeries(row);
+  }
+
+  async createWithCreationPolicy(input: {
+    title: string;
+    slug: string;
+    description?: string | null | undefined;
+    coverUrl?: string | null | undefined;
+    createdBy: string;
+    actorRole: "admin" | "gestor" | "uploader";
+    grantId?: string | undefined;
+    discordChannelId?: string | undefined;
+    discordChannelNameSnapshot?: string | undefined;
+  }) {
+    const discordChannelId = input.discordChannelId;
+    if (input.actorRole === "gestor" && !discordChannelId)
+      return { outcome: "channel-required" as const };
+    if (input.actorRole === "uploader" && !input.grantId)
+      return { outcome: "grant-not-found" as const };
+    return this.db.transaction(async (tx) => {
+      if (input.actorRole === "uploader") {
+        const grantId = input.grantId;
+        if (!grantId) return { outcome: "grant-not-found" as const };
+        const [grant] = await tx
+          .select()
+          .from(seriesCreationGrants)
+          .where(eq(seriesCreationGrants.id, grantId))
+          .limit(1)
+          .for("update");
+        if (!grant) return { outcome: "grant-not-found" as const };
+        if (grant.targetUserId !== input.createdBy)
+          return { outcome: "grant-not-owned" as const };
+        if (grant.status !== "available" && grant.status !== "reserved")
+          return { outcome: "grant-unavailable" as const };
+        const [created] = await tx
+          .insert(series)
+          .values({
+            title: input.title,
+            slug: input.slug,
+            description: input.description,
+            coverUrl: input.coverUrl,
+            createdBy: input.createdBy,
+          })
+          .returning();
+        if (!created) throw new Error("series-create-failed");
+        const [consumed] = await tx
+          .update(seriesCreationGrants)
+          .set({
+            status: "consumed",
+            consumedAt: new Date(),
+            consumedBySeriesId: created.id,
+          })
+          .where(
+            and(
+              eq(seriesCreationGrants.id, grant.id),
+              eq(seriesCreationGrants.status, grant.status),
+            ),
+          )
+          .returning({ id: seriesCreationGrants.id });
+        if (!consumed) throw new Error("series-creation-grant-consume-failed");
+        await tx.insert(auditLogs).values({
+          actorId: input.createdBy,
+          action: "discord.series_grant.consumed",
+          resourceType: "series_creation_grant",
+          resourceId: grant.id,
+          metadata: { grantId: grant.id, seriesId: created.id },
+        });
+        await this.events?.append(
+          {
+            type: "series.creation_grant.consumed",
+            aggregateType: "series_creation_grant",
+            aggregateId: grant.id,
+            actorUserId: input.createdBy,
+            payload: { grantId: grant.id, seriesId: created.id },
+            occurredAt: new Date(),
+          },
+          tx,
+        );
+        return { outcome: "created" as const, series: toSeries(created) };
+      }
+      const [created] = await tx
+        .insert(series)
+        .values({
+          title: input.title,
+          slug: input.slug,
+          description: input.description,
+          coverUrl: input.coverUrl,
+          createdBy: input.createdBy,
+          ...(input.actorRole === "gestor" && discordChannelId
+            ? {
+                discordChannelId,
+                ...(input.discordChannelNameSnapshot
+                  ? {
+                      discordChannelNameSnapshot:
+                        input.discordChannelNameSnapshot,
+                    }
+                  : {}),
+              }
+            : {}),
+        })
+        .returning();
+      if (!created) throw new Error("series-create-failed");
+      if (input.actorRole === "gestor")
+        await tx.insert(auditLogs).values({
+          actorId: input.createdBy,
+          action: "series.channel.bound",
+          resourceType: "series",
+          resourceId: created.id,
+          metadata: { channelId: input.discordChannelId },
+        });
+      if (input.actorRole === "gestor")
+        await this.events?.append(
+          {
+            type: "series.channel.bound",
+            aggregateType: "series",
+            aggregateId: created.id,
+            actorUserId: input.createdBy,
+            payload: { channelId: discordChannelId },
+            occurredAt: new Date(),
+          },
+          tx,
+        );
+      return { outcome: "created" as const, series: toSeries(created) };
+    });
   }
 
   async appendAudit(input: {

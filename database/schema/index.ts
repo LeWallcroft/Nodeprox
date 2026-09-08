@@ -1,5 +1,12 @@
 export { sessions, users } from "./authentication.js";
-export { auditLogs, auditResultEnum, systemConfig } from "./authorization.js";
+export {
+  auditLogs,
+  auditResultEnum,
+  discordAuthorizedRoles,
+  discordIntegrations,
+  discordInteractions,
+  systemConfig,
+} from "./authorization.js";
 export { bootstrapMetadata } from "./bootstrap.js";
 export {
   chapterDeletionOutbox,
@@ -19,6 +26,11 @@ export {
   chapters,
   helperSeriesCooldowns,
 } from "./chapters.js";
+export {
+  seriesCreationGrantStatusEnum,
+  seriesCreationGrants,
+} from "./discord.js";
+export { domainEventOutbox } from "./domain-event-outbox.js";
 export {
   imageReplacementOperationStatusEnum,
   imageReplacementOperations,

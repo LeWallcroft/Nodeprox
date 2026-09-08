@@ -21,6 +21,10 @@ import { DrizzleChapterReplacementRepository } from "./modules/chapter-replaceme
 import { DrizzleChapterReplacementProcessingRepository } from "./modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { registerChapterReplacementPlugin } from "./modules/chapter-replacements/presentation/chapter-replacement.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
+import { DiscordGatewayService } from "./modules/discord/application/discord-gateway.service.js";
+import { RedisLinkCodeStore } from "./modules/discord/infrastructure/redis-link-code.store.js";
+import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
+import { DrizzleDomainEventOutbox } from "./modules/events/infrastructure/persistence/drizzle-domain-event-outbox.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
 import { HealthService } from "./modules/health/health.service.js";
@@ -59,6 +63,12 @@ export interface AppDependencies {
   uploadTransfer?: UploadTransferPort;
   publicMediaOrigin?: string;
   operationAuditWriter?: OperationAuditWriter;
+  discord?: {
+    internalToken?: string | undefined;
+    redisUrl: string;
+    guildId?: string | undefined;
+    controlChannelId?: string | undefined;
+  };
 }
 
 export function buildApp(
@@ -99,6 +109,23 @@ export function buildApp(
       dependencies.database,
       authentication,
     );
+    const domainEvents = new DrizzleDomainEventOutbox();
+    if (dependencies.discord)
+      registerDiscordPlugin(app, {
+        service: new DiscordGatewayService(
+          dependencies.database,
+          new RedisLinkCodeStore(dependencies.discord.redisUrl),
+          domainEvents,
+          dependencies.discord.guildId && dependencies.discord.controlChannelId
+            ? {
+                guildId: dependencies.discord.guildId,
+                controlChannelId: dependencies.discord.controlChannelId,
+              }
+            : undefined,
+        ),
+        internalToken: dependencies.discord.internalToken,
+        authentication,
+      });
     registerIdentityPlugin(
       app,
       dependencies.database,
@@ -135,6 +162,7 @@ export function buildApp(
       authentication,
       authorization,
       chapterPermissions,
+      domainEvents,
     );
     const storageConfig = dependencies.storage ?? {
       provider: "filesystem" as const,

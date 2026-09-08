@@ -35,6 +35,12 @@ const configSchema = z.object({
   B2_APPLICATION_KEY: z.string().trim().min(1).optional(),
   CLOUDFLARE_ZONE_ID: z.string().trim().min(1).optional(),
   CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1).optional(),
+  DISCORD_APPLICATION_ID: z.string().trim().min(1).optional(),
+  DISCORD_BOT_TOKEN: z.string().trim().min(1).optional(),
+  DISCORD_GUILD_ID: z.string().trim().min(1).optional(),
+  DISCORD_CONTROL_CHANNEL_ID: z.string().trim().min(1).optional(),
+  DISCORD_BOT_INTERNAL_TOKEN: z.string().trim().min(1).optional(),
+  NODEPROX_INTERNAL_API_URL: z.url().optional(),
 });
 
 const databaseConfigSchema = configSchema.pick({ DATABASE_URL: true });
@@ -103,8 +109,8 @@ export {
   b2ConfigSchema,
   configSchema,
   databaseConfigSchema,
-  processingConfigSchema,
   mediaEffectsConfigSchema,
+  processingConfigSchema,
 };
 
 export function loadConfig(

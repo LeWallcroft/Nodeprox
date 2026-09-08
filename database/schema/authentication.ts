@@ -24,6 +24,8 @@ export const users = pgTable(
     id: uuid("id").primaryKey(),
     email: varchar("email", { length: 320 }).notNull(),
     discordUsername: varchar("discord_username", { length: 64 }),
+    discordId: varchar("discord_id", { length: 32 }),
+    discordLinkedAt: timestamp("discord_linked_at", { withTimezone: true }),
     passwordHash: text("password_hash").notNull(),
     status: varchar("status", { length: 16 }).notNull(),
     role: userRoleEnum("role").notNull().default("uploader"),
@@ -36,6 +38,7 @@ export const users = pgTable(
   },
   (table) => [
     uniqueIndex("users_email_unique").on(table.email),
+    uniqueIndex("users_discord_id_unique").on(table.discordId),
     check(
       "users_status_check",
       sql`${table.status} in ('pending', 'active', 'rejected', 'suspended', 'disabled')`,
