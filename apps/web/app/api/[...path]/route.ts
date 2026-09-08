@@ -28,6 +28,7 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (value === "auth/register") return method === "POST";
   if (value === "auth/session" || value === "auth/capabilities")
     return method === "GET";
+  if (value === "me/discord/link-code") return method === "POST";
   if (value === "admin/users") return method === "GET";
   if (value === "admin/audit") return method === "GET";
   if (value === "admin/settings") return method === "GET" || method === "PATCH";
