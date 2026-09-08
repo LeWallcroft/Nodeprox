@@ -11,6 +11,8 @@ export type SeriesRecord = {
   slug: string;
   description: string | null;
   coverUrl: string | null;
+  discordChannelId: string | null;
+  discordChannelNameSnapshot: string | null;
   principalUploader: SeriesPrincipalUploader | null;
   createdBy: string;
   createdAt: Date;

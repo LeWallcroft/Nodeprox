@@ -1,11 +1,11 @@
+import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
+import type { Role } from "../../../authorization/domain/roles.js";
 import type {
   ChapterCoreRecord,
   SeriesPrincipalUploader,
   SeriesRecord,
   SeriesUploaderCandidate,
 } from "../../domain/series.types.js";
-import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
-import type { Role } from "../../../authorization/domain/roles.js";
 
 export interface SeriesRepositoryPort {
   create(input: {
@@ -15,6 +15,26 @@ export interface SeriesRepositoryPort {
     coverUrl?: string | null | undefined;
     createdBy: string;
   }): Promise<SeriesRecord>;
+  createWithCreationPolicy(input: {
+    title: string;
+    slug: string;
+    description?: string | null | undefined;
+    coverUrl?: string | null | undefined;
+    createdBy: string;
+    actorRole: "admin" | "gestor" | "uploader";
+    grantId?: string | undefined;
+    discordChannelId?: string | undefined;
+    discordChannelNameSnapshot?: string | undefined;
+  }): Promise<
+    | { outcome: "created"; series: SeriesRecord }
+    | {
+        outcome:
+          | "grant-not-found"
+          | "grant-not-owned"
+          | "grant-unavailable"
+          | "channel-required";
+      }
+  >;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
   listAll(): Promise<SeriesRecord[]>;
   listWithHelperAccess(userId: string): Promise<SeriesRecord[]>;

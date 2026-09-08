@@ -17,6 +17,8 @@ export const series = pgTable(
     slug: varchar("slug", { length: 220 }).notNull(),
     description: text("description"),
     coverUrl: varchar("cover_url", { length: 2048 }),
+    discordChannelId: text("discord_channel_id"),
+    discordChannelNameSnapshot: text("discord_channel_name_snapshot"),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),

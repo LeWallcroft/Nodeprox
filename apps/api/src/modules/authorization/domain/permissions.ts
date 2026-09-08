@@ -3,6 +3,7 @@ import type { Role } from "./roles.js";
 export const PERMISSIONS = {
   SERIES_READ: "series.read",
   SERIES_CREATE: "series.create",
+  SERIES_CREATE_WITH_GRANT: "series.create.with-grant",
   SERIES_EDIT: "series.edit",
   SERIES_DELETE: "series.delete",
   SERIES_ASSIGNMENT_MANAGE: "series.assignment.manage",
@@ -20,6 +21,10 @@ export const PERMISSIONS = {
   APPROVALS_READ: "approvals.read",
   APPROVALS_CONSUME: "approvals.consume",
   APPROVALS_INVALIDATE: "approvals.invalidate",
+  DISCORD_INTEGRATION_CONFIGURE: "discord.integration.configure",
+  DISCORD_SERIES_GRANT_ISSUE: "discord.series-grant.issue",
+  DISCORD_SERIES_GRANT_INVALIDATE: "discord.series-grant.invalidate",
+  DISCORD_SERIES_GRANT_READ: "discord.series-grant.read",
   ADMIN_USERS_MANAGE: "admin.users.manage",
   ADMIN_SYSTEM_MANAGE: "admin.system.manage",
   ADMIN_STORAGE_MANAGE: "admin.storage.manage",
@@ -52,6 +57,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     PERMISSIONS.IMAGES_REPLACE,
     PERMISSIONS.IMAGES_REORDER,
     PERMISSIONS.IMAGES_DELETE,
+    PERMISSIONS.SERIES_CREATE_WITH_GRANT,
   ],
 };
 

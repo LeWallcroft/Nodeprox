@@ -28,16 +28,31 @@ export class SeriesService {
       title: string;
       description?: string | null | undefined;
       coverUrl?: string | null | undefined;
+      grantId?: string | undefined;
+      discordChannelId?: string | undefined;
+      discordChannelNameSnapshot?: string | undefined;
     },
   ) {
     this.requireSession(context);
     const slug = SeriesSlug.fromTitle(input.title).toString();
-    const decision = await this.authorization.authorize(
+    let decision = await this.authorization.authorize(
       context,
       PERMISSIONS.SERIES_CREATE,
     );
-    if (!decision.allowed) return { forbidden: true as const };
-    return this.series.create({ ...input, slug, createdBy: context.userId });
+    if (!decision.allowed)
+      decision = await this.authorization.authorize(
+        context,
+        PERMISSIONS.SERIES_CREATE_WITH_GRANT,
+      );
+    if (!decision.allowed || !decision.role)
+      return { forbidden: true as const };
+    const result = await this.series.createWithCreationPolicy({
+      ...input,
+      slug,
+      createdBy: context.userId,
+      actorRole: decision.role,
+    });
+    return result.outcome === "created" ? result.series : result;
   }
 
   async list(context: AuthorizationContext) {

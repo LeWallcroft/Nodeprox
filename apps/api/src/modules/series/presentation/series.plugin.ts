@@ -1,27 +1,28 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
 import {
   getRequestContext,
   markOperationAuditRecorded,
   setOperationAuditContext,
 } from "../../../plugins/request-context.js";
-import type { NodeProxDatabase } from "../../../../../../database/client.js";
-import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
+import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
+import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
-import { ChapterDeleteService } from "../../chapters/application/services/chapter-delete.service.js";
 import { ChapterCoreService } from "../../chapters/application/services/chapter-core.service.js";
-import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
+import { ChapterDeleteService } from "../../chapters/application/services/chapter-delete.service.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
+import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
+import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
+import { SeriesService } from "../application/services/series.service.js";
+import { InvalidSeriesSlugError } from "../domain/series-slug.js";
 import {
   DrizzleChapterCoreRepository,
   DrizzleSeriesRepository,
 } from "../infrastructure/persistence/drizzle/series.repository.js";
-import { SeriesService } from "../application/services/series.service.js";
-import { InvalidSeriesSlugError } from "../domain/series-slug.js";
-import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
 const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
@@ -47,6 +48,9 @@ const seriesCreateSchema = z
       .optional(),
     description: z.string().max(5000).nullable().optional(),
     coverUrl: externalCoverUrlSchema.nullable().optional(),
+    grantId: z.uuid().optional(),
+    discordChannelId: z.string().trim().min(1).max(64).optional(),
+    discordChannelNameSnapshot: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
 const seriesPatchSchema = z
@@ -151,12 +155,13 @@ export function registerSeriesPlugin(
   authentication: { service: SessionService; cookies: SessionCookieAdapter },
   authorization: AuthorizationService,
   chapterPermissions: ChapterPermissionService,
+  events?: DomainEventOutbox,
 ) {
   const session = requireSession(
     authentication.service,
     authentication.cookies,
   );
-  const repository = new DrizzleSeriesRepository(db);
+  const repository = new DrizzleSeriesRepository(db, events);
   const chapters = new DrizzleChapterCoreRepository(db);
   const seriesService = new SeriesService(
     repository,
@@ -185,6 +190,35 @@ export function registerSeriesPlugin(
       );
       const result = await seriesService.create(context(), input);
       if ("forbidden" in result) throw forbidden;
+      if ("outcome" in result) {
+        if (result.outcome === "channel-required")
+          throw error(
+            "series-channel-required",
+            "A Discord channel is required.",
+            422,
+            "Discord channel required",
+          );
+        if (result.outcome === "grant-not-owned")
+          throw error(
+            "series-creation-grant-not-owned",
+            "The Series creation grant does not belong to the current user.",
+            403,
+            "Forbidden",
+          );
+        if (result.outcome === "grant-unavailable")
+          throw error(
+            "series-creation-grant-already-consumed",
+            "The Series creation grant is unavailable.",
+            409,
+            "Grant unavailable",
+          );
+        throw error(
+          "series-creation-grant-not-found",
+          "The Series creation grant was not found.",
+          404,
+          "Grant not found",
+        );
+      }
       return reply.code(201).send(result);
     } catch (cause) {
       if (cause instanceof InvalidSeriesSlugError) throw invalidSeriesSlug;

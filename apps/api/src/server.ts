@@ -32,6 +32,12 @@ const app = buildApp(
     secureCookie: config.NODE_ENV === "production",
     storage: loadStorageConfig(),
     publicMediaOrigin: config.PUBLIC_MEDIA_ORIGIN,
+    discord: {
+      internalToken: config.DISCORD_BOT_INTERNAL_TOKEN,
+      redisUrl: config.REDIS_URL,
+      guildId: config.DISCORD_GUILD_ID,
+      controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
+    },
   },
 );
 dispatcher.start();
