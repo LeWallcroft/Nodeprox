@@ -554,6 +554,53 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("proxies only the allowlisted Discord role configuration routes", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    expect(
+      (
+        await GET(
+          new Request(
+            "http://localhost:3000/api/admin/discord/authorized-roles",
+          ),
+          context(["admin", "discord", "authorized-roles"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await PUT(
+          new Request(
+            "http://localhost:3000/api/admin/discord/authorized-roles",
+            {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ roles: [] }),
+            },
+          ),
+          context(["admin", "discord", "authorized-roles"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await POST(
+          new Request(
+            "http://localhost:3000/api/admin/discord/authorized-roles",
+            {
+              method: "POST",
+            },
+          ),
+          context(["admin", "discord", "authorized-roles"]),
+        )
+      ).status,
+    ).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
   it.each([401, 404, 409, 422, 500])(
     "preserves backend status %s",
     async (status) => {

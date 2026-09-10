@@ -34,6 +34,7 @@ const app = buildApp(
     publicMediaOrigin: config.PUBLIC_MEDIA_ORIGIN,
     discord: {
       internalToken: config.DISCORD_BOT_INTERNAL_TOKEN,
+      botInternalUrl: config.DISCORD_BOT_INTERNAL_URL,
       redisUrl: config.REDIS_URL,
       guildId: config.DISCORD_GUILD_ID,
       controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,

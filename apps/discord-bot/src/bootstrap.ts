@@ -3,6 +3,7 @@ import type { Logger } from "pino";
 import { LinkDiscordAccount } from "./application/link-discord-account.js";
 import { type DiscordBotConfig, loadDiscordBotConfig } from "./config/env.js";
 import { createDiscordClient } from "./discord/client.js";
+import { AuthorizeSeriesWorkflow } from "./discord/commands/authorize-series.workflow.js";
 import { HelpCommand } from "./discord/commands/help.command.js";
 import { LinkCommand } from "./discord/commands/link.command.js";
 import { registerInteractionRouter } from "./discord/interaction-router.js";
@@ -14,6 +15,7 @@ import { registerGuildCommands } from "./discord/register-commands.js";
 import { BotHealthState } from "./health/health.js";
 import type { NodeProxDiscordApi } from "./infrastructure/nodeprox-api/contracts.js";
 import { NodeProxApiClient } from "./infrastructure/nodeprox-api/nodeprox-api.client.js";
+import { createGuildRoleVerifierServer } from "./internal/guild-role-verifier.server.js";
 import { createBotLogger } from "./observability/logger.js";
 
 type RegisterCommands = typeof registerGuildCommands;
@@ -50,18 +52,25 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
     logger.info("discord_bot.integration.validated");
 
     const client = dependencies.client ?? createDiscordClient();
-    const stop = bindClientLifecycle({ client, health, logger });
+    const stop = bindClientLifecycle({
+      client,
+      health,
+      logger,
+    });
     if (dependencies.installSignalHandlers ?? true)
       registerShutdownHandlers(stop);
 
+    const authorizeSeries = new AuthorizeSeriesWorkflow(api);
     registerInteractionRouter({
       client,
       guildId: config.DISCORD_GUILD_ID,
       controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
       handlers: [
         new LinkCommand(new LinkDiscordAccount(api)),
+        authorizeSeries,
         new HelpCommand(),
       ],
+      componentHandlers: [authorizeSeries],
       logger,
     });
     await (dependencies.registerCommands ?? registerGuildCommands)({
@@ -72,7 +81,24 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
     logger.info("discord_bot.commands.registered");
     logger.info("discord_bot.gateway.login.start");
     await client.login(config.DISCORD_BOT_TOKEN);
-    return { client, health, stop };
+    const verifier = createGuildRoleVerifierServer({
+      client,
+      expectedToken: config.DISCORD_BOT_INTERNAL_TOKEN,
+      guildId: config.DISCORD_GUILD_ID,
+      logger,
+    });
+    await verifier.start(
+      config.DISCORD_BOT_INTERNAL_HOST,
+      config.DISCORD_BOT_INTERNAL_PORT,
+    );
+    return {
+      client,
+      health,
+      stop: async (signal: string) => {
+        await verifier.stop();
+        await stop(signal);
+      },
+    };
   } catch (error) {
     health.markDegraded();
     logger.error(

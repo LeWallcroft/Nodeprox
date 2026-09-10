@@ -11,6 +11,11 @@ import {
 } from "../../../../../../database/schema/index.js";
 import type { NodeProxTransaction } from "../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
 import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
+import {
+  hasDiscordCapability,
+  projectDiscordAuthorizedRole,
+  type DiscordBotCapability,
+} from "./discord-authorization-policy.js";
 
 export type GrantStatus = "available" | "reserved" | "consumed" | "invalidated";
 
@@ -354,10 +359,15 @@ export class DiscordGatewayService {
       .limit(1);
     if (!integration)
       throw new DiscordGatewayError("discord-integration-disabled");
+    const roles = await this.db
+      .select()
+      .from(discordAuthorizedRoles)
+      .where(eq(discordAuthorizedRoles.integrationId, integration.id));
     return {
       guildId: integration.guildId,
       controlChannelId: integration.controlChannelId,
       enabled: integration.enabled,
+      authorizedRoles: roles.map(projectDiscordAuthorizedRole),
     };
   }
 
@@ -428,11 +438,13 @@ export class DiscordGatewayService {
           inArray(discordAuthorizedRoles.roleId, roleIds),
         ),
       );
+    const capability: DiscordBotCapability =
+      action === "issue" ? "series_grant.issue" : "series_grant.invalidate";
     if (
-      !rows.some((row) =>
-        action === "issue"
-          ? row.canIssueSeriesGrants
-          : row.canInvalidateSeriesGrants,
+      !hasDiscordCapability(
+        roleIds,
+        rows.map(projectDiscordAuthorizedRole),
+        capability,
       )
     )
       throw new DiscordGatewayError("discord-actor-role-not-authorized");

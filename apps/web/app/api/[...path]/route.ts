@@ -32,6 +32,8 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (value === "admin/users") return method === "GET";
   if (value === "admin/audit") return method === "GET";
   if (value === "admin/settings") return method === "GET" || method === "PATCH";
+  if (value === "admin/discord/authorized-roles")
+    return method === "GET" || method === "PUT";
   if (/^admin\/users\/[^/]+$/.test(value)) return method === "PATCH";
   if (value === "series") return method === "GET" || method === "POST";
   if (/^series\/[^/]+$/.test(value))

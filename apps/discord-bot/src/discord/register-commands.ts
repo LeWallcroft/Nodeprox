@@ -13,6 +13,9 @@ export const commandDefinitions = [
         .setMaxLength(64),
     ),
   new SlashCommandBuilder()
+    .setName("autorizar-serie")
+    .setDescription("Autoriza a un usuario a crear una Serie."),
+  new SlashCommandBuilder()
     .setName("ayuda")
     .setDescription("Muestra los comandos disponibles de NodeProx."),
 ].map((command) => command.toJSON());

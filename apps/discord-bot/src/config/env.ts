@@ -7,6 +7,13 @@ const schema = z.object({
   DISCORD_CONTROL_CHANNEL_ID: z.string().trim().min(1),
   NODEPROX_INTERNAL_API_URL: z.url(),
   DISCORD_BOT_INTERNAL_TOKEN: z.string().trim().min(1),
+  DISCORD_BOT_INTERNAL_HOST: z.string().trim().min(1).default("127.0.0.1"),
+  DISCORD_BOT_INTERNAL_PORT: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(65535)
+    .default(3002),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

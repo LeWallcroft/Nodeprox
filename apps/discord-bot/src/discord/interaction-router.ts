@@ -1,24 +1,46 @@
 import type {
+  ButtonInteraction,
   ChatInputCommandInteraction,
   Client,
   Interaction,
+  ModalSubmitInteraction,
+  RepliableInteraction,
+  UserSelectMenuInteraction,
 } from "discord.js";
 import type { Logger } from "pino";
 import { CommandUserError } from "./commands/command-user-error.js";
+import { DiscordInteractionError } from "./commands/discord-interaction-error.js";
 import { isAllowedControlChannel } from "./guards/control-channel.guard.js";
 import { isAllowedGuild } from "./guards/guild.guard.js";
+import {
+  ephemeralPayload,
+  interactionErrorCode,
+  isInteractionLifecycleError,
+  respondSafely,
+} from "./interaction-response.js";
 
 export interface DiscordCommandHandler {
   readonly name: string;
   execute(interaction: ChatInputCommandInteraction): Promise<void>;
 }
 
+export interface DiscordComponentHandler {
+  readonly customIdPrefix: string;
+  executeComponent(
+    interaction:
+      | ButtonInteraction
+      | UserSelectMenuInteraction
+      | ModalSubmitInteraction,
+  ): Promise<void>;
+}
+
 async function safeReply(interaction: Interaction, content: string) {
-  if (!interaction.isChatInputCommand()) return;
-  const reply = { content, ephemeral: true };
-  if (interaction.replied || interaction.deferred)
-    await interaction.followUp(reply);
-  else await interaction.reply(reply);
+  if (!("reply" in interaction) || typeof interaction.reply !== "function")
+    return;
+  await respondSafely(
+    interaction as RepliableInteraction,
+    ephemeralPayload({ content }),
+  );
 }
 
 export function registerInteractionRouter(input: {
@@ -26,15 +48,32 @@ export function registerInteractionRouter(input: {
   guildId: string;
   controlChannelId: string;
   handlers: readonly DiscordCommandHandler[];
+  componentHandlers?: readonly DiscordComponentHandler[];
   logger: Logger;
 }) {
   const handlers = new Map(
     input.handlers.map((handler) => [handler.name, handler]),
   );
+  const componentHandlers = input.componentHandlers ?? [];
   input.client.on("interactionCreate", async (interaction) => {
-    if (!interaction.isChatInputCommand()) return;
-    const handler = handlers.get(interaction.commandName);
+    const isChatInputCommand = interaction.isChatInputCommand();
+    const isButton = interaction.isButton?.() ?? false;
+    const isUserSelectMenu = interaction.isUserSelectMenu?.() ?? false;
+    const isModalSubmit = interaction.isModalSubmit?.() ?? false;
+    const customId =
+      "customId" in interaction && typeof interaction.customId === "string"
+        ? interaction.customId
+        : undefined;
+    const handler = isChatInputCommand
+      ? handlers.get(interaction.commandName)
+      : isButton || isUserSelectMenu || isModalSubmit
+        ? componentHandlers.find((candidate) =>
+            customId?.startsWith(candidate.customIdPrefix),
+          )
+        : undefined;
     if (!handler) return;
+    const handlerName =
+      "name" in handler ? handler.name : handler.customIdPrefix;
     if (!isAllowedGuild(interaction, input.guildId)) {
       await safeReply(
         interaction,
@@ -51,10 +90,15 @@ export function registerInteractionRouter(input: {
     }
     const startedAt = Date.now();
     try {
-      await handler.execute(interaction);
+      if (isChatInputCommand)
+        await (handler as DiscordCommandHandler).execute(interaction as never);
+      else
+        await (handler as DiscordComponentHandler).executeComponent(
+          interaction as never,
+        );
       input.logger.info(
         {
-          command: handler.name,
+          command: handlerName,
           interactionId: interaction.id,
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -65,11 +109,34 @@ export function registerInteractionRouter(input: {
         "Discord command handled",
       );
     } catch (error) {
-      const source = error instanceof CommandUserError ? error.cause : error;
+      const typedError =
+        error instanceof CommandUserError ||
+        error instanceof DiscordInteractionError
+          ? error
+          : undefined;
+      const source = typedError?.cause ?? error;
+      if (isInteractionLifecycleError(source)) {
+        input.logger.warn(
+          {
+            command: handlerName,
+            interactionId: interaction.id,
+            code: interactionErrorCode(source),
+            status: "interaction-lifecycle-error",
+          },
+          "Discord interaction lifecycle error",
+        );
+        return;
+      }
       input.logger.error(
         {
           err: source,
-          command: handler.name,
+          errorName: error instanceof Error ? error.name : typeof error,
+          errorCode:
+            error instanceof DiscordInteractionError
+              ? error.failure
+              : undefined,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          command: handlerName,
           interactionId: interaction.id,
           guildId: interaction.guildId,
           channelId: interaction.channelId,
@@ -79,11 +146,16 @@ export function registerInteractionRouter(input: {
         },
         "Discord command failed",
       );
+      const genericMessage =
+        handlerName === "autorizar-serie"
+          ? "No se pudo iniciar la autorización. Inténtalo nuevamente."
+          : "No se pudo completar la solicitud. Inténtalo nuevamente más tarde.";
       await safeReply(
         interaction,
-        error instanceof CommandUserError
+        error instanceof CommandUserError ||
+          error instanceof DiscordInteractionError
           ? error.userMessage
-          : "No se pudo completar la solicitud. Inténtalo nuevamente más tarde.",
+          : genericMessage,
       );
     }
   });

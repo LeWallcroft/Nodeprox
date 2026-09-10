@@ -1,17 +1,25 @@
+import { MessageFlags } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { LinkDiscordAccount } from "../../application/link-discord-account.js";
 import { NodeProxApiError } from "../../infrastructure/nodeprox-api/nodeprox-api.client.js";
 import { LINK_SUCCESS, LinkCommand } from "./link.command.js";
 
 function interaction() {
-  return {
+  const target = {
     id: "interaction-1",
     guildId: "guild-1",
     channelId: "channel-1",
     user: { id: "discord-user-1" },
     options: { getString: vi.fn().mockReturnValue("NPX-LINK-code") },
     reply: vi.fn().mockResolvedValue(undefined),
+    editReply: vi.fn().mockResolvedValue(undefined),
+    deferred: false,
+    replied: false,
+    deferReply: vi.fn().mockImplementation(async () => {
+      target.deferred = true;
+    }),
   };
+  return target;
 }
 
 describe("/vincular", () => {
@@ -21,6 +29,7 @@ describe("/vincular", () => {
         .fn()
         .mockResolvedValue({ linked: true, idempotent: false }),
       getIntegration: vi.fn(),
+      issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
     const target = interaction();
@@ -33,9 +42,11 @@ describe("/vincular", () => {
       channelId: "channel-1",
       interactionId: "interaction-1",
     });
-    expect(target.reply).toHaveBeenCalledWith({
+    expect(target.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(target.editReply).toHaveBeenCalledWith({
       content: LINK_SUCCESS,
-      ephemeral: true,
     });
   });
 
@@ -47,6 +58,7 @@ describe("/vincular", () => {
           new NodeProxApiError("discord-link-code-invalid", 400),
         ),
       getIntegration: vi.fn(),
+      issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
     await expect(command.execute(interaction() as never)).rejects.toMatchObject(
@@ -60,6 +72,7 @@ describe("/vincular", () => {
     const api = {
       confirmLink: vi.fn().mockRejectedValue(new NodeProxApiError(null, 0)),
       getIntegration: vi.fn(),
+      issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
     await expect(command.execute(interaction() as never)).rejects.toMatchObject(

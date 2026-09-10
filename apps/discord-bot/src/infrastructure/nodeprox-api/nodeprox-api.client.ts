@@ -2,6 +2,8 @@ import type {
   ConfirmDiscordLinkInput,
   ConfirmDiscordLinkResult,
   DiscordIntegrationConfig,
+  IssueSeriesCreationGrantInput,
+  IssueSeriesCreationGrantResult,
   NodeProxDiscordApi,
 } from "./contracts.js";
 
@@ -32,6 +34,13 @@ export class NodeProxApiClient implements NodeProxDiscordApi {
     return this.request<DiscordIntegrationConfig>(
       "/internal/discord/integration",
       { method: "GET" },
+    );
+  }
+
+  issueSeriesCreationGrant(input: IssueSeriesCreationGrantInput) {
+    return this.request<IssueSeriesCreationGrantResult>(
+      "/internal/discord/series-grants",
+      { method: "POST", body: JSON.stringify(input) },
     );
   }
 

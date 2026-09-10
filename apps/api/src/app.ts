@@ -22,8 +22,12 @@ import { DrizzleChapterReplacementProcessingRepository } from "./modules/chapter
 import { registerChapterReplacementPlugin } from "./modules/chapter-replacements/presentation/chapter-replacement.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { DiscordGatewayService } from "./modules/discord/application/discord-gateway.service.js";
+import { DiscordRoleConfigurationService } from "./modules/discord/application/discord-role-configuration.service.js";
+import { DiscordBotGuildRoleVerifier } from "./modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
+import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "./modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
 import { RedisLinkCodeStore } from "./modules/discord/infrastructure/redis-link-code.store.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
+import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
 import { DrizzleDomainEventOutbox } from "./modules/events/infrastructure/persistence/drizzle-domain-event-outbox.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -65,6 +69,7 @@ export interface AppDependencies {
   operationAuditWriter?: OperationAuditWriter;
   discord?: {
     internalToken?: string | undefined;
+    botInternalUrl?: string | undefined;
     redisUrl: string;
     guildId?: string | undefined;
     controlChannelId?: string | undefined;
@@ -110,22 +115,41 @@ export function buildApp(
       authentication,
     );
     const domainEvents = new DrizzleDomainEventOutbox();
-    if (dependencies.discord)
+    if (dependencies.discord) {
+      const discordService = new DiscordGatewayService(
+        dependencies.database,
+        new RedisLinkCodeStore(dependencies.discord.redisUrl),
+        domainEvents,
+        dependencies.discord.guildId && dependencies.discord.controlChannelId
+          ? {
+              guildId: dependencies.discord.guildId,
+              controlChannelId: dependencies.discord.controlChannelId,
+            }
+          : undefined,
+      );
       registerDiscordPlugin(app, {
-        service: new DiscordGatewayService(
-          dependencies.database,
-          new RedisLinkCodeStore(dependencies.discord.redisUrl),
-          domainEvents,
-          dependencies.discord.guildId && dependencies.discord.controlChannelId
-            ? {
-                guildId: dependencies.discord.guildId,
-                controlChannelId: dependencies.discord.controlChannelId,
-              }
-            : undefined,
-        ),
+        service: discordService,
         internalToken: dependencies.discord.internalToken,
         authentication,
       });
+      if (
+        dependencies.discord.botInternalUrl &&
+        dependencies.discord.internalToken
+      )
+        registerDiscordAdminPlugin(app, {
+          service: new DiscordRoleConfigurationService(
+            new DrizzleDiscordAuthorizedRoleConfigurationRepository(
+              dependencies.database,
+            ),
+            authorization,
+            new DiscordBotGuildRoleVerifier(
+              dependencies.discord.botInternalUrl,
+              dependencies.discord.internalToken,
+            ),
+          ),
+          authentication,
+        });
+    }
     registerIdentityPlugin(
       app,
       dependencies.database,
