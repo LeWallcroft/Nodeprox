@@ -1,37 +1,34 @@
 import { randomUUID } from "node:crypto";
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  type ButtonInteraction,
-  ButtonStyle,
-  type ChatInputCommandInteraction,
-  ModalBuilder,
-  type ModalSubmitInteraction,
-  TextInputBuilder,
-  TextInputStyle,
-  UserSelectMenuBuilder,
-  type UserSelectMenuInteraction,
+import type {
+  ButtonInteraction,
+  ChatInputCommandInteraction,
+  ModalSubmitInteraction,
+  UserSelectMenuInteraction,
 } from "discord.js";
 import { IssueSeriesCreationGrant } from "../../application/issue-series-creation-grant.js";
 import type { NodeProxDiscordApi } from "../../infrastructure/nodeprox-api/contracts.js";
 import { NodeProxApiError } from "../../infrastructure/nodeprox-api/nodeprox-api.client.js";
+import {
+  authorizeSeriesCustomIdPrefix,
+  createAuthorizeSeriesCustomId,
+} from "../ui/components/authorize-series.components.js";
+import { createAuthorizeSeriesReferenceModal } from "../ui/modals/authorize-series-reference.modal.js";
+import { presentAuthorizeSeries } from "../ui/presenters/authorize-series.presenter.js";
+import type { AuthorizeSeriesViewModel } from "../ui/view-models/authorize-series.view-model.js";
 import {
   getInteractionRoleIds,
   hasDiscordCapability,
 } from "../guards/authorized-role.guard.js";
 import {
   deferComponentUpdate,
-  deferEphemeral,
-  ephemeralPayload,
   respondSafely,
 } from "../interaction-response.js";
 import { CommandUserError } from "./command-user-error.js";
 import { DiscordInteractionError } from "./discord-interaction-error.js";
 
-const PREFIX = "nodeprox:series-grant:";
 const EXPIRES_IN_MS = 10 * 60 * 1000;
 
-type WorkflowStep = "target" | "reference" | "confirming";
+type WorkflowStep = "target" | "reference" | "confirming" | "completed";
 type Workflow = {
   actorDiscordId: string;
   guildId: string;
@@ -41,7 +38,6 @@ type Workflow = {
   targetDiscordId?: string;
   reference?: string;
   submitting: boolean;
-  completedContent?: string;
 };
 
 type WorkflowInteraction =
@@ -49,15 +45,11 @@ type WorkflowInteraction =
   | UserSelectMenuInteraction
   | ModalSubmitInteraction;
 
-function actionId(action: string, workflowId: string) {
-  return `${PREFIX}${action}:${workflowId}`;
-}
-
 function parseAction(customId: string) {
-  const match = new RegExp(`^${PREFIX}([a-z-]+):([a-f0-9-]{36})$`).exec(
-    customId,
-  );
-  return match ? { action: match[1]!, workflowId: match[2]! } : null;
+  const match = new RegExp(
+    `^${authorizeSeriesCustomIdPrefix}([a-f0-9-]{36}):([a-z-]+)$`,
+  ).exec(customId);
+  return match ? { workflowId: match[1]!, action: match[2]! } : null;
 }
 
 function messageFor(error: unknown) {
@@ -78,7 +70,7 @@ function messageFor(error: unknown) {
 
 export class AuthorizeSeriesWorkflow {
   readonly name = "autorizar-serie";
-  readonly customIdPrefix = PREFIX;
+  readonly customIdPrefix = authorizeSeriesCustomIdPrefix;
   private readonly workflows = new Map<string, Workflow>();
 
   constructor(
@@ -87,41 +79,21 @@ export class AuthorizeSeriesWorkflow {
   ) {}
 
   async execute(interaction: ChatInputCommandInteraction) {
-    await deferEphemeral(interaction);
     await this.requireIssuer(interaction);
     const workflowId = randomUUID();
-    this.pruneExpired();
-    this.workflows.set(workflowId, {
+    const workflow: Workflow = {
       actorDiscordId: interaction.user.id,
       guildId: interaction.guildId ?? "",
       channelId: interaction.channelId ?? "",
       expiresAt: Date.now() + EXPIRES_IN_MS,
       step: "target",
       submitting: false,
-    });
-    const selector =
-      new ActionRowBuilder<UserSelectMenuBuilder>().addComponents(
-        new UserSelectMenuBuilder()
-          .setCustomId(actionId("target", workflowId))
-          .setMinValues(1)
-          .setMaxValues(1)
-          .setPlaceholder("Seleccionar usuario"),
-      );
+    };
+    this.pruneExpired();
+    this.workflows.set(workflowId, workflow);
     await respondSafely(
       interaction,
-      ephemeralPayload({
-        content:
-          "Selecciona al usuario de Discord que recibirá la autorización.",
-        components: [
-          selector,
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder()
-              .setCustomId(actionId("cancel", workflowId))
-              .setLabel("Cancelar")
-              .setStyle(ButtonStyle.Secondary),
-          ),
-        ],
-      }),
+      presentAuthorizeSeries(this.toViewModel(workflowId, workflow)),
     );
   }
 
@@ -129,7 +101,11 @@ export class AuthorizeSeriesWorkflow {
     const parsed = parseAction(interaction.customId);
     if (!parsed) throw new DiscordInteractionError("invalid_component");
     const workflow = this.workflows.get(parsed.workflowId);
-    if (!workflow || workflow.expiresAt <= Date.now()) {
+    if (
+      !workflow ||
+      workflow.expiresAt <= Date.now() ||
+      workflow.step === "completed"
+    ) {
       this.workflows.delete(parsed.workflowId);
       throw new DiscordInteractionError("stale_workflow");
     }
@@ -139,20 +115,30 @@ export class AuthorizeSeriesWorkflow {
       interaction.channelId !== workflow.channelId
     )
       throw new CommandUserError(
-        "Esta autorización no te pertenece.",
+        "No tienes permisos para interactuar con esta acción.",
         undefined,
       );
 
-    if (parsed.action === "target" && interaction.isUserSelectMenu())
+    await this.requireIssuer(interaction);
+
+    if (parsed.action === "target" && interaction.isUserSelectMenu()) {
+      this.requireStep(workflow, "target");
       return this.selectTarget(interaction, workflow, parsed.workflowId);
-    if (parsed.action === "continue" && interaction.isButton())
+    }
+    if (parsed.action === "continue" && interaction.isButton()) {
+      this.requireStep(workflow, "reference");
       return this.showReferenceModal(interaction, workflow, parsed.workflowId);
-    if (parsed.action === "reference" && interaction.isModalSubmit())
+    }
+    if (parsed.action === "reference" && interaction.isModalSubmit()) {
+      this.requireStep(workflow, "reference");
       return this.confirmation(interaction, workflow, parsed.workflowId);
-    if (parsed.action === "confirm" && interaction.isButton())
+    }
+    if (parsed.action === "confirm" && interaction.isButton()) {
+      this.requireStep(workflow, "confirming");
       return this.confirm(interaction, workflow);
+    }
     if (parsed.action === "cancel" && interaction.isButton())
-      return this.cancel(interaction, parsed.workflowId);
+      return this.cancel(interaction, workflow, parsed.workflowId);
     throw new DiscordInteractionError("invalid_component");
   }
 
@@ -169,21 +155,9 @@ export class AuthorizeSeriesWorkflow {
       );
     workflow.targetDiscordId = targetDiscordId;
     workflow.step = "reference";
-    await interaction.update({
-      content: `Usuario seleccionado: <@${targetDiscordId}>`,
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(actionId("continue", workflowId))
-            .setLabel("Continuar")
-            .setStyle(ButtonStyle.Primary),
-          new ButtonBuilder()
-            .setCustomId(actionId("cancel", workflowId))
-            .setLabel("Cancelar")
-            .setStyle(ButtonStyle.Secondary),
-        ),
-      ],
-    });
+    await interaction.update(
+      presentAuthorizeSeries(this.toViewModel(workflowId, workflow)),
+    );
   }
 
   private async showReferenceModal(
@@ -194,20 +168,7 @@ export class AuthorizeSeriesWorkflow {
     if (!workflow.targetDiscordId)
       throw new CommandUserError("Selecciona primero un usuario.", undefined);
     await interaction.showModal(
-      new ModalBuilder()
-        .setCustomId(actionId("reference", workflowId))
-        .setTitle("Referencia de autorización")
-        .addComponents(
-          new ActionRowBuilder<TextInputBuilder>().addComponents(
-            new TextInputBuilder()
-              .setCustomId("reference")
-              .setLabel("Referencia (opcional)")
-              .setPlaceholder("Ej.: Proyecto Alpha / lote septiembre")
-              .setStyle(TextInputStyle.Short)
-              .setRequired(false)
-              .setMaxLength(240),
-          ),
-        ),
+      createAuthorizeSeriesReferenceModal(workflowId),
     );
   }
 
@@ -218,46 +179,22 @@ export class AuthorizeSeriesWorkflow {
   ) {
     if (!workflow.targetDiscordId)
       throw new CommandUserError("Selecciona primero un usuario.", undefined);
+    if (!interaction.isFromMessage())
+      throw new DiscordInteractionError("invalid_component");
     workflow.reference = interaction.fields
       .getTextInputValue("reference")
       .trim();
     workflow.step = "confirming";
-    const reference = workflow.reference || "Sin referencia";
-    await respondSafely(
-      interaction,
-      ephemeralPayload({
-        content:
-          `**Autorizar creación de Serie**\n\nUsuario: <@${workflow.targetDiscordId}>\nReferencia: ${reference}\n\n` +
-          "Esta autorización permitirá crear exactamente una Serie. No expira y puede invalidarse mientras siga disponible.",
-        components: [
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder()
-              .setCustomId(actionId("confirm", workflowId))
-              .setLabel("Autorizar")
-              .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-              .setCustomId(actionId("cancel", workflowId))
-              .setLabel("Cancelar")
-              .setStyle(ButtonStyle.Secondary),
-          ),
-        ],
-      }),
+    await interaction.update(
+      presentAuthorizeSeries(this.toViewModel(workflowId, workflow)),
     );
   }
 
   private async confirm(interaction: ButtonInteraction, workflow: Workflow) {
-    if (workflow.completedContent) {
-      await interaction.update({
-        content: workflow.completedContent,
-        components: [],
-      });
-      return;
-    }
     if (workflow.submitting) {
-      await respondSafely(
-        interaction,
-        ephemeralPayload({ content: "La autorización ya se está procesando." }),
-      );
+      await respondSafely(interaction, {
+        content: "La autorización ya se está procesando.",
+      });
       return;
     }
     if (!workflow.targetDiscordId)
@@ -265,7 +202,6 @@ export class AuthorizeSeriesWorkflow {
     workflow.submitting = true;
     try {
       await deferComponentUpdate(interaction);
-      await this.requireIssuer(interaction);
       const result = await this.issueGrant.execute({
         targetDiscordId: workflow.targetDiscordId,
         ...(workflow.reference ? { reference: workflow.reference } : {}),
@@ -275,14 +211,17 @@ export class AuthorizeSeriesWorkflow {
         channelId: interaction.channelId ?? "",
         interactionId: interaction.id,
       });
-      workflow.completedContent =
-        `✅ **Autorización creada**\n\nUsuario: <@${workflow.targetDiscordId}>\n` +
-        `Código: \`${result.displayCode}\`\nReferencia: ${result.reference ?? "Sin referencia"}\n` +
-        "Estado: Disponible\n\nPermite crear exactamente una Serie.";
-      await respondSafely(interaction, {
-        content: workflow.completedContent,
-        components: [],
-      });
+      workflow.step = "completed";
+      await respondSafely(
+        interaction,
+        presentAuthorizeSeries({
+          state: "completed",
+          initiatedByDiscordUserId: workflow.actorDiscordId,
+          targetDiscordId: workflow.targetDiscordId,
+          reference: result.reference,
+          displayCode: result.displayCode,
+        }),
+      );
     } catch (error) {
       workflow.submitting = false;
       if (error instanceof CommandUserError) throw error;
@@ -290,16 +229,53 @@ export class AuthorizeSeriesWorkflow {
     }
   }
 
-  private async cancel(interaction: ButtonInteraction, workflowId: string) {
+  private async cancel(
+    interaction: ButtonInteraction,
+    workflow: Workflow,
+    workflowId: string,
+  ) {
     this.workflows.delete(workflowId);
-    await interaction.update({
-      content: "Autorización cancelada.",
-      components: [],
-    });
+    await interaction.update(
+      presentAuthorizeSeries({
+        state: "cancelled",
+        initiatedByDiscordUserId: workflow.actorDiscordId,
+      }),
+    );
+  }
+
+  private toViewModel(
+    workflowId: string,
+    workflow: Workflow,
+  ): AuthorizeSeriesViewModel {
+    if (workflow.step === "target")
+      return {
+        state: "selecting-target",
+        workflowId,
+        initiatedByDiscordUserId: workflow.actorDiscordId,
+      };
+    if (workflow.step === "reference")
+      return {
+        state: "target-selected",
+        workflowId,
+        initiatedByDiscordUserId: workflow.actorDiscordId,
+        targetDiscordId: workflow.targetDiscordId ?? "",
+      };
+    return {
+      state: "pending-confirmation",
+      workflowId,
+      initiatedByDiscordUserId: workflow.actorDiscordId,
+      targetDiscordId: workflow.targetDiscordId ?? "",
+      reference: workflow.reference || null,
+    };
+  }
+
+  private requireStep(workflow: Workflow, step: WorkflowStep) {
+    if (workflow.step !== step)
+      throw new DiscordInteractionError("stale_workflow");
   }
 
   private async requireIssuer(
-    interaction: ChatInputCommandInteraction | ButtonInteraction,
+    interaction: ChatInputCommandInteraction | WorkflowInteraction,
   ) {
     const integration = await this.api.getIntegration();
     if (!integration.enabled)
@@ -308,13 +284,13 @@ export class AuthorizeSeriesWorkflow {
       throw new DiscordInteractionError("wrong_guild");
     if (interaction.channelId !== integration.controlChannelId)
       throw new DiscordInteractionError("wrong_channel");
-    const actorRoleIds = getInteractionRoleIds(interaction);
-    const actorHasIssueCapability = hasDiscordCapability(
-      actorRoleIds,
-      integration.authorizedRoles,
-      "series_grant.issue",
-    );
-    if (!actorHasIssueCapability)
+    if (
+      !hasDiscordCapability(
+        getInteractionRoleIds(interaction),
+        integration.authorizedRoles,
+        "series_grant.issue",
+      )
+    )
       throw new DiscordInteractionError("unauthorized");
   }
 
@@ -324,3 +300,5 @@ export class AuthorizeSeriesWorkflow {
       if (workflow.expiresAt <= now) this.workflows.delete(workflowId);
   }
 }
+
+export { createAuthorizeSeriesCustomId };
