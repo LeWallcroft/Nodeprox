@@ -1,7 +1,5 @@
-import type { ChatInputCommandInteraction } from "discord.js";
-
 export function isAllowedGuild(
-  interaction: Pick<ChatInputCommandInteraction, "guildId">,
+  interaction: { guildId: string | null },
   guildId: string,
 ) {
   return interaction.guildId === guildId;

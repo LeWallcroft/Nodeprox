@@ -1,7 +1,5 @@
-import type { ChatInputCommandInteraction } from "discord.js";
-
 export function isAllowedControlChannel(
-  interaction: Pick<ChatInputCommandInteraction, "channelId">,
+  interaction: { channelId: string | null },
   channelId: string,
 ) {
   return interaction.channelId === channelId;

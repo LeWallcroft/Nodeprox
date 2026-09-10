@@ -18,6 +18,7 @@ describe("Discord bot lifecycle", () => {
     const logger = {
       info: vi.fn(),
       error: vi.fn(),
+      warn: vi.fn(),
       flush: vi.fn().mockResolvedValue(undefined),
     };
     const health = new BotHealthState();
@@ -46,6 +47,7 @@ describe("Discord bot lifecycle", () => {
       const logger = {
         info: vi.fn(),
         error: vi.fn(),
+        warn: vi.fn(),
         flush: vi.fn().mockResolvedValue(undefined),
       };
       const stop = bindClientLifecycle({
@@ -68,6 +70,36 @@ describe("Discord bot lifecycle", () => {
       once.mockRestore();
     },
   );
+
+  it.each([10062, 40060])(
+    "keeps gateway health ready for interaction lifecycle error %s",
+    (code) => {
+      const client = new EventEmitter() as EventEmitter & {
+        destroy: ReturnType<typeof vi.fn>;
+      };
+      client.destroy = vi.fn();
+      const logger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        flush: vi.fn().mockResolvedValue(undefined),
+      };
+      const health = new BotHealthState();
+      bindClientLifecycle({
+        client: client as never,
+        health,
+        logger: logger as never,
+      });
+      client.emit(Events.ClientReady);
+      client.emit(Events.Error, { code });
+      expect(health.snapshot()).toEqual({
+        status: "ready",
+        discordConnected: true,
+      });
+      expect(logger.warn).toHaveBeenCalledOnce();
+      expect(logger.error).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("Discord bot startup", () => {
@@ -78,6 +110,8 @@ describe("Discord bot startup", () => {
     DISCORD_CONTROL_CHANNEL_ID: "channel-id",
     NODEPROX_INTERNAL_API_URL: "http://127.0.0.1:3001",
     DISCORD_BOT_INTERNAL_TOKEN: "internal-token",
+    DISCORD_BOT_INTERNAL_HOST: "127.0.0.1",
+    DISCORD_BOT_INTERNAL_PORT: 0,
     LOG_LEVEL: "silent",
   };
 
@@ -91,6 +125,7 @@ describe("Discord bot startup", () => {
     const logger = {
       info: vi.fn(),
       error: vi.fn(),
+      warn: vi.fn(),
       flush: vi.fn().mockResolvedValue(undefined),
     };
     const getIntegration = vi.fn().mockResolvedValue({
@@ -103,7 +138,11 @@ describe("Discord bot startup", () => {
     await startBot({
       config,
       logger: logger as never,
-      api: { getIntegration, confirmLink: vi.fn() },
+      api: {
+        getIntegration,
+        confirmLink: vi.fn(),
+        issueSeriesCreationGrant: vi.fn(),
+      },
       client: client as never,
       registerCommands,
       installSignalHandlers: false,
@@ -125,6 +164,7 @@ describe("Discord bot startup", () => {
     const logger = {
       info: vi.fn(),
       error: vi.fn(),
+      warn: vi.fn(),
       flush: vi.fn().mockResolvedValue(undefined),
     };
 
@@ -139,6 +179,7 @@ describe("Discord bot startup", () => {
             controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
           }),
           confirmLink: vi.fn(),
+          issueSeriesCreationGrant: vi.fn(),
         },
         client: client as never,
         registerCommands: vi.fn().mockResolvedValue(undefined),

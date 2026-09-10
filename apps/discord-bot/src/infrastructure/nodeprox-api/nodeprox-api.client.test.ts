@@ -55,4 +55,37 @@ describe("NodeProxApiClient", () => {
     ).rejects.toEqual(new NodeProxApiError("discord-link-code-invalid", 400));
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+
+  it("issues grants only through the internal M2M endpoint", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: "grant",
+          displayCode: "NPX-SER-OPAQUE",
+          reference: null,
+          status: "available",
+          issuedAt: "2026-09-08T00:00:00.000Z",
+          targetUser: { id: "user", username: "user" },
+        }),
+        { status: 201 },
+      ),
+    );
+    const client = new NodeProxApiClient(
+      "https://api.example.test",
+      "internal-token",
+      fetcher,
+    );
+    await client.issueSeriesCreationGrant({
+      targetDiscordId: "target-discord",
+      actorDiscordId: "actor-discord",
+      actorRoleIds: ["issuer"],
+      guildId: "guild",
+      channelId: "channel",
+      interactionId: "interaction",
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL("/internal/discord/series-grants", "https://api.example.test"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

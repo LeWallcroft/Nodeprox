@@ -1,6 +1,7 @@
 import { type Client, Events } from "discord.js";
 import type { Logger } from "pino";
 import type { BotHealthState } from "../health/health.js";
+import { isInteractionLifecycleError } from "./interaction-response.js";
 
 export function registerShutdownHandlers(
   stop: (signal: string) => Promise<void>,
@@ -10,7 +11,7 @@ export function registerShutdownHandlers(
 }
 
 export function bindClientLifecycle(input: {
-  client: Pick<Client, "once" | "destroy">;
+  client: Pick<Client, "once" | "on" | "destroy">;
   health: BotHealthState;
   logger: Logger;
 }) {
@@ -29,7 +30,14 @@ export function bindClientLifecycle(input: {
       "discord_bot.gateway.ready",
     );
   });
-  input.client.once(Events.Error, (error) => {
+  input.client.on(Events.Error, (error) => {
+    if (isInteractionLifecycleError(error)) {
+      input.logger.warn(
+        { err: error },
+        "discord_bot.interaction.lifecycle.error",
+      );
+      return;
+    }
     input.health.markDegraded();
     input.logger.error(
       { err: error, health: input.health.snapshot() },

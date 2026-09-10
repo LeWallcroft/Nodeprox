@@ -1,6 +1,11 @@
 import type { ChatInputCommandInteraction } from "discord.js";
 import type { LinkDiscordAccount } from "../../application/link-discord-account.js";
 import { NodeProxApiError } from "../../infrastructure/nodeprox-api/nodeprox-api.client.js";
+import {
+  deferEphemeral,
+  ephemeralPayload,
+  respondSafely,
+} from "../interaction-response.js";
 import { CommandUserError } from "./command-user-error.js";
 
 export const LINK_SUCCESS =
@@ -32,20 +37,24 @@ export class LinkCommand {
   async execute(interaction: ChatInputCommandInteraction) {
     const code = interaction.options.getString("codigo", true).trim();
     if (!code || code.length > 64) {
-      await interaction.reply({
-        content: "El código de vinculación no es válido.",
-        ephemeral: true,
-      });
+      await respondSafely(
+        interaction,
+        ephemeralPayload({ content: "El código de vinculación no es válido." }),
+      );
       return;
     }
     if (!interaction.guildId || !interaction.channelId) {
-      await interaction.reply({
-        content: "Este comando debe utilizarse dentro del servidor autorizado.",
-        ephemeral: true,
-      });
+      await respondSafely(
+        interaction,
+        ephemeralPayload({
+          content:
+            "Este comando debe utilizarse dentro del servidor autorizado.",
+        }),
+      );
       return;
     }
     try {
+      await deferEphemeral(interaction);
       await this.link.execute({
         code,
         discordId: interaction.user.id,
@@ -53,7 +62,10 @@ export class LinkCommand {
         channelId: interaction.channelId,
         interactionId: interaction.id,
       });
-      await interaction.reply({ content: LINK_SUCCESS, ephemeral: true });
+      await respondSafely(
+        interaction,
+        ephemeralPayload({ content: LINK_SUCCESS }),
+      );
     } catch (error) {
       throw new CommandUserError(messageFor(error), error);
     }

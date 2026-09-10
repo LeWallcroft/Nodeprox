@@ -37,8 +37,15 @@ export const PERMISSION_CATALOG = Object.values(
   PERMISSIONS,
 ) as readonly Permission[];
 
+/** Permissions reserved for NodeProx administrators even though their names are
+ * intentionally not prefixed with `admin.`. */
+const adminOnlyPermissions = new Set<Permission>([
+  PERMISSIONS.DISCORD_INTEGRATION_CONFIGURE,
+]);
+
 const nonAdminPermissions = PERMISSION_CATALOG.filter(
-  (permission) => !permission.startsWith("admin."),
+  (permission) =>
+    !permission.startsWith("admin.") && !adminOnlyPermissions.has(permission),
 );
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {

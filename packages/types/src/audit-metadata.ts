@@ -20,6 +20,12 @@ const ALLOWED_METADATA_KEYS = new Set([
   "retiredImageCount",
   "previousVersion",
   "currentVersion",
+  "guildId",
+  "previousRoleCount",
+  "newRoleCount",
+  "issueCapabilityCount",
+  "invalidateCapabilityCount",
+  "configureCapabilityCount",
 ]);
 
 const SENSITIVE_KEY_PATTERN =
