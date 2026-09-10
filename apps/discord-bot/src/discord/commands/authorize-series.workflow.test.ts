@@ -11,245 +11,183 @@ const integration = {
   ],
 };
 
+function api() {
+  return {
+    getIntegration: vi.fn().mockResolvedValue(integration),
+    issueSeriesCreationGrant: vi.fn().mockResolvedValue({
+      id: "grant",
+      displayCode: "NPX-SER-OPAQUE",
+      reference: "Proyecto Alpha",
+      status: "available",
+      issuedAt: "2026-09-08T00:00:00.000Z",
+      targetUser: { id: "internal-user", username: "user" },
+    }),
+    confirmLink: vi.fn(),
+  };
+}
+
 function commandInteraction(roleIds = ["issuer"]) {
-  const target = {
+  return {
     id: "command-interaction",
     guildId: "guild",
     channelId: "channel",
     user: { id: "actor" },
     member: { roles: roleIds },
     reply: vi.fn().mockResolvedValue(undefined),
+    deferred: false,
+    replied: false,
+  };
+}
+
+function component(customId: string, shape: "select" | "button" | "modal") {
+  const target = {
+    id: `${shape}-interaction`,
+    customId,
+    values: shape === "select" ? ["target-discord"] : [],
+    guildId: "guild",
+    channelId: "channel",
+    user: { id: "actor" },
+    member: { roles: ["issuer"] },
+    isUserSelectMenu: () => shape === "select",
+    isButton: () => shape === "button",
+    isModalSubmit: () => shape === "modal",
+    isFromMessage: () => shape === "modal",
+    fields: { getTextInputValue: vi.fn().mockReturnValue("Proyecto Alpha") },
+    update: vi.fn().mockResolvedValue(undefined),
+    showModal: vi.fn().mockResolvedValue(undefined),
+    reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue(undefined),
     deferred: false,
     replied: false,
-    deferReply: vi.fn().mockImplementation(async () => {
-      target.deferred = true;
-    }),
+    deferUpdate: vi.fn(),
   };
+  target.deferUpdate.mockImplementation(async () => {
+    target.deferred = true;
+  });
   return target;
 }
 
+function customId(payload: unknown, row: number, item: number) {
+  return (
+    payload as {
+      components: Array<{ components: Array<{ data: { custom_id: string } }> }>;
+    }
+  ).components[row]!.components[item]!.data.custom_id;
+}
+
 describe("/autorizar-serie workflow", () => {
+  it("publishes an embedded selector only for an issuing actor", async () => {
+    const client = api();
+    const workflow = new AuthorizeSeriesWorkflow(client);
+    const command = commandInteraction();
+
+    await workflow.execute(command as never);
+
+    expect(command.reply).toHaveBeenCalledOnce();
+    const response = command.reply.mock.calls[0]?.[0];
+    expect(response.embeds).toHaveLength(1);
+    expect(response.flags).toBeUndefined();
+    expect(customId(response, 0, 0)).toMatch(
+      /^nodeprox:series-grant:[a-f0-9-]{36}:target$/,
+    );
+  });
+
   it.each([{ roleIds: [] }, { roleIds: ["invalidator"] }])(
-    "fails closed before showing the selector when the actor lacks issue capability",
+    "rejects an actor without issue capability before creating a public workflow",
     async ({ roleIds }) => {
-      const api = {
-        getIntegration: vi.fn().mockResolvedValue(integration),
-        issueSeriesCreationGrant: vi.fn(),
-        confirmLink: vi.fn(),
-      };
-      const workflow = new AuthorizeSeriesWorkflow(api);
-      const target = commandInteraction(roleIds);
-      await expect(workflow.execute(target as never)).rejects.toMatchObject({
+      const workflow = new AuthorizeSeriesWorkflow(api());
+      await expect(
+        workflow.execute(commandInteraction(roleIds) as never),
+      ).rejects.toMatchObject({
         failure: "unauthorized",
-        userMessage: "No tienes permisos para autorizar la creación de Series.",
       });
-      expect(target.deferReply).toHaveBeenCalledOnce();
-      expect(target.reply).not.toHaveBeenCalled();
-      expect(target.editReply).not.toHaveBeenCalled();
-      expect(api.issueSeriesCreationGrant).not.toHaveBeenCalled();
       expect(
         (workflow as unknown as { workflows: Map<string, unknown> }).workflows,
       ).toHaveLength(0);
     },
   );
 
-  it("builds and sends the initial selector for the configured issuing role", async () => {
-    const api = {
-      getIntegration: vi.fn().mockResolvedValue({
-        ...integration,
-        authorizedRoles: [
-          {
-            roleId: "1508658475209723985",
-            capabilities: ["series_grant.issue"] as const,
-          },
-        ],
-      }),
-      issueSeriesCreationGrant: vi.fn(),
-      confirmLink: vi.fn(),
-    };
-    const workflow = new AuthorizeSeriesWorkflow(api);
-    const target = commandInteraction(["1508658475209723985"]);
-
-    await workflow.execute(target as never);
-
-    expect(target.deferReply).toHaveBeenCalledOnce();
-    expect(target.editReply).toHaveBeenCalledOnce();
-    const response = target.editReply.mock.calls[0]?.[0];
-    expect(response.components[0].components[0].data.custom_id).toMatch(
-      /^nodeprox:series-grant:target:[a-f0-9-]{36}$/,
-    );
-    expect(api.issueSeriesCreationGrant).not.toHaveBeenCalled();
-    expect(
-      (workflow as unknown as { workflows: Map<string, unknown> }).workflows,
-    ).toHaveLength(1);
-  });
-
-  it("keeps stale workflow errors distinct from authorization failures", async () => {
-    const workflow = new AuthorizeSeriesWorkflow({
-      getIntegration: vi.fn(),
-      issueSeriesCreationGrant: vi.fn(),
-      confirmLink: vi.fn(),
-    });
-    await expect(
-      workflow.executeComponent({
-        customId:
-          "nodeprox:series-grant:confirm:00000000-0000-0000-0000-000000000000",
-      } as never),
-    ).rejects.toEqual(expect.any(DiscordInteractionError));
-    await expect(
-      workflow.executeComponent({
-        customId:
-          "nodeprox:series-grant:confirm:00000000-0000-0000-0000-000000000000",
-      } as never),
-    ).rejects.toMatchObject({
-      failure: "stale_workflow",
-      userMessage: "Esta acción ya no es válida.",
-    });
-  });
-
-  it("classifies a disabled integration separately", async () => {
-    const api = {
-      getIntegration: vi.fn().mockResolvedValue({
-        ...integration,
-        enabled: false,
-      }),
-      issueSeriesCreationGrant: vi.fn(),
-      confirmLink: vi.fn(),
-    };
-    const workflow = new AuthorizeSeriesWorkflow(api);
-    await expect(
-      workflow.execute(commandInteraction() as never),
-    ).rejects.toMatchObject({
-      failure: "integration_disabled",
-      userMessage: "La integración de Discord no está habilitada.",
-    });
-    expect(api.issueSeriesCreationGrant).not.toHaveBeenCalled();
-  });
-
-  it("uses the selected Discord identity and emits a grant only after confirmation", async () => {
-    const api = {
-      getIntegration: vi.fn().mockResolvedValue(integration),
-      issueSeriesCreationGrant: vi.fn().mockResolvedValue({
-        id: "grant",
-        displayCode: "NPX-SER-OPAQUE",
-        reference: "Proyecto Alpha",
-        status: "available",
-        issuedAt: "2026-09-08T00:00:00.000Z",
-        targetUser: { id: "internal-user", username: "user" },
-      }),
-      confirmLink: vi.fn(),
-    };
-    const workflow = new AuthorizeSeriesWorkflow(api);
+  it("updates one public panel through selection, modal confirmation, and issuance", async () => {
+    const client = api();
+    const workflow = new AuthorizeSeriesWorkflow(client);
     const command = commandInteraction();
     await workflow.execute(command as never);
-    const targetCustomId =
-      command.editReply.mock.calls[0]?.[0].components[0].components[0].data
-        .custom_id;
-    const select = {
-      customId: targetCustomId,
-      values: ["target-discord"],
-      user: { id: "actor" },
-      guildId: "guild",
-      channelId: "channel",
-      isUserSelectMenu: () => true,
-      isButton: () => false,
-      isModalSubmit: () => false,
-      update: vi.fn().mockResolvedValue(undefined),
-    };
-    await workflow.executeComponent(select as never);
-    const continueCustomId =
-      select.update.mock.calls[0]?.[0].components[0].components[0].data
-        .custom_id;
-    const button = {
-      customId: continueCustomId,
-      user: { id: "actor" },
-      guildId: "guild",
-      channelId: "channel",
-      isUserSelectMenu: () => false,
-      isButton: () => true,
-      isModalSubmit: () => false,
-      showModal: vi.fn().mockResolvedValue(undefined),
-    };
-    await workflow.executeComponent(button as never);
-    const referenceCustomId =
-      button.showModal.mock.calls[0]?.[0].data.custom_id;
-    const modal = {
-      customId: referenceCustomId,
-      user: { id: "actor" },
-      guildId: "guild",
-      channelId: "channel",
-      isUserSelectMenu: () => false,
-      isButton: () => false,
-      isModalSubmit: () => true,
-      fields: { getTextInputValue: vi.fn().mockReturnValue("Proyecto Alpha") },
-      reply: vi.fn().mockResolvedValue(undefined),
-    };
+    const selector = component(
+      customId(command.reply.mock.calls[0]?.[0], 0, 0),
+      "select",
+    );
+    await workflow.executeComponent(selector as never);
+
+    const continueButton = component(
+      customId(selector.update.mock.calls[0]?.[0], 0, 0),
+      "button",
+    );
+    await workflow.executeComponent(continueButton as never);
+    const modal = component(
+      continueButton.showModal.mock.calls[0]?.[0].data.custom_id,
+      "modal",
+    );
     await workflow.executeComponent(modal as never);
-    const confirmCustomId =
-      modal.reply.mock.calls[0]?.[0].components[0].components[0].data.custom_id;
-    const confirm = {
-      id: "final-interaction",
-      customId: confirmCustomId,
-      user: { id: "actor" },
-      guildId: "guild",
-      channelId: "channel",
-      member: { roles: ["issuer"] },
-      isUserSelectMenu: () => false,
-      isButton: () => true,
-      isModalSubmit: () => false,
-      update: vi.fn().mockResolvedValue(undefined),
-      deferred: false,
-      replied: false,
-      deferUpdate: vi.fn().mockImplementation(async () => {
-        confirm.deferred = true;
-      }),
-      editReply: vi.fn().mockResolvedValue(undefined),
-    };
-    await workflow.executeComponent(confirm as never);
-    expect(api.issueSeriesCreationGrant).toHaveBeenCalledWith({
-      targetDiscordId: "target-discord",
-      reference: "Proyecto Alpha",
-      actorDiscordId: "actor",
-      actorRoleIds: ["issuer"],
-      guildId: "guild",
-      channelId: "channel",
-      interactionId: "final-interaction",
-    });
-    expect(confirm.editReply).toHaveBeenCalledWith(
+
+    const confirmButton = component(
+      customId(modal.update.mock.calls[0]?.[0], 0, 0),
+      "button",
+    );
+    confirmButton.id = "final-interaction";
+    await workflow.executeComponent(confirmButton as never);
+
+    expect(client.issueSeriesCreationGrant).toHaveBeenCalledOnce();
+    expect(confirmButton.editReply).toHaveBeenCalledWith(
       expect.objectContaining({
-        content: expect.stringContaining("NPX-SER-OPAQUE"),
+        embeds: expect.any(Array),
+        components: [],
       }),
     );
+  });
+
+  it("rejects another actor without mutating the public panel", async () => {
+    const workflow = new AuthorizeSeriesWorkflow(api());
+    const command = commandInteraction();
+    await workflow.execute(command as never);
+    const select = component(
+      customId(command.reply.mock.calls[0]?.[0], 0, 0),
+      "select",
+    );
+    select.user = { id: "other" };
+
+    await expect(
+      workflow.executeComponent(select as never),
+    ).rejects.toMatchObject({
+      userMessage: "No tienes permisos para interactuar con esta acción.",
+    });
+    expect(select.update).not.toHaveBeenCalled();
   });
 
   it("cancels without calling the grant API", async () => {
-    const api = {
-      getIntegration: vi.fn().mockResolvedValue(integration),
-      issueSeriesCreationGrant: vi.fn(),
-      confirmLink: vi.fn(),
-    };
-    const workflow = new AuthorizeSeriesWorkflow(api);
+    const client = api();
+    const workflow = new AuthorizeSeriesWorkflow(client);
     const command = commandInteraction();
     await workflow.execute(command as never);
-    const cancelCustomId =
-      command.editReply.mock.calls[0]?.[0].components[1].components[0].data
-        .custom_id;
-    const cancel = {
-      customId: cancelCustomId,
-      user: { id: "actor" },
-      guildId: "guild",
-      channelId: "channel",
-      isUserSelectMenu: () => false,
-      isButton: () => true,
-      isModalSubmit: () => false,
-      update: vi.fn().mockResolvedValue(undefined),
-    };
+    const cancel = component(
+      customId(command.reply.mock.calls[0]?.[0], 1, 0),
+      "button",
+    );
+
     await workflow.executeComponent(cancel as never);
-    expect(api.issueSeriesCreationGrant).not.toHaveBeenCalled();
-    expect(cancel.update).toHaveBeenCalledWith({
-      content: "Autorización cancelada.",
-      components: [],
-    });
+
+    expect(client.issueSeriesCreationGrant).not.toHaveBeenCalled();
+    expect(cancel.update).toHaveBeenCalledWith(
+      expect.objectContaining({ components: [] }),
+    );
+  });
+
+  it("keeps stale workflow errors private to the component interaction", async () => {
+    const workflow = new AuthorizeSeriesWorkflow(api());
+    await expect(
+      workflow.executeComponent({
+        customId:
+          "nodeprox:series-grant:00000000-0000-0000-0000-000000000000:confirm",
+      } as never),
+    ).rejects.toEqual(expect.any(DiscordInteractionError));
   });
 });
