@@ -5,6 +5,8 @@ import type {
   IssueSeriesCreationGrantInput,
   IssueSeriesCreationGrantResult,
   NodeProxDiscordApi,
+  ReplaceDiscordAuthorizedRolesInput,
+  ReplaceDiscordAuthorizedRolesResult,
 } from "./contracts.js";
 
 export class NodeProxApiError extends Error {
@@ -34,6 +36,20 @@ export class NodeProxApiClient implements NodeProxDiscordApi {
     return this.request<DiscordIntegrationConfig>(
       "/internal/discord/integration",
       { method: "GET" },
+    );
+  }
+
+  getDiscordConfiguration() {
+    return this.request<DiscordIntegrationConfig>(
+      "/internal/discord/configuration",
+      { method: "GET" },
+    );
+  }
+
+  replaceAuthorizedRoles(input: ReplaceDiscordAuthorizedRolesInput) {
+    return this.request<ReplaceDiscordAuthorizedRolesResult>(
+      "/internal/discord/authorized-roles",
+      { method: "PUT", body: JSON.stringify(input) },
     );
   }
 

@@ -4,6 +4,7 @@ import { LinkDiscordAccount } from "./application/link-discord-account.js";
 import { type DiscordBotConfig, loadDiscordBotConfig } from "./config/env.js";
 import { createDiscordClient } from "./discord/client.js";
 import { AuthorizeSeriesWorkflow } from "./discord/commands/authorize-series.workflow.js";
+import { OperationalPanel } from "./discord/commands/configuration.workflow.js";
 import { HelpCommand } from "./discord/commands/help.command.js";
 import { LinkCommand } from "./discord/commands/link.command.js";
 import { registerInteractionRouter } from "./discord/interaction-router.js";
@@ -61,6 +62,7 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
       registerShutdownHandlers(stop);
 
     const authorizeSeries = new AuthorizeSeriesWorkflow(api);
+    const configuration = new OperationalPanel(api, authorizeSeries);
     registerInteractionRouter({
       client,
       guildId: config.DISCORD_GUILD_ID,
@@ -68,9 +70,10 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
       handlers: [
         new LinkCommand(new LinkDiscordAccount(api)),
         authorizeSeries,
+        configuration,
         new HelpCommand(),
       ],
-      componentHandlers: [authorizeSeries],
+      componentHandlers: [authorizeSeries, configuration],
       logger,
     });
     await (dependencies.registerCommands ?? registerGuildCommands)({

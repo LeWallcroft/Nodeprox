@@ -9,13 +9,6 @@ import { IssueSeriesCreationGrant } from "../../application/issue-series-creatio
 import type { NodeProxDiscordApi } from "../../infrastructure/nodeprox-api/contracts.js";
 import { NodeProxApiError } from "../../infrastructure/nodeprox-api/nodeprox-api.client.js";
 import {
-  authorizeSeriesCustomIdPrefix,
-  createAuthorizeSeriesCustomId,
-} from "../ui/components/authorize-series.components.js";
-import { createAuthorizeSeriesReferenceModal } from "../ui/modals/authorize-series-reference.modal.js";
-import { presentAuthorizeSeries } from "../ui/presenters/authorize-series.presenter.js";
-import type { AuthorizeSeriesViewModel } from "../ui/view-models/authorize-series.view-model.js";
-import {
   getInteractionRoleIds,
   hasDiscordCapability,
 } from "../guards/authorized-role.guard.js";
@@ -23,6 +16,13 @@ import {
   deferComponentUpdate,
   respondSafely,
 } from "../interaction-response.js";
+import {
+  authorizeSeriesCustomIdPrefix,
+  createAuthorizeSeriesCustomId,
+} from "../ui/components/authorize-series.components.js";
+import { createAuthorizeSeriesReferenceModal } from "../ui/modals/authorize-series-reference.modal.js";
+import { presentAuthorizeSeries } from "../ui/presenters/authorize-series.presenter.js";
+import type { AuthorizeSeriesViewModel } from "../ui/view-models/authorize-series.view-model.js";
 import { CommandUserError } from "./command-user-error.js";
 import { DiscordInteractionError } from "./discord-interaction-error.js";
 
@@ -44,12 +44,15 @@ type WorkflowInteraction =
   | ButtonInteraction
   | UserSelectMenuInteraction
   | ModalSubmitInteraction;
+type StartInteraction = ChatInputCommandInteraction | ButtonInteraction;
 
 function parseAction(customId: string) {
   const match = new RegExp(
     `^${authorizeSeriesCustomIdPrefix}([a-f0-9-]{36}):([a-z-]+)$`,
   ).exec(customId);
-  return match ? { workflowId: match[1]!, action: match[2]! } : null;
+  const workflowId = match?.[1];
+  const action = match?.[2];
+  return workflowId && action ? { workflowId, action } : null;
 }
 
 function messageFor(error: unknown) {
@@ -78,7 +81,7 @@ export class AuthorizeSeriesWorkflow {
     private readonly issueGrant = new IssueSeriesCreationGrant(api),
   ) {}
 
-  async execute(interaction: ChatInputCommandInteraction) {
+  async execute(interaction: StartInteraction) {
     await this.requireIssuer(interaction);
     const workflowId = randomUUID();
     const workflow: Workflow = {
@@ -291,7 +294,11 @@ export class AuthorizeSeriesWorkflow {
         "series_grant.issue",
       )
     )
-      throw new DiscordInteractionError("unauthorized");
+      throw new DiscordInteractionError(
+        "unauthorized",
+        undefined,
+        "series_grant.issue",
+      );
   }
 
   private pruneExpired() {

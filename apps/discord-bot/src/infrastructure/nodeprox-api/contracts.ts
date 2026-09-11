@@ -29,6 +29,24 @@ export type DiscordIntegrationConfig = {
   authorizedRoles: readonly DiscordAuthorizedRole[];
 };
 
+export type ReplaceDiscordAuthorizedRolesInput = {
+  actorDiscordId: string;
+  actorRoleIds: string[];
+  guildId: string;
+  channelId: string;
+  interactionId: string;
+  roles: Array<{
+    roleId: string;
+    capabilities: DiscordBotCapability[];
+  }>;
+};
+
+export type ReplaceDiscordAuthorizedRolesResult = {
+  guildId: string;
+  authorizedRoles: readonly DiscordAuthorizedRole[];
+  updatedAt: string;
+};
+
 export type IssueSeriesCreationGrantInput = {
   targetDiscordId: string;
   reference?: string;
@@ -53,6 +71,10 @@ export interface NodeProxDiscordApi {
     input: ConfirmDiscordLinkInput,
   ): Promise<ConfirmDiscordLinkResult>;
   getIntegration(): Promise<DiscordIntegrationConfig>;
+  getDiscordConfiguration?(): Promise<DiscordIntegrationConfig>;
+  replaceAuthorizedRoles?(
+    input: ReplaceDiscordAuthorizedRolesInput,
+  ): Promise<ReplaceDiscordAuthorizedRolesResult>;
   issueSeriesCreationGrant(
     input: IssueSeriesCreationGrantInput,
   ): Promise<IssueSeriesCreationGrantResult>;

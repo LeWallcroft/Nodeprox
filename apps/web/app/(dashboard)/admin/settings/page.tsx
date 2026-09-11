@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DiscordAuthorizationConfiguration } from "../../../../components/domains/discord/discord-authorization-configuration";
+import { errorMessage } from "../../../../components/domains/feedback";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { Button } from "../../../../components/ui/button";
 import { Card } from "../../../../components/ui/card";
@@ -8,7 +10,6 @@ import { EmptyState } from "../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../components/ui/error-state";
 import { LoadingState } from "../../../../components/ui/loading-state";
 import { PageSection } from "../../../../components/ui/page-section";
-import { errorMessage } from "../../../../components/domains/feedback";
 import {
   useProductSettings,
   useUpdateProductSettings,
@@ -143,6 +144,9 @@ export default function SettingsPage() {
           ) : null}
         </div>
       ) : null}
+      <PageSection title="Integraciones">
+        <DiscordAuthorizationConfiguration />
+      </PageSection>
     </>
   );
 }

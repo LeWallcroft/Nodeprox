@@ -126,6 +126,13 @@ export function buildApp(
               controlChannelId: dependencies.discord.controlChannelId,
             }
           : undefined,
+        dependencies.discord.botInternalUrl &&
+          dependencies.discord.internalToken
+          ? new DiscordBotGuildRoleVerifier(
+              dependencies.discord.botInternalUrl,
+              dependencies.discord.internalToken,
+            )
+          : undefined,
       );
       registerDiscordPlugin(app, {
         service: discordService,

@@ -33,4 +33,11 @@ export const queryKeys = {
   publication: {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,
   },
+  discord: {
+    authorizationConfiguration: [
+      "admin",
+      "discord",
+      "authorized-roles",
+    ] as const,
+  },
 } as const;

@@ -12,6 +12,7 @@ describe("/ayuda", () => {
     expect(fields.map((field: { name: string }) => field.name)).toEqual([
       "/vincular",
       "/autorizar-serie",
+      "/panel",
       "/ayuda",
     ]);
   });

@@ -36,6 +36,34 @@ const confirmInput = z
     actorDiscordId: z.string().trim().min(1).max(32),
   })
   .strict();
+const botCapability = z.enum([
+  "series_grant.issue",
+  "series_grant.invalidate",
+  "bot.configure",
+]);
+const replaceAuthorizedRolesInput = z
+  .object({
+    actorDiscordId: z.string().trim().min(1).max(32),
+    actorRoleIds: z.array(z.string().trim().min(1).max(64)).max(100),
+    guildId: z.string().trim().min(1).max(32),
+    channelId: z.string().trim().min(1).max(32),
+    interactionId: z.string().trim().min(1).max(128),
+    roles: z
+      .array(
+        z
+          .object({
+            roleId: z
+              .string()
+              .trim()
+              .regex(/^\d{17,20}$/),
+            capabilities: z.array(botCapability).max(3),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100),
+  })
+  .strict();
 const idSchema = z.object({ id: z.uuid() }).strict();
 const statusSchema = z
   .object({
@@ -72,7 +100,12 @@ function mapError(error: unknown): never {
           ? 403
           : error.code === "discord-link-code-invalid"
             ? 400
-            : 403;
+            : error.code === "configuration-lockout" ||
+                error.code === "configuration-invalid-role"
+              ? 422
+              : error.code === "discord-role-verification-unavailable"
+                ? 503
+                : 403;
   throw problem(error.code, status);
 }
 function internal(expectedToken: string | undefined) {
@@ -138,6 +171,30 @@ export function registerDiscordPlugin(
     async () => {
       try {
         return await input.service.integration();
+      } catch (error) {
+        return mapError(error);
+      }
+    },
+  );
+  app.get(
+    "/internal/discord/configuration",
+    { preHandler: internalGuard },
+    async () => {
+      try {
+        return await input.service.configuration();
+      } catch (error) {
+        return mapError(error);
+      }
+    },
+  );
+  app.put(
+    "/internal/discord/authorized-roles",
+    { preHandler: internalGuard },
+    async (request) => {
+      try {
+        return await input.service.replaceAuthorizedRoles(
+          parsed(replaceAuthorizedRolesInput, request.body),
+        );
       } catch (error) {
         return mapError(error);
       }
