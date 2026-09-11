@@ -13,9 +13,11 @@ import type { NodeProxTransaction } from "../../authorization/infrastructure/per
 import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
 import {
   hasDiscordCapability,
+  mapDiscordAuthorizedRoleWrite,
   projectDiscordAuthorizedRole,
   type DiscordBotCapability,
 } from "./discord-authorization-policy.js";
+import type { DiscordGuildRoleVerifier } from "./discord-guild-role-verifier.js";
 
 export type GrantStatus = "available" | "reserved" | "consumed" | "invalidated";
 
@@ -68,6 +70,7 @@ export class DiscordGatewayService {
           controlChannelId: string;
         }
       | undefined,
+    private readonly roleVerifier?: DiscordGuildRoleVerifier,
   ) {}
 
   async bootstrapIntegration() {
@@ -371,6 +374,107 @@ export class DiscordGatewayService {
     };
   }
 
+  async configuration() {
+    return this.integration();
+  }
+
+  async replaceAuthorizedRoles(input: {
+    actorDiscordId: string;
+    actorRoleIds: string[];
+    guildId: string;
+    channelId: string;
+    interactionId: string;
+    roles: Array<{
+      roleId: string;
+      capabilities: DiscordBotCapability[];
+    }>;
+  }) {
+    this.validateConfigurationRoles(input.guildId, input.roles);
+    if (!this.roleVerifier)
+      throw new DiscordGatewayError("discord-role-verification-unavailable");
+    const verified = await this.roleVerifier.verifyRoles({
+      guildId: input.guildId,
+      roleIds: input.roles.map((role) => role.roleId),
+    });
+    if (
+      verified.guildId !== input.guildId ||
+      verified.roles.length !== input.roles.length ||
+      verified.roles.some((role) => !role.exists)
+    )
+      throw new DiscordGatewayError("configuration-invalid-role");
+
+    return this.db.transaction(async (tx) => {
+      await this.lockInteraction(tx, input.interactionId);
+      const integration = await this.requireIntegration(
+        tx,
+        input.guildId,
+        input.channelId,
+      );
+      const previous = await this.findInteraction(tx, input.interactionId);
+      if (previous)
+        return {
+          ...(await this.configurationForIntegration(
+            tx,
+            integration.id,
+            integration.guildId,
+          )),
+          updatedAt: new Date().toISOString(),
+        };
+      await this.requireActorRole(
+        tx,
+        integration.id,
+        input.actorRoleIds,
+        "configure",
+      );
+      const before = await tx
+        .select()
+        .from(discordAuthorizedRoles)
+        .where(eq(discordAuthorizedRoles.integrationId, integration.id));
+      const roles = input.roles.map(mapDiscordAuthorizedRoleWrite);
+      await tx
+        .delete(discordAuthorizedRoles)
+        .where(eq(discordAuthorizedRoles.integrationId, integration.id));
+      await tx
+        .insert(discordAuthorizedRoles)
+        .values(
+          roles.map((role) => ({ integrationId: integration.id, ...role })),
+        );
+      await tx.insert(discordInteractions).values({
+        interactionId: input.interactionId,
+        interactionType: "discord.configuration.replace-authorized-roles",
+        actorDiscordId: input.actorDiscordId,
+        guildId: input.guildId,
+        channelId: input.channelId,
+        result: integration.id,
+      });
+      const count = (capability: keyof (typeof roles)[number]) =>
+        roles.filter((role) => role[capability]).length;
+      await tx.insert(auditLogs).values({
+        action: "discord.integration.config.updated",
+        resourceType: "discord_integration",
+        resourceId: integration.id,
+        metadata: {
+          actorDiscordId: input.actorDiscordId,
+          guildId: input.guildId,
+          interactionId: input.interactionId,
+          previousRoleCount: before.length,
+          newRoleCount: roles.length,
+          issueCapabilityCount: count("canIssueSeriesGrants"),
+          invalidateCapabilityCount: count("canInvalidateSeriesGrants"),
+          configureCapabilityCount: count("canConfigureBot"),
+        },
+      });
+      return {
+        ...(await this.configurationForIntegration(
+          tx,
+          integration.id,
+          integration.guildId,
+        )),
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }
+
   private projectGrant(grant: typeof seriesCreationGrants.$inferSelect) {
     return {
       id: grant.id,
@@ -425,7 +529,7 @@ export class DiscordGatewayService {
     tx: NodeProxTransaction,
     integrationId: string,
     roleIds: string[],
-    action: "issue" | "invalidate",
+    action: "issue" | "invalidate" | "configure",
   ) {
     if (!roleIds.length)
       throw new DiscordGatewayError("discord-actor-role-not-authorized");
@@ -439,7 +543,11 @@ export class DiscordGatewayService {
         ),
       );
     const capability: DiscordBotCapability =
-      action === "issue" ? "series_grant.issue" : "series_grant.invalidate";
+      action === "issue"
+        ? "series_grant.issue"
+        : action === "invalidate"
+          ? "series_grant.invalidate"
+          : "bot.configure";
     if (
       !hasDiscordCapability(
         roleIds,
@@ -448,6 +556,53 @@ export class DiscordGatewayService {
       )
     )
       throw new DiscordGatewayError("discord-actor-role-not-authorized");
+  }
+
+  private async configurationForIntegration(
+    tx: NodeProxTransaction,
+    integrationId: string,
+    guildId: string,
+  ) {
+    const roles = await tx
+      .select()
+      .from(discordAuthorizedRoles)
+      .where(eq(discordAuthorizedRoles.integrationId, integrationId));
+    return {
+      guildId,
+      authorizedRoles: roles.map(projectDiscordAuthorizedRole),
+    };
+  }
+
+  private validateConfigurationRoles(
+    guildId: string,
+    roles: readonly { roleId: string; capabilities: DiscordBotCapability[] }[],
+  ) {
+    if (!roles.length || roles.length > 100)
+      throw new DiscordGatewayError("configuration-lockout");
+    const seen = new Set<string>();
+    for (const role of roles) {
+      if (
+        !/^\d{17,20}$/.test(role.roleId) ||
+        role.roleId === guildId ||
+        seen.has(role.roleId)
+      )
+        throw new DiscordGatewayError("configuration-invalid-role");
+      seen.add(role.roleId);
+      if (
+        new Set(role.capabilities).size !== role.capabilities.length ||
+        role.capabilities.some(
+          (capability) =>
+            ![
+              "series_grant.issue",
+              "series_grant.invalidate",
+              "bot.configure",
+            ].includes(capability),
+        )
+      )
+        throw new DiscordGatewayError("configuration-invalid-role");
+    }
+    if (!roles.some((role) => role.capabilities.includes("bot.configure")))
+      throw new DiscordGatewayError("configuration-lockout");
   }
 }
 

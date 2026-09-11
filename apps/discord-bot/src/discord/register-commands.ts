@@ -16,6 +16,9 @@ export const commandDefinitions = [
     .setName("autorizar-serie")
     .setDescription("Autoriza a un usuario a crear una Serie."),
   new SlashCommandBuilder()
+    .setName("panel")
+    .setDescription("Abre el panel de acciones de NodeProx."),
+  new SlashCommandBuilder()
     .setName("ayuda")
     .setDescription("Muestra los comandos disponibles de NodeProx."),
 ].map((command) => command.toJSON());

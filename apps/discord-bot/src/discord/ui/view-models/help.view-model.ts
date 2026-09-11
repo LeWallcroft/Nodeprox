@@ -6,11 +6,15 @@ export const defaultHelpViewModel: HelpViewModel = {
   commands: [
     {
       name: "/vincular",
-      description: "Vincula tu cuenta Discord con NodeProx.",
+      description: "Vincula Discord con tu cuenta NodeProx.",
     },
     {
       name: "/autorizar-serie",
-      description: "Autoriza a un usuario vinculado a crear una Serie.",
+      description: "Autoriza a un usuario para crear una Serie.",
+    },
+    {
+      name: "/panel",
+      description: "Abre el panel de acciones del bot.",
     },
     { name: "/ayuda", description: "Muestra esta ayuda." },
   ],

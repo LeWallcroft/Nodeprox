@@ -88,4 +88,53 @@ describe("NodeProxApiClient", () => {
       expect.objectContaining({ method: "POST" }),
     );
   });
+
+  it("uses the dedicated M2M configuration endpoints", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            guildId: "guild",
+            controlChannelId: "channel",
+            enabled: true,
+            authorizedRoles: [],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            guildId: "guild",
+            authorizedRoles: [],
+            updatedAt: "2026-09-10T00:00:00.000Z",
+          }),
+          { status: 200 },
+        ),
+      );
+    const client = new NodeProxApiClient(
+      "https://api.example.test",
+      "internal-token",
+      fetcher,
+    );
+    await client.getDiscordConfiguration();
+    await client.replaceAuthorizedRoles({
+      actorDiscordId: "actor",
+      actorRoleIds: ["role"],
+      guildId: "guild",
+      channelId: "channel",
+      interactionId: "interaction",
+      roles: [{ roleId: "12345678901234567", capabilities: ["bot.configure"] }],
+    });
+    expect(fetcher.mock.calls[0]?.[0]).toEqual(
+      new URL("/internal/discord/configuration", "https://api.example.test"),
+    );
+    expect(fetcher.mock.calls[1]?.[0]).toEqual(
+      new URL("/internal/discord/authorized-roles", "https://api.example.test"),
+    );
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
 });

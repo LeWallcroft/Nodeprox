@@ -6,6 +6,7 @@ import {
   ephemeralPayload,
   respondSafely,
 } from "../interaction-response.js";
+import { presentLinkSuccess } from "../ui/presenters/link.presenter.js";
 import { CommandUserError } from "./command-user-error.js";
 
 export const LINK_SUCCESS =
@@ -62,10 +63,7 @@ export class LinkCommand {
         channelId: interaction.channelId,
         interactionId: interaction.id,
       });
-      await respondSafely(
-        interaction,
-        ephemeralPayload({ content: LINK_SUCCESS }),
-      );
+      await respondSafely(interaction, ephemeralPayload(presentLinkSuccess()));
     } catch (error) {
       throw new CommandUserError(messageFor(error), error);
     }

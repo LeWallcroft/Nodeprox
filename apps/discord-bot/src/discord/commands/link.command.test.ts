@@ -2,7 +2,7 @@ import { MessageFlags } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { LinkDiscordAccount } from "../../application/link-discord-account.js";
 import { NodeProxApiError } from "../../infrastructure/nodeprox-api/nodeprox-api.client.js";
-import { LINK_SUCCESS, LinkCommand } from "./link.command.js";
+import { LinkCommand } from "./link.command.js";
 
 function interaction() {
   const target = {
@@ -45,9 +45,9 @@ describe("/vincular", () => {
     expect(target.deferReply).toHaveBeenCalledWith({
       flags: MessageFlags.Ephemeral,
     });
-    expect(target.editReply).toHaveBeenCalledWith({
-      content: LINK_SUCCESS,
-    });
+    const response = target.editReply.mock.calls[0]?.[0];
+    expect(response.embeds).toHaveLength(1);
+    expect(response.embeds[0].data.title).toBe("✅ Cuenta vinculada");
   });
 
   it("maps an expired code to a safe user-facing error", async () => {
