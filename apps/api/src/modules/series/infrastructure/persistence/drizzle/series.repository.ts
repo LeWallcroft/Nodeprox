@@ -46,6 +46,7 @@ import type {
   ChapterCoreRecord,
   SeriesRecord,
 } from "../../../domain/series.types.js";
+import { canBeSeriesResponsible } from "../../../domain/series-responsibility.policy.js";
 
 const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   id: row.id,
@@ -55,7 +56,7 @@ const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   coverUrl: row.coverUrl,
   discordChannelId: row.discordChannelId,
   discordChannelNameSnapshot: row.discordChannelNameSnapshot,
-  principalUploader: null,
+  responsibleUser: null,
   createdBy: row.createdBy,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
@@ -81,18 +82,6 @@ export class DrizzleSeriesRepository
     private readonly events?: DomainEventOutbox,
   ) {}
 
-  async create(input: {
-    title: string;
-    slug: string;
-    description?: string | null | undefined;
-    coverUrl?: string | null | undefined;
-    createdBy: string;
-  }) {
-    const [row] = await this.db.insert(series).values(input).returning();
-    if (!row) throw new Error("series-create-failed");
-    return toSeries(row);
-  }
-
   async createWithCreationPolicy(input: {
     title: string;
     slug: string;
@@ -110,10 +99,11 @@ export class DrizzleSeriesRepository
     if (input.actorRole === "uploader" && !input.grantId)
       return { outcome: "grant-not-found" as const };
     return this.db.transaction(async (tx) => {
+      let grant: typeof seriesCreationGrants.$inferSelect | undefined;
       if (input.actorRole === "uploader") {
         const grantId = input.grantId;
         if (!grantId) return { outcome: "grant-not-found" as const };
-        const [grant] = await tx
+        [grant] = await tx
           .select()
           .from(seriesCreationGrants)
           .where(eq(seriesCreationGrants.id, grantId))
@@ -124,17 +114,56 @@ export class DrizzleSeriesRepository
           return { outcome: "grant-not-owned" as const };
         if (grant.status !== "available" && grant.status !== "reserved")
           return { outcome: "grant-unavailable" as const };
-        const [created] = await tx
-          .insert(series)
-          .values({
-            title: input.title,
-            slug: input.slug,
-            description: input.description,
-            coverUrl: input.coverUrl,
-            createdBy: input.createdBy,
-          })
-          .returning();
-        if (!created) throw new Error("series-create-failed");
+      }
+      const [created] = await tx
+        .insert(series)
+        .values({
+          title: input.title,
+          slug: input.slug,
+          description: input.description,
+          coverUrl: input.coverUrl,
+          createdBy: input.createdBy,
+          ...(input.actorRole === "gestor" && discordChannelId
+            ? {
+                discordChannelId,
+                ...(input.discordChannelNameSnapshot
+                  ? {
+                      discordChannelNameSnapshot:
+                        input.discordChannelNameSnapshot,
+                    }
+                  : {}),
+              }
+            : {}),
+        })
+        .returning();
+      if (!created) throw new Error("series-create-failed");
+      await tx.insert(seriesAssignments).values({
+        seriesId: created.id,
+        responsibleUserId: input.createdBy,
+        assignedBy: input.createdBy,
+      });
+      await tx.insert(auditLogs).values({
+        actorId: input.createdBy,
+        action: "series.responsibility.assigned",
+        resourceType: "series",
+        resourceId: created.id,
+        metadata: {
+          responsibleUserId: input.createdBy,
+          initial: true,
+        },
+      });
+      await this.events?.append(
+        {
+          type: "series.responsibility.assigned",
+          aggregateType: "series",
+          aggregateId: created.id,
+          actorUserId: input.createdBy,
+          payload: { responsibleUserId: input.createdBy, initial: true },
+          occurredAt: new Date(),
+        },
+        tx,
+      );
+      if (grant) {
         const [consumed] = await tx
           .update(seriesCreationGrants)
           .set({
@@ -168,30 +197,7 @@ export class DrizzleSeriesRepository
           },
           tx,
         );
-        return { outcome: "created" as const, series: toSeries(created) };
       }
-      const [created] = await tx
-        .insert(series)
-        .values({
-          title: input.title,
-          slug: input.slug,
-          description: input.description,
-          coverUrl: input.coverUrl,
-          createdBy: input.createdBy,
-          ...(input.actorRole === "gestor" && discordChannelId
-            ? {
-                discordChannelId,
-                ...(input.discordChannelNameSnapshot
-                  ? {
-                      discordChannelNameSnapshot:
-                        input.discordChannelNameSnapshot,
-                    }
-                  : {}),
-              }
-            : {}),
-        })
-        .returning();
-      if (!created) throw new Error("series-create-failed");
       if (input.actorRole === "gestor")
         await tx.insert(auditLogs).values({
           actorId: input.createdBy,
@@ -290,22 +296,22 @@ export class DrizzleSeriesRepository
     return Boolean(row);
   }
 
-  async listAssignedSeriesIds(uploaderId: string) {
+  async listAssignedSeriesIds(responsibleUserId: string) {
     const rows = await this.db
       .select({ seriesId: seriesAssignments.seriesId })
       .from(seriesAssignments)
-      .where(eq(seriesAssignments.uploaderId, uploaderId));
+      .where(eq(seriesAssignments.responsibleUserId, responsibleUserId));
     return rows.map((row) => row.seriesId);
   }
 
-  async isAssigned(seriesId: string, uploaderId: string) {
+  async isAssigned(seriesId: string, responsibleUserId: string) {
     const [row] = await this.db
       .select({ id: seriesAssignments.id })
       .from(seriesAssignments)
       .where(
         and(
           eq(seriesAssignments.seriesId, seriesId),
-          eq(seriesAssignments.uploaderId, uploaderId),
+          eq(seriesAssignments.responsibleUserId, responsibleUserId),
         ),
       )
       .limit(1);
@@ -314,7 +320,7 @@ export class DrizzleSeriesRepository
 
   async assign(input: {
     seriesId: string;
-    uploaderId: string;
+    responsibleUserId: string;
     assignedBy: string;
   }) {
     await this.db
@@ -323,48 +329,47 @@ export class DrizzleSeriesRepository
       .onConflictDoUpdate({
         target: seriesAssignments.seriesId,
         set: {
-          uploaderId: input.uploaderId,
+          responsibleUserId: input.responsibleUserId,
           assignedBy: input.assignedBy,
           updatedAt: new Date(),
         },
       });
   }
 
-  async clear(seriesId: string) {
-    await this.db
-      .delete(seriesAssignments)
-      .where(eq(seriesAssignments.seriesId, seriesId));
-  }
-
-  async listPrincipalUploaders(seriesIds: readonly string[]) {
+  async listResponsibleUsers(seriesIds: readonly string[]) {
     if (!seriesIds.length) return new Map();
     const rows = await this.db
       .select({
         seriesId: seriesAssignments.seriesId,
         id: users.id,
         email: users.email,
-        discordUsername: users.discordUsername,
+        role: users.role,
       })
       .from(seriesAssignments)
-      .innerJoin(users, eq(users.id, seriesAssignments.uploaderId))
+      .innerJoin(users, eq(users.id, seriesAssignments.responsibleUserId))
       .where(inArray(seriesAssignments.seriesId, [...seriesIds]));
     return new Map(
       rows.map((row) => [
         row.seriesId,
-        { id: row.id, email: row.email, discordUsername: row.discordUsername },
+        { id: row.id, email: row.email, role: row.role },
       ]),
     );
   }
 
-  async listActiveUploaderCandidates() {
+  async listActiveResponsibleCandidates() {
     const rows = await this.db
       .select({
         id: users.id,
         email: users.email,
-        discordUsername: users.discordUsername,
+        role: users.role,
       })
       .from(users)
-      .where(and(eq(users.status, "active"), eq(users.role, "uploader")))
+      .where(
+        and(
+          eq(users.status, "active"),
+          inArray(users.role, ["admin", "gestor", "uploader"]),
+        ),
+      )
       .orderBy(asc(users.email));
     return rows;
   }
@@ -427,48 +432,57 @@ export class DrizzleSeriesRepository
         actor: input.actor,
         seriesId: input.seriesId,
         permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
-        additionalUserIds: [input.uploaderId],
+        additionalUserIds: [input.responsibleUserId],
       });
       if (context.outcome !== "authorized") return context;
-      const target = context.usersById.get(input.uploaderId);
-      if (target?.status !== "active" || target.role !== "uploader")
+      const target = context.usersById.get(input.responsibleUserId);
+      if (!canBeSeriesResponsible(target))
         return { outcome: "invalid-target" as const };
+      const [previous] = await tx
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, input.seriesId))
+        .limit(1);
       await tx
         .insert(seriesAssignments)
         .values({
           seriesId: input.seriesId,
-          uploaderId: input.uploaderId,
+          responsibleUserId: input.responsibleUserId,
           assignedBy: input.actor.userId,
         })
         .onConflictDoUpdate({
           target: seriesAssignments.seriesId,
           set: {
-            uploaderId: input.uploaderId,
+            responsibleUserId: input.responsibleUserId,
             assignedBy: input.actor.userId,
             updatedAt: new Date(),
           },
         });
-      return { outcome: "assigned" as const };
-    });
-  }
-
-  async clearAssignmentIfAuthorized(
-    input: Parameters<
-      SeriesMutationBoundaryPort["clearAssignmentIfAuthorized"]
-    >[0],
-  ): ReturnType<SeriesMutationBoundaryPort["clearAssignmentIfAuthorized"]> {
-    return this.db.transaction(async (tx) => {
-      const context = await this.lockMutationContext({
-        tx,
-        actor: input.actor,
-        seriesId: input.seriesId,
-        permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+      await tx.insert(auditLogs).values({
+        actorId: input.actor.userId,
+        action: "series.responsibility.reassigned",
+        resourceType: "series",
+        resourceId: input.seriesId,
+        metadata: {
+          previousResponsibleUserId: previous?.responsibleUserId ?? null,
+          responsibleUserId: input.responsibleUserId,
+        },
       });
-      if (context.outcome !== "authorized") return context;
-      await tx
-        .delete(seriesAssignments)
-        .where(eq(seriesAssignments.seriesId, input.seriesId));
-      return { outcome: "cleared" as const };
+      await this.events?.append(
+        {
+          type: "series.responsibility.reassigned",
+          aggregateType: "series",
+          aggregateId: input.seriesId,
+          actorUserId: input.actor.userId,
+          payload: {
+            previousResponsibleUserId: previous?.responsibleUserId ?? null,
+            responsibleUserId: input.responsibleUserId,
+          },
+          occurredAt: new Date(),
+        },
+        tx,
+      );
+      return { outcome: "assigned" as const };
     });
   }
 
@@ -505,7 +519,7 @@ export class DrizzleSeriesRepository
       .for("update");
     if (!lockedSeries) return { outcome: "not-found" };
     const [assignment] = await input.tx
-      .select({ uploaderId: seriesAssignments.uploaderId })
+      .select({ responsibleUserId: seriesAssignments.responsibleUserId })
       .from(seriesAssignments)
       .where(eq(seriesAssignments.seriesId, input.seriesId))
       .limit(1)
@@ -513,7 +527,7 @@ export class DrizzleSeriesRepository
     const allowed = canAdministerSeries({
       role: actor.role,
       isOwner: lockedSeries.createdBy === input.actor.userId,
-      isAssigned: assignment?.uploaderId === input.actor.userId,
+      isAssigned: assignment?.responsibleUserId === input.actor.userId,
     });
     return allowed
       ? { outcome: "authorized", usersById: actor.usersById }
@@ -636,7 +650,7 @@ export class DrizzleChapterCoreRepository
       const assigned = await this.db
         .select({ seriesId: seriesAssignments.seriesId })
         .from(seriesAssignments)
-        .where(eq(seriesAssignments.uploaderId, input.userId));
+        .where(eq(seriesAssignments.responsibleUserId, input.userId));
       const delegated = await this.db
         .select({ chapterId: chapterPermissions.chapterId })
         .from(chapterPermissions)
@@ -868,12 +882,12 @@ export class DrizzleChapterCoreRepository
       if (!lockedSeries) return { outcome: "not-found" };
       isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
       const [assignment] = await input.tx
-        .select({ uploaderId: seriesAssignments.uploaderId })
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, input.expectedSeriesId))
         .limit(1)
         .for("update");
-      isAssigned = assignment?.uploaderId === input.actor.userId;
+      isAssigned = assignment?.responsibleUserId === input.actor.userId;
     }
 
     const [chapter] = await input.tx
@@ -920,10 +934,10 @@ export class DrizzleChapterCoreRepository
     };
   }
 
-  async isAssigned(seriesId: string, uploaderId: string) {
+  async isAssigned(seriesId: string, responsibleUserId: string) {
     return new DrizzleSeriesRepository(this.db).isAssigned(
       seriesId,
-      uploaderId,
+      responsibleUserId,
     );
   }
 

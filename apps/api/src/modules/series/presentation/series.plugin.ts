@@ -67,7 +67,10 @@ const chapterCreateSchema = z
   })
   .strict();
 const chapterPatchSchema = chapterCreateSchema.partial().strict();
-const assignmentSchema = z.object({ uploaderId: z.uuid() }).strict();
+const responsibleAssignmentSchema = z
+  .object({ responsibleUserId: z.uuid() })
+  .strict();
+const legacyAssignmentSchema = z.object({ uploaderId: z.uuid() }).strict();
 
 const error = (
   code: string,
@@ -259,11 +262,11 @@ export function registerSeriesPlugin(
   );
 
   app.get(
-    "/series/:seriesId/uploader-candidates",
+    "/series/:seriesId/responsible-candidates",
     { preHandler: session },
     async (request) => {
       const { seriesId } = parse(idSchema, request.params);
-      const result = await seriesService.listUploaderCandidates(
+      const result = await seriesService.listResponsibleCandidates(
         context(),
         seriesId,
       );
@@ -305,11 +308,33 @@ export function registerSeriesPlugin(
   );
 
   app.put(
+    "/series/:seriesId/responsible",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const { responsibleUserId } = parse(
+        responsibleAssignmentSchema,
+        request.body,
+      );
+      const result = await seriesService.assignResponsible(
+        context(),
+        seriesId,
+        responsibleUserId,
+      );
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      if ("invalidTarget" in result) throw invalid;
+      if ("conflict" in result) throw conflict;
+      return { assigned: true };
+    },
+  );
+
+  app.put(
     "/series/:seriesId/uploader",
     { preHandler: session },
     async (request) => {
       const { seriesId } = parse(idSchema, request.params);
-      const { uploaderId } = parse(assignmentSchema, request.body);
+      const { uploaderId } = parse(legacyAssignmentSchema, request.body);
       const result = await seriesService.assignUploader(
         context(),
         seriesId,
@@ -320,19 +345,6 @@ export function registerSeriesPlugin(
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return { assigned: true };
-    },
-  );
-
-  app.delete(
-    "/series/:seriesId/uploader",
-    { preHandler: session },
-    async (request, reply) => {
-      const { seriesId } = parse(idSchema, request.params);
-      const result = await seriesService.clearUploader(context(), seriesId);
-      if (!result) throw notFound;
-      if ("forbidden" in result) throw forbidden;
-      if ("conflict" in result) throw conflict;
-      return reply.code(204).send();
     },
   );
 

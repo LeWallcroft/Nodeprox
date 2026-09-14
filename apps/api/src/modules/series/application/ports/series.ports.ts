@@ -2,19 +2,12 @@ import type { AuthorizationContext } from "../../../authorization/domain/authori
 import type { Role } from "../../../authorization/domain/roles.js";
 import type {
   ChapterCoreRecord,
-  SeriesPrincipalUploader,
   SeriesRecord,
-  SeriesUploaderCandidate,
+  SeriesResponsibleCandidate,
+  SeriesResponsibleUser,
 } from "../../domain/series.types.js";
 
 export interface SeriesRepositoryPort {
-  create(input: {
-    title: string;
-    slug: string;
-    description?: string | null | undefined;
-    coverUrl?: string | null | undefined;
-    createdBy: string;
-  }): Promise<SeriesRecord>;
   createWithCreationPolicy(input: {
     title: string;
     slug: string;
@@ -53,18 +46,17 @@ export interface SeriesRepositoryPort {
 }
 
 export interface SeriesAssignmentRepositoryPort {
-  listAssignedSeriesIds(uploaderId: string): Promise<string[]>;
-  isAssigned(seriesId: string, uploaderId: string): Promise<boolean>;
+  listAssignedSeriesIds(responsibleUserId: string): Promise<string[]>;
+  isAssigned(seriesId: string, responsibleUserId: string): Promise<boolean>;
   assign(input: {
     seriesId: string;
-    uploaderId: string;
+    responsibleUserId: string;
     assignedBy: string;
   }): Promise<void>;
-  clear(seriesId: string): Promise<void>;
-  listPrincipalUploaders(
+  listResponsibleUsers(
     seriesIds: readonly string[],
-  ): Promise<ReadonlyMap<string, SeriesPrincipalUploader>>;
-  listActiveUploaderCandidates(): Promise<SeriesUploaderCandidate[]>;
+  ): Promise<ReadonlyMap<string, SeriesResponsibleUser>>;
+  listActiveResponsibleCandidates(): Promise<SeriesResponsibleCandidate[]>;
 }
 
 export interface SeriesUserPort {
@@ -100,12 +92,8 @@ export interface SeriesMutationBoundaryPort {
   assignIfAuthorized(input: {
     actor: AuthorizationContext;
     seriesId: string;
-    uploaderId: string;
+    responsibleUserId: string;
   }): Promise<{ outcome: "assigned" } | SeriesMutationFailure>;
-  clearAssignmentIfAuthorized(input: {
-    actor: AuthorizationContext;
-    seriesId: string;
-  }): Promise<{ outcome: "cleared" } | SeriesMutationFailure>;
 }
 
 export interface ChapterCoreRepositoryPort {
@@ -142,5 +130,5 @@ export interface ChapterCoreRepositoryPort {
     },
   ): Promise<ChapterCoreRecord | null>;
   delete(id: string): Promise<void>;
-  isAssigned?(seriesId: string, uploaderId: string): Promise<boolean>;
+  isAssigned?(seriesId: string, responsibleUserId: string): Promise<boolean>;
 }

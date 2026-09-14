@@ -42,7 +42,7 @@ export const seriesAssignments = pgTable(
     seriesId: uuid("series_id")
       .notNull()
       .references(() => series.id, { onDelete: "cascade" }),
-    uploaderId: uuid("uploader_id")
+    responsibleUserId: uuid("responsible_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     assignedBy: uuid("assigned_by")
@@ -57,6 +57,8 @@ export const seriesAssignments = pgTable(
   },
   (table) => [
     uniqueIndex("series_assignments_series_unique").on(table.seriesId),
-    index("series_assignments_uploader_idx").on(table.uploaderId),
+    index("series_assignments_responsible_user_idx").on(
+      table.responsibleUserId,
+    ),
   ],
 );

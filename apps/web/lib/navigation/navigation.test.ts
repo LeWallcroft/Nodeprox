@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { isNavigationItemActive } from "../routing/is-active";
 import { navigationConfig } from "./config";
 import { getVisibleNavigation } from "./policy";
-import { isNavigationItemActive } from "../routing/is-active";
 
 describe("M1 navigation contract", () => {
   it("keeps navigation declarative and typed", () => {
@@ -9,6 +9,7 @@ describe("M1 navigation contract", () => {
       "overview",
       "audit",
       "series",
+      "authorizations",
       "chapters",
       "settings",
       "users",
@@ -19,6 +20,10 @@ describe("M1 navigation contract", () => {
     expect(
       navigationConfig.find((item) => item.id === "series")?.capabilityKey,
     ).toBe("series.read");
+    expect(
+      navigationConfig.find((item) => item.id === "authorizations")
+        ?.capabilityKey,
+    ).toBe("series.create.with-grant");
     expect(navigationConfig.every((item) => item.icon !== undefined)).toBe(
       true,
     );
@@ -89,5 +94,13 @@ describe("M1 navigation contract", () => {
     expect(
       sections.flatMap((section) => section.items.map((item) => item.id)),
     ).toEqual(["overview", "series", "chapters", "users", "audit", "settings"]);
+  });
+
+  it("shows authorizations to actors who create Series with grants", () => {
+    expect(
+      getVisibleNavigation(["series.read", "series.create.with-grant"])
+        .flatMap((section) => section.items)
+        .map((item) => item.id),
+    ).toEqual(["overview", "series", "authorizations"]);
   });
 });

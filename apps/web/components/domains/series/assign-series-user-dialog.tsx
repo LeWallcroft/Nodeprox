@@ -3,12 +3,12 @@
 import { useMemo, useState } from "react";
 import type {
   Series,
-  SeriesUploaderCandidate,
+  SeriesResponsibleCandidate,
 } from "../../../lib/domains/series/types";
+import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
-import { AppDialog } from "../../ui/app-dialog";
 
 export function AssignSeriesUserDialog({
   open,
@@ -22,12 +22,12 @@ export function AssignSeriesUserDialog({
 }: {
   open: boolean;
   series: Series;
-  candidates: readonly SeriesUploaderCandidate[] | undefined;
+  candidates: readonly SeriesResponsibleCandidate[] | undefined;
   isLoading: boolean;
   error: Error | null;
   isSubmitting: boolean;
   onClose: () => void;
-  onAssign: (uploaderId: string) => Promise<void>;
+  onAssign: (responsibleUserId: string) => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState("");
@@ -35,7 +35,7 @@ export function AssignSeriesUserDialog({
   const visible = useMemo(
     () =>
       (candidates ?? []).filter((candidate) =>
-        `${candidate.discordUsername ?? ""} ${candidate.email}`
+        `${candidate.email} ${candidate.role}`
           .toLowerCase()
           .includes(query.trim().toLowerCase()),
       ),
@@ -49,7 +49,7 @@ export function AssignSeriesUserDialog({
       open={open}
       size="md"
       title={
-        series.principalUploader ? "Cambiar responsable" : "Asignar responsable"
+        series.responsibleUser ? "Cambiar responsable" : "Asignar responsable"
       }
       onOpenChange={(next) => {
         if (!next) onClose();
@@ -86,7 +86,7 @@ export function AssignSeriesUserDialog({
     >
       <p className="mt-4 text-sm">
         Responsable actual:{" "}
-        {series.principalUploader?.email ?? "Sin responsable asignado"}
+        {series.responsibleUser?.email ?? "Sin responsable asignado"}
       </p>
       {isLoading ? <LoadingState label="Cargando candidatos" /> : null}
       {error ? (
@@ -99,11 +99,11 @@ export function AssignSeriesUserDialog({
         <>
           <label
             className="mt-4 grid gap-1.5 text-sm font-medium text-muted"
-            htmlFor="uploader-search"
+            htmlFor="responsible-search"
           >
             Buscar responsable
             <input
-              id="uploader-search"
+              id="responsible-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="correo@ejemplo.com"
@@ -118,26 +118,22 @@ export function AssignSeriesUserDialog({
                 >
                   <input
                     checked={selectedId === candidate.id}
-                    name="uploader"
+                    name="responsible"
                     type="radio"
                     value={candidate.id}
                     onChange={() => setSelectedId(candidate.id)}
                   />
                   <span>
-                    <span className="block">
-                      {candidate.discordUsername ?? candidate.email}
+                    <span className="block">{candidate.email}</span>
+                    <span className="block text-xs capitalize text-muted">
+                      {candidate.role}
                     </span>
-                    {candidate.discordUsername ? (
-                      <span className="block text-xs text-muted">
-                        {candidate.email}
-                      </span>
-                    ) : null}
                   </span>
                 </label>
               ))
             ) : (
               <p className="m-0 p-3 text-sm text-muted">
-                No hay uploaders activos disponibles.
+                No hay responsables activos disponibles.
               </p>
             )}
           </div>

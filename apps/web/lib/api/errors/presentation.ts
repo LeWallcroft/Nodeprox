@@ -32,6 +32,31 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
       severity: "warning",
       presentation: "inline",
     },
+    "series-creation-grant-already-consumed": {
+      title: "Autorización no disponible",
+      message:
+        "Esta autorización ya no está disponible. Selecciona otra autorización.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-creation-grant-invalidated": {
+      title: "Autorización invalidada",
+      message: "Esta autorización fue invalidada y ya no puede utilizarse.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-creation-grant-not-owned": {
+      title: "Autorización no disponible",
+      message: "La autorización seleccionada no está disponible.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-creation-grant-not-found": {
+      title: "Autorización no disponible",
+      message: "La autorización seleccionada no está disponible.",
+      severity: "warning",
+      presentation: "inline",
+    },
     forbidden: {
       title: "Acción no permitida",
       message: "No tienes permisos para realizar esta operación.",

@@ -10,6 +10,11 @@ import {
   type DiscordGatewayService,
   matchesInternalToken,
 } from "../application/discord-gateway.service.js";
+import {
+  DiscordGrantAdministrationForbiddenError,
+  DiscordGrantAdministrationValidationError,
+  type ListSeriesCreationGrantsForAdministrationService,
+} from "../application/list-series-creation-grants-for-administration.service.js";
 
 const grantInput = z
   .object({
@@ -67,9 +72,16 @@ const replaceAuthorizedRolesInput = z
 const idSchema = z.object({ id: z.uuid() }).strict();
 const statusSchema = z
   .object({
-    status: z.enum(["available", "consumed", "invalidated"]).optional(),
+    status: z
+      .enum(["available", "reserved", "consumed", "invalidated"])
+      .optional(),
   })
   .strict();
+const adminGrantQuerySchema = statusSchema.extend({
+  targetUserId: z.uuid().optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+});
 
 function problem(code: string, statusCode: number) {
   return new AppError({
@@ -86,6 +98,10 @@ function parsed<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
   return result.data;
 }
 function mapError(error: unknown): never {
+  if (error instanceof DiscordGrantAdministrationForbiddenError)
+    throw problem("authorization-denied", 403);
+  if (error instanceof DiscordGrantAdministrationValidationError)
+    throw problem("validation-failed", 422);
   if (!(error instanceof DiscordGatewayError)) throw error;
   const status =
     error.code === "resource-not-found" ||
@@ -122,10 +138,18 @@ function sessionContext() {
   return context.userId;
 }
 
+function sessionActor() {
+  const context = getRequestContext();
+  if (!context?.userId || !context.sessionId)
+    throw problem("authentication-required", 401);
+  return { userId: context.userId, sessionId: context.sessionId };
+}
+
 export function registerDiscordPlugin(
   app: FastifyInstance,
   input: {
     service: DiscordGatewayService;
+    grantAdministration: ListSeriesCreationGrantsForAdministrationService;
     internalToken?: string | undefined;
     authentication: { service: SessionService; cookies: SessionCookieAdapter };
   },
@@ -146,6 +170,20 @@ export function registerDiscordPlugin(
           .send(
             await input.service.issueGrant(parsed(grantInput, request.body)),
           );
+      } catch (error) {
+        return mapError(error);
+      }
+    },
+  );
+  app.get(
+    "/admin/series-creation-grants",
+    { preHandler: sessionGuard },
+    async (request) => {
+      try {
+        return await input.grantAdministration.execute(
+          sessionActor(),
+          parsed(adminGrantQuerySchema, request.query),
+        );
       } catch (error) {
         return mapError(error);
       }

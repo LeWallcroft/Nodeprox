@@ -152,6 +152,35 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("proxies only GET for the authenticated Series creation grants endpoint", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("[]", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+
+    const allowed = await GET(
+      new Request(
+        "http://localhost:3000/api/me/series-creation-grants?status=available",
+      ),
+      context(["me", "series-creation-grants"]),
+    );
+    const denied = await POST(
+      new Request("http://localhost:3000/api/me/series-creation-grants", {
+        method: "POST",
+      }),
+      context(["me", "series-creation-grants"]),
+    );
+
+    expect(allowed.status).toBe(200);
+    expect(denied.status).toBe(404);
+    expect(backend).toHaveBeenCalledTimes(1);
+    expect(backend).toHaveBeenCalledWith(
+      "http://localhost:3001/me/series-creation-grants?status=available",
+      expect.objectContaining({ method: "GET" }),
+    );
+    vi.unstubAllGlobals();
+  });
+
   it("supports PATCH, DELETE and upload metadata without proxying ZIP bytes", async () => {
     const backend = vi
       .fn()
@@ -374,7 +403,7 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
-  it("proxies only the contextual uploader assignment routes", async () => {
+  it("proxies the generic responsibility route and preserves the legacy uploader adapter", async () => {
     const backend = vi
       .fn()
       .mockResolvedValue(new Response(null, { status: 204 }));
@@ -383,9 +412,9 @@ describe("same-origin API proxy", () => {
 
     const candidates = await GET(
       new Request(
-        `http://localhost:3000/api/series/${seriesId}/uploader-candidates`,
+        `http://localhost:3000/api/series/${seriesId}/responsible-candidates`,
       ),
-      context(["series", seriesId, "uploader-candidates"]),
+      context(["series", seriesId, "responsible-candidates"]),
     );
     const assigned = await PUT(
       new Request(`http://localhost:3000/api/series/${seriesId}/uploader`, {
@@ -395,11 +424,13 @@ describe("same-origin API proxy", () => {
       }),
       context(["series", seriesId, "uploader"]),
     );
-    const cleared = await DELETE(
-      new Request(`http://localhost:3000/api/series/${seriesId}/uploader`, {
-        method: "DELETE",
+    const reassigned = await PUT(
+      new Request(`http://localhost:3000/api/series/${seriesId}/responsible`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ responsibleUserId: "responsible-1" }),
       }),
-      context(["series", seriesId, "uploader"]),
+      context(["series", seriesId, "responsible"]),
     );
     const blocked = await GET(
       new Request(`http://localhost:3000/api/series/${seriesId}/uploader/raw`),
@@ -408,7 +439,7 @@ describe("same-origin API proxy", () => {
 
     expect(candidates.status).toBe(204);
     expect(assigned.status).toBe(204);
-    expect(cleared.status).toBe(204);
+    expect(reassigned.status).toBe(204);
     expect(blocked.status).toBe(404);
     expect(backend).toHaveBeenCalledTimes(3);
     vi.unstubAllGlobals();

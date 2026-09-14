@@ -190,6 +190,13 @@
       "when": 1788857937236,
       "tag": "0026_smart_malcolm_colcord",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789146960938,
+      "tag": "0027_generic_series_responsibility",
+      "breakpoints": true
     }
   ]
 }

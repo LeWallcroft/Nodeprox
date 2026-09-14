@@ -23,6 +23,7 @@ import { registerChapterReplacementPlugin } from "./modules/chapter-replacements
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { DiscordGatewayService } from "./modules/discord/application/discord-gateway.service.js";
 import { DiscordRoleConfigurationService } from "./modules/discord/application/discord-role-configuration.service.js";
+import { ListSeriesCreationGrantsForAdministrationService } from "./modules/discord/application/list-series-creation-grants-for-administration.service.js";
 import { DiscordBotGuildRoleVerifier } from "./modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
 import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "./modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
 import { RedisLinkCodeStore } from "./modules/discord/infrastructure/redis-link-code.store.js";
@@ -136,6 +137,11 @@ export function buildApp(
       );
       registerDiscordPlugin(app, {
         service: discordService,
+        grantAdministration:
+          new ListSeriesCreationGrantsForAdministrationService(
+            dependencies.database,
+            authorization,
+          ),
         internalToken: dependencies.discord.internalToken,
         authentication,
       });

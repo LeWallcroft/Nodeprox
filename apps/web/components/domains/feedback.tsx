@@ -1,5 +1,5 @@
-import { ApiError } from "../../lib/api/types";
 import { resolveErrorPresentation } from "../../lib/api/errors/presentation";
+import { ApiError } from "../../lib/api/types";
 
 export function errorMessage(
   error: unknown,
@@ -13,7 +13,11 @@ export function errorMessage(
     if (
       error.code === "chapter-conflict" ||
       error.code === "series-slug-conflict" ||
-      error.code === "series-slug-invalid"
+      error.code === "series-slug-invalid" ||
+      error.code === "series-creation-grant-already-consumed" ||
+      error.code === "series-creation-grant-invalidated" ||
+      error.code === "series-creation-grant-not-owned" ||
+      error.code === "series-creation-grant-not-found"
     )
       return `${presentation.message}${reference}`;
     if (error.status === 401) return "Tu sesión no es válida o ha expirado.";

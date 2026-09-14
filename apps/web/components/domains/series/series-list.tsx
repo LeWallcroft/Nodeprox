@@ -53,7 +53,7 @@ export function SeriesList({
         ) : (
           items.map((series) => {
             const selected = selectedId === series.id;
-            const responsible = series.principalUploader?.email;
+            const responsible = series.responsibleUser?.email;
             return (
               <tr
                 {...getSelectableTableRowProps(() => onSelect(series.id))}

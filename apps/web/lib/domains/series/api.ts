@@ -3,7 +3,7 @@ import type {
   Series,
   SeriesCapabilitiesProjection,
   SeriesInput,
-  SeriesUploaderCandidate,
+  SeriesResponsibleCandidate,
 } from "./types";
 
 export function listSeries() {
@@ -40,22 +40,19 @@ export function deleteSeries(seriesId: string) {
   return apiRequestBrowser<void>(`/series/${seriesId}`, { method: "DELETE" });
 }
 
-export function listSeriesUploaderCandidates(seriesId: string) {
-  return apiRequestBrowser<SeriesUploaderCandidate[]>(
-    `/series/${seriesId}/uploader-candidates`,
+export function listSeriesResponsibleCandidates(seriesId: string) {
+  return apiRequestBrowser<SeriesResponsibleCandidate[]>(
+    `/series/${seriesId}/responsible-candidates`,
   );
 }
 
-export function assignSeriesUploader(seriesId: string, uploaderId: string) {
-  return apiRequestBrowser<void>(`/series/${seriesId}/uploader`, {
+export function assignSeriesResponsible(
+  seriesId: string,
+  responsibleUserId: string,
+) {
+  return apiRequestBrowser<void>(`/series/${seriesId}/responsible`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ uploaderId }),
-  });
-}
-
-export function clearSeriesUploader(seriesId: string) {
-  return apiRequestBrowser<void>(`/series/${seriesId}/uploader`, {
-    method: "DELETE",
+    body: JSON.stringify({ responsibleUserId }),
   });
 }

@@ -3,6 +3,7 @@ import type { AuthorizationContext } from "../../../authorization/domain/authori
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
 import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
+import { canBeSeriesResponsible } from "../../domain/series-responsibility.policy.js";
 import { SeriesSlug } from "../../domain/series-slug.js";
 import type {
   ChapterCoreRepositoryPort,
@@ -63,14 +64,14 @@ export class SeriesService {
     );
     if (!decision.allowed) return [];
     if (decision.role === "admin")
-      return this.withPrincipalUploaders(await this.series.listAll());
+      return this.withResponsibleUsers(await this.series.listAll());
     if (decision.role === "gestor")
-      return this.withPrincipalUploaders(await this.series.listAll());
+      return this.withResponsibleUsers(await this.series.listAll());
     const ids = new Set(
       await this.assignments.listAssignedSeriesIds(context.userId),
     );
     const helperSeries = await this.series.listWithHelperAccess(context.userId);
-    return this.withPrincipalUploaders(
+    return this.withResponsibleUsers(
       [
         ...(await this.series.listAll()).filter((item) => ids.has(item.id)),
         ...helperSeries,
@@ -84,7 +85,7 @@ export class SeriesService {
   async get(context: AuthorizationContext, id: string) {
     const item = await this.findVisible(context, id);
     if (!item || "forbidden" in item) return item;
-    return this.withPrincipalUploader(item);
+    return this.withResponsibleUser(item);
   }
 
   async projectCapabilities(context: AuthorizationContext, id: string) {
@@ -202,10 +203,10 @@ export class SeriesService {
     });
   }
 
-  async assignUploader(
+  async assignResponsible(
     context: AuthorizationContext,
     seriesId: string,
-    uploaderId: string,
+    responsibleUserId: string,
   ) {
     const managed = await this.findManaged(
       context,
@@ -213,13 +214,13 @@ export class SeriesService {
       PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
     );
     if (!managed || "forbidden" in managed) return managed;
-    const uploader = await this.users.findById(uploaderId);
-    if (uploader?.status !== "active" || uploader?.role !== "uploader")
+    const responsible = await this.users.findById(responsibleUserId);
+    if (!canBeSeriesResponsible(responsible))
       return { invalidTarget: true as const };
     const result = await this.mutations.assignIfAuthorized({
       actor: context,
       seriesId,
-      uploaderId,
+      responsibleUserId,
     });
     if (result.outcome === "denied") return { forbidden: true as const };
     if (result.outcome === "not-found") return null;
@@ -229,24 +230,18 @@ export class SeriesService {
     return { assigned: true as const };
   }
 
-  async clearUploader(context: AuthorizationContext, seriesId: string) {
-    const managed = await this.findManaged(
-      context,
-      seriesId,
-      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
-    );
-    if (!managed || "forbidden" in managed) return managed;
-    const result = await this.mutations.clearAssignmentIfAuthorized({
-      actor: context,
-      seriesId,
-    });
-    if (result.outcome === "denied") return { forbidden: true as const };
-    if (result.outcome === "not-found") return null;
-    if (result.outcome !== "cleared") return { conflict: true as const };
-    return { cleared: true as const };
+  async assignUploader(
+    context: AuthorizationContext,
+    seriesId: string,
+    uploaderId: string,
+  ) {
+    const uploader = await this.users.findById(uploaderId);
+    if (!canBeSeriesResponsible(uploader) || uploader.role !== "uploader")
+      return { invalidTarget: true as const };
+    return this.assignResponsible(context, seriesId, uploaderId);
   }
 
-  async listUploaderCandidates(
+  async listResponsibleCandidates(
     context: AuthorizationContext,
     seriesId: string,
   ) {
@@ -256,24 +251,30 @@ export class SeriesService {
       PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
     );
     if (!managed || "forbidden" in managed) return managed;
-    return this.assignments.listActiveUploaderCandidates();
+    return this.assignments.listActiveResponsibleCandidates();
   }
 
-  private async withPrincipalUploader(item: {
+  private async withResponsibleUser(item: {
     id: string;
-    principalUploader: { id: string; email: string } | null;
+    responsibleUser: {
+      id: string;
+      email: string;
+      role: "admin" | "gestor" | "uploader";
+    } | null;
   }) {
-    const uploaders = await this.assignments.listPrincipalUploaders([item.id]);
-    return { ...item, principalUploader: uploaders.get(item.id) ?? null };
+    const responsibleUsers = await this.assignments.listResponsibleUsers([
+      item.id,
+    ]);
+    return { ...item, responsibleUser: responsibleUsers.get(item.id) ?? null };
   }
 
-  private async withPrincipalUploaders<T extends { id: string }>(items: T[]) {
-    const uploaders = await this.assignments.listPrincipalUploaders(
+  private async withResponsibleUsers<T extends { id: string }>(items: T[]) {
+    const responsibleUsers = await this.assignments.listResponsibleUsers(
       items.map((item) => item.id),
     );
     return items.map((item) => ({
       ...item,
-      principalUploader: uploaders.get(item.id) ?? null,
+      responsibleUser: responsibleUsers.get(item.id) ?? null,
     }));
   }
 

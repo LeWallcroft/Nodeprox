@@ -1,9 +1,10 @@
-export type SeriesPrincipalUploader = {
+export type SeriesResponsibleUser = {
   id: string;
   email: string;
+  role: "admin" | "gestor" | "uploader";
 };
 
-export type SeriesUploaderCandidate = SeriesPrincipalUploader;
+export type SeriesResponsibleCandidate = SeriesResponsibleUser;
 
 export type SeriesRecord = {
   id: string;
@@ -13,7 +14,7 @@ export type SeriesRecord = {
   coverUrl: string | null;
   discordChannelId: string | null;
   discordChannelNameSnapshot: string | null;
-  principalUploader: SeriesPrincipalUploader | null;
+  responsibleUser: SeriesResponsibleUser | null;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;

@@ -12,8 +12,8 @@ export const queryKeys = {
     detail: (seriesId: string) => ["series", "detail", seriesId] as const,
     capabilities: (seriesId: string) =>
       ["series", "capabilities", seriesId] as const,
-    uploaderCandidates: (seriesId: string) =>
-      ["series", "uploader-candidates", seriesId] as const,
+    responsibleCandidates: (seriesId: string) =>
+      ["series", "responsible-candidates", seriesId] as const,
     chapters: (seriesId: string) => ["series", seriesId, "chapters"] as const,
   },
   chapters: {
@@ -39,5 +39,12 @@ export const queryKeys = {
       "discord",
       "authorized-roles",
     ] as const,
+  },
+  authorizations: {
+    all: ["authorizations"] as const,
+    mine: (status?: string) =>
+      ["authorizations", "mine", status ?? "all"] as const,
+    admin: (status?: string) =>
+      ["authorizations", "admin", status ?? "all"] as const,
   },
 } as const;
