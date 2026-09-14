@@ -19,16 +19,17 @@ import { Pagination } from "../../../components/ui/pagination";
 import { SearchInput } from "../../../components/ui/search-input";
 import { hasCapability } from "../../../lib/auth/visibility";
 import { useCapabilities } from "../../../lib/domains/auth/hooks";
+import { useAvailableSeriesCreationGrants } from "../../../lib/domains/authorizations/hooks";
 import { useChapterList } from "../../../lib/domains/chapters/hooks";
+import { requiresSeriesCreationGrant } from "../../../lib/domains/series/creation-policy";
 import {
-  useAssignSeriesUploader,
-  useClearSeriesUploader,
+  useAssignSeriesResponsible,
   useCreateSeries,
   useDeleteSeries,
   useSeries,
   useSeriesCapabilities,
   useSeriesList,
-  useSeriesUploaderCandidates,
+  useSeriesResponsibleCandidates,
   useUpdateSeries,
 } from "../../../lib/domains/series/hooks";
 import type { SeriesInput } from "../../../lib/domains/series/types";
@@ -59,16 +60,23 @@ export default function SeriesPage() {
     selectedCapabilities.data?.capabilities,
     "series.assignment.manage",
   );
-  const uploaderCandidates = useSeriesUploaderCandidates(
+  const responsibleCandidates = useSeriesResponsibleCandidates(
     selectedSeriesId ?? "",
     canManageAssignment,
   );
-  const assignUploader = useAssignSeriesUploader(selectedSeriesId ?? "");
-  const clearUploader = useClearSeriesUploader(selectedSeriesId ?? "");
-  const canCreate = hasCapability(
+  const assignResponsible = useAssignSeriesResponsible(selectedSeriesId ?? "");
+  const canCreateWithoutGrant = hasCapability(
     globalCapabilities.data?.capabilities,
     "series.create",
   );
+  const requiresGrant = requiresSeriesCreationGrant(
+    globalCapabilities.data?.capabilities,
+  );
+  const availableGrants = useAvailableSeriesCreationGrants(requiresGrant);
+  const canCreate = canCreateWithoutGrant || requiresGrant;
+  const createBlockedByGrant =
+    requiresGrant &&
+    (!availableGrants.isSuccess || availableGrants.data.length === 0);
   const canViewChapters = hasCapability(
     selectedCapabilities.data?.capabilities,
     "series.read",
@@ -76,8 +84,7 @@ export default function SeriesPage() {
 
   const items = useMemo(() => {
     const filtered = filterSeries(listQuery.data ?? [], query).filter(
-      (series) =>
-        !responsible || series.principalUploader?.email === responsible,
+      (series) => !responsible || series.responsibleUser?.email === responsible,
     );
     return filtered.map(toSeriesListItem);
   }, [listQuery.data, query, responsible]);
@@ -86,7 +93,7 @@ export default function SeriesPage() {
       [
         ...new Set(
           (listQuery.data ?? []).flatMap((item) =>
-            item.principalUploader?.email ? [item.principalUploader.email] : [],
+            item.responsibleUser?.email ? [item.responsibleUser.email] : [],
           ),
         ),
       ].sort(),
@@ -141,20 +148,36 @@ export default function SeriesPage() {
         ]}
         actions={
           canCreate ? (
-            <Button
-              type="button"
-              onClick={() => setCreating((value) => !value)}
-            >
-              <Plus aria-hidden="true" className="size-4" />
-              {creating ? "Cerrar" : "Nueva serie"}
-            </Button>
+            <div className="grid justify-items-end gap-1.5">
+              <Button
+                disabled={createBlockedByGrant}
+                type="button"
+                onClick={() => setCreating((value) => !value)}
+              >
+                <Plus aria-hidden="true" className="size-4" />
+                {creating ? "Cerrar" : "Nueva serie"}
+              </Button>
+              {createBlockedByGrant ? (
+                <p className="m-0 text-xs text-muted">
+                  Necesitas una autorización disponible para crear una Serie.{" "}
+                  <Link
+                    className="text-primary underline"
+                    href="/autorizaciones"
+                  >
+                    Ver autorizaciones
+                  </Link>
+                </p>
+              ) : null}
+            </div>
           ) : undefined
         }
       />
       <AppDialog open={creating} title="Nueva serie" onOpenChange={setCreating}>
         <SeriesForm
+          availableGrants={availableGrants.data ?? []}
           onSubmit={handleCreate}
           onCancel={() => setCreating(false)}
+          requiresGrant={requiresGrant}
         />
       </AppDialog>
       {actionError ? (
@@ -240,12 +263,21 @@ export default function SeriesPage() {
                 <div className="mt-3 grid gap-2 text-sm">
                   {canCreate ? (
                     <Button
+                      disabled={createBlockedByGrant}
                       type="button"
                       variant="secondary"
                       onClick={() => setCreating(true)}
                     >
                       <Plus aria-hidden="true" className="size-4" /> Nueva serie
                     </Button>
+                  ) : null}
+                  {createBlockedByGrant ? (
+                    <Link
+                      className="text-primary underline"
+                      href="/autorizaciones"
+                    >
+                      Ver autorizaciones disponibles
+                    </Link>
                   ) : null}
                   {selectedSeriesId && canViewChapters ? (
                     <Link
@@ -329,22 +361,19 @@ export default function SeriesPage() {
                   await update.mutateAsync(input);
                 }}
                 onDelete={handleDelete}
-                candidates={uploaderCandidates.data}
-                candidatesLoading={uploaderCandidates.isPending}
+                candidates={responsibleCandidates.data}
+                candidatesLoading={responsibleCandidates.isPending}
                 candidatesError={
-                  uploaderCandidates.error instanceof Error
-                    ? uploaderCandidates.error
+                  responsibleCandidates.error instanceof Error
+                    ? responsibleCandidates.error
                     : null
                 }
-                assignmentPending={
-                  assignUploader.isPending || clearUploader.isPending
-                }
+                assignmentPending={assignResponsible.isPending}
                 updatePending={update.isPending}
                 deletePending={remove.isPending}
-                onAssignUploader={async (uploaderId) =>
-                  assignUploader.mutateAsync(uploaderId)
+                onAssignResponsible={async (responsibleUserId) =>
+                  assignResponsible.mutateAsync(responsibleUserId)
                 }
-                onClearUploader={async () => clearUploader.mutateAsync()}
               />
             ) : null}
           </SeriesContextPanel>

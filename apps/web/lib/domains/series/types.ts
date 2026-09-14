@@ -4,24 +4,25 @@ export interface Series {
   slug: string;
   description: string | null;
   coverUrl: string | null;
-  principalUploader: SeriesPrincipalUploader | null;
+  responsibleUser: SeriesResponsibleUser | null;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
 
-export interface SeriesPrincipalUploader {
+export interface SeriesResponsibleUser {
   id: string;
   email: string;
-  discordUsername?: string | null;
+  role: "admin" | "gestor" | "uploader";
 }
 
-export type SeriesUploaderCandidate = SeriesPrincipalUploader;
+export type SeriesResponsibleCandidate = SeriesResponsibleUser;
 
 export interface SeriesInput {
   title: string;
   description?: string | null;
   coverUrl?: string | null;
+  grantId?: string;
 }
 
 export interface SeriesCapabilitiesProjection {

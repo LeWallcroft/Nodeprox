@@ -29,6 +29,7 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (value === "auth/session" || value === "auth/capabilities")
     return method === "GET";
   if (value === "me/discord/link-code") return method === "POST";
+  if (value === "me/series-creation-grants") return method === "GET";
   if (value === "admin/users") return method === "GET";
   if (value === "admin/audit") return method === "GET";
   if (value === "admin/settings") return method === "GET" || method === "PATCH";
@@ -39,10 +40,11 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (/^series\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
   if (/^series\/[^/]+\/capabilities$/.test(value)) return method === "GET";
-  if (/^series\/[^/]+\/uploader-candidates$/.test(value))
+  if (/^series\/[^/]+\/responsible-candidates$/.test(value))
     return method === "GET";
-  if (/^series\/[^/]+\/uploader$/.test(value))
-    return method === "PUT" || method === "DELETE";
+  if (/^series\/[^/]+\/responsible$/.test(value)) return method === "PUT";
+  if (/^series\/[^/]+\/uploader$/.test(value)) return method === "PUT";
+  if (value === "admin/series-creation-grants") return method === "GET";
   if (/^series\/[^/]+\/chapters$/.test(value))
     return ["GET", "POST"].includes(method);
   if (/^series\/[^/]+\/import-batches$/.test(value)) return method === "POST";

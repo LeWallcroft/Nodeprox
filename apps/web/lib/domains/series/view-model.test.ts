@@ -8,7 +8,7 @@ const series = [
     slug: "raven",
     description: "Una serie",
     coverUrl: null,
-    principalUploader: null,
+    responsibleUser: null,
     createdBy: "user-1",
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-02T00:00:00.000Z",
@@ -19,7 +19,7 @@ const series = [
     slug: "northwind",
     description: null,
     coverUrl: null,
-    principalUploader: null,
+    responsibleUser: null,
     createdBy: "user-2",
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-03T00:00:00.000Z",
@@ -36,7 +36,7 @@ describe("Series list view model", () => {
       slug: "raven",
       description: "Una serie",
       coverUrl: null,
-      principalUploader: null,
+      responsibleUser: null,
       updatedAt: "2026-08-02T00:00:00.000Z",
     });
   });

@@ -10,15 +10,15 @@ import {
   seriesAssignments,
   uploads,
 } from "../../../../../../../../database/schema/index.js";
+import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
 import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
-import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
+import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import {
   lockCurrentAuthorization,
   type NodeProxTransaction,
 } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
-import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
+import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
 import type { ProcessingOutboxPort } from "../../../../processing/application/ports.js";
-import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
 import type {
   UploadAuditPort,
   UploadLifecycleBoundaryPort,
@@ -378,12 +378,12 @@ export class DrizzleUploadRepository
       if (!lockedSeries) return { outcome: "conflict" };
       isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
       const [assignment] = await input.tx
-        .select({ uploaderId: seriesAssignments.uploaderId })
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, input.expectedSeriesId))
         .limit(1)
         .for("update");
-      isAssigned = assignment?.uploaderId === input.actor.userId;
+      isAssigned = assignment?.responsibleUserId === input.actor.userId;
     }
 
     const [chapter] = await input.tx

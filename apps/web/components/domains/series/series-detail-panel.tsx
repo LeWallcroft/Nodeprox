@@ -14,7 +14,7 @@ import { hasCapability } from "../../../lib/auth/visibility";
 import type {
   Series,
   SeriesInput,
-  SeriesUploaderCandidate,
+  SeriesResponsibleCandidate,
 } from "../../../lib/domains/series/types";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
@@ -38,8 +38,7 @@ export function SeriesDetailPanel({
   candidatesLoading,
   candidatesError,
   assignmentPending,
-  onAssignUploader,
-  onClearUploader,
+  onAssignResponsible,
   updatePending,
   deletePending,
 }: {
@@ -50,21 +49,18 @@ export function SeriesDetailPanel({
     input: Pick<SeriesInput, "title" | "description" | "coverUrl">,
   ) => Promise<void>;
   onDelete: () => Promise<void>;
-  candidates: readonly SeriesUploaderCandidate[] | undefined;
+  candidates: readonly SeriesResponsibleCandidate[] | undefined;
   candidatesLoading: boolean;
   candidatesError: Error | null;
   assignmentPending: boolean;
-  onAssignUploader: (uploaderId: string) => Promise<void>;
-  onClearUploader: () => Promise<void>;
+  onAssignResponsible: (responsibleUserId: string) => Promise<void>;
   updatePending: boolean;
   deletePending: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [assigning, setAssigning] = useState(false);
-  const [confirmingClear, setConfirmingClear] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [managingHelpers, setManagingHelpers] = useState(false);
-  const [assignmentError, setAssignmentError] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   if (!series)
     return (
@@ -134,10 +130,10 @@ export function SeriesDetailPanel({
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Responsable principal
+            Responsable
           </dt>
           <dd className="mt-1 text-muted">
-            {series.principalUploader?.email ?? "Sin responsable asignado."}
+            {series.responsibleUser?.email ?? "Sin responsable asignado."}
           </dd>
         </div>
         <div>
@@ -184,7 +180,7 @@ export function SeriesDetailPanel({
         {canManageAssignment ? (
           <Button type="button" onClick={() => setAssigning(true)}>
             <UserRoundPlus aria-hidden="true" className="size-4" />
-            {series.principalUploader
+            {series.responsibleUser
               ? "Cambiar responsable"
               : "Asignar responsable"}
           </Button>
@@ -193,16 +189,6 @@ export function SeriesDetailPanel({
           <Button type="button" onClick={() => setManagingHelpers(true)}>
             <UserRoundPlus aria-hidden="true" className="size-4" /> Gestionar
             colaboradores
-          </Button>
-        ) : null}
-        {canManageAssignment && series.principalUploader ? (
-          <Button
-            variant="destructive"
-            type="button"
-            disabled={assignmentPending}
-            onClick={() => setConfirmingClear(true)}
-          >
-            Quitar responsable
           </Button>
         ) : null}
         {canDelete ? (
@@ -222,11 +208,6 @@ export function SeriesDetailPanel({
         <p className="mb-1 text-sm font-medium">Muy pronto</p>
         <p className="mb-0 text-xs">Disponible en una próxima versión.</p>
       </section>
-      {assignmentError ? (
-        <p className="mt-3 text-sm text-danger" role="alert">
-          {assignmentError}
-        </p>
-      ) : null}
       <AppDialog
         busy={updatePending}
         description="El slug público es estable y no se puede modificar desde esta acción."
@@ -256,8 +237,8 @@ export function SeriesDetailPanel({
         error={candidatesError}
         isSubmitting={assignmentPending}
         onClose={() => setAssigning(false)}
-        onAssign={async (uploaderId) => {
-          await onAssignUploader(uploaderId);
+        onAssign={async (responsibleUserId) => {
+          await onAssignResponsible(responsibleUserId);
           setAssigning(false);
         }}
       />
@@ -268,30 +249,6 @@ export function SeriesDetailPanel({
           onClose={() => setManagingHelpers(false)}
         />
       ) : null}
-      <ConfirmationDialog
-        confirmLabel="Quitar responsable"
-        description="La serie quedará sin uploader principal hasta una nueva asignación."
-        error={assignmentError}
-        open={confirmingClear}
-        pending={assignmentPending}
-        title="¿Quitar responsable?"
-        onOpenChange={(open) => {
-          setConfirmingClear(open);
-          if (!open) setAssignmentError(null);
-        }}
-        onConfirm={() => {
-          setAssignmentError(null);
-          void onClearUploader()
-            .then(() => setConfirmingClear(false))
-            .catch((cause: unknown) =>
-              setAssignmentError(
-                cause instanceof Error
-                  ? cause.message
-                  : "No se pudo quitar el responsable.",
-              ),
-            );
-        }}
-      />
       <ConfirmationDialog
         confirmLabel="Eliminar serie"
         description="Esta acción elimina la serie si no tiene Chapters asociados y no se puede deshacer."

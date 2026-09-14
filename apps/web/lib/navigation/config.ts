@@ -1,10 +1,11 @@
 import {
   FileText,
-  LayoutDashboard,
   Layers3,
-  Settings,
-  Users,
+  LayoutDashboard,
   ScrollText,
+  Settings,
+  Ticket,
+  Users,
 } from "lucide-react";
 import type { NavigationItem } from "./types";
 
@@ -23,6 +24,13 @@ export const navigationConfig: NavigationItem[] = [
     href: "/series",
     icon: Layers3,
     capabilityKey: "series.read",
+  },
+  {
+    id: "authorizations",
+    label: "Autorizaciones",
+    href: "/autorizaciones",
+    icon: Ticket,
+    capabilityKey: "series.create.with-grant",
   },
   {
     id: "chapters",
@@ -52,7 +60,7 @@ export const navigationSections = [
   {
     id: "content",
     label: "Contenido",
-    itemIds: ["series", "chapters"],
+    itemIds: ["series", "authorizations", "chapters"],
   },
   {
     id: "administration",

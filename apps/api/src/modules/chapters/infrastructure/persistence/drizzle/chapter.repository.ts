@@ -9,6 +9,10 @@ import {
   seriesAssignments,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
+import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
+import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
+import { lockCurrentAuthorization } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
 import type {
   ChapterPermissionRepositoryPort,
   ChapterRepositoryPort,
@@ -19,13 +23,9 @@ import type {
   ChapterRecord,
 } from "../../../domain/chapter.types.js";
 import {
-  evaluateChapterAdministrationAuthorization,
   type DelegableChapterPermission,
+  evaluateChapterAdministrationAuthorization,
 } from "../../../domain/chapter-permission.policy.js";
-import type { AuthorizationAuditRepository } from "../../../../authorization/application/ports/authorization.ports.js";
-import { sanitizeAuditMetadata } from "../../../../authorization/infrastructure/audit/audit-metadata.js";
-import { lockCurrentAuthorization } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
-import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
 
 const toChapter = (row: typeof chapters.$inferSelect): ChapterRecord => ({
   id: row.id,
@@ -78,7 +78,7 @@ export class DrizzleChapterRepository
           .where(
             and(
               eq(seriesAssignments.seriesId, seriesId),
-              eq(seriesAssignments.uploaderId, userId),
+              eq(seriesAssignments.responsibleUserId, userId),
             ),
           )
           .limit(1)
@@ -160,12 +160,12 @@ export class DrizzleChapterRepository
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx
-          .select({ uploaderId: seriesAssignments.uploaderId })
+          .select({ responsibleUserId: seriesAssignments.responsibleUserId })
           .from(seriesAssignments)
           .where(eq(seriesAssignments.seriesId, snapshot.seriesId))
           .limit(1)
           .for("update");
-        isAssigned = assignment?.uploaderId === input.actor.userId;
+        isAssigned = assignment?.responsibleUserId === input.actor.userId;
       }
       const [chapter] = await tx
         .select({ seriesId: chapters.seriesId })
@@ -265,12 +265,12 @@ export class DrizzleChapterRepository
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx
-          .select({ uploaderId: seriesAssignments.uploaderId })
+          .select({ responsibleUserId: seriesAssignments.responsibleUserId })
           .from(seriesAssignments)
           .where(eq(seriesAssignments.seriesId, snapshot.seriesId))
           .limit(1)
           .for("update");
-        isAssigned = assignment?.uploaderId === input.actor.userId;
+        isAssigned = assignment?.responsibleUserId === input.actor.userId;
       }
 
       const [chapter] = await tx

@@ -1,24 +1,32 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { Button } from "../../ui/button";
-import { errorMessage } from "../feedback";
+import { type FormEvent, useState } from "react";
+import type { SeriesCreationGrantListItem } from "../../../lib/domains/authorizations/types";
+import { grantOptionLabel } from "../../../lib/domains/authorizations/view-model";
 import type { SeriesInput } from "../../../lib/domains/series/types";
+import { Button } from "../../ui/button";
+import { Select } from "../../ui/select";
+import { errorMessage } from "../feedback";
 
 export function SeriesForm({
   initial,
   onSubmit,
   submitLabel = "Crear Series",
   onCancel,
+  requiresGrant = false,
+  availableGrants = [],
 }: {
   initial?: Partial<SeriesInput>;
   onSubmit: (input: SeriesInput) => Promise<void>;
   submitLabel?: string;
   onCancel?: () => void;
+  requiresGrant?: boolean;
+  availableGrants?: readonly SeriesCreationGrantListItem[];
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [coverUrl, setCoverUrl] = useState(initial?.coverUrl ?? "");
+  const [grantId, setGrantId] = useState(initial?.grantId ?? "");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -31,6 +39,7 @@ export function SeriesForm({
         title: title.trim(),
         description: description.trim() || null,
         coverUrl: coverUrl.trim() || null,
+        ...(requiresGrant ? { grantId } : {}),
       });
     } catch (cause) {
       setError(errorMessage(cause));
@@ -57,6 +66,32 @@ export function SeriesForm({
           El slug público se genera automáticamente y permanece estable.
         </span>
       </label>
+      {requiresGrant ? (
+        <label
+          className="grid gap-1.5 text-[13px] font-medium text-muted"
+          htmlFor="series-grant"
+        >
+          Autorización
+          <Select
+            id="series-grant"
+            required
+            value={grantId}
+            onChange={(event) => setGrantId(event.target.value)}
+          >
+            <option disabled value="">
+              Selecciona una autorización disponible
+            </option>
+            {availableGrants.map((grant) => (
+              <option key={grant.id} value={grant.id}>
+                {grantOptionLabel(grant)}
+              </option>
+            ))}
+          </Select>
+          <span className="font-normal text-muted">
+            Esta autorización se consume al crear la Serie.
+          </span>
+        </label>
+      ) : null}
       <label
         className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="series-cover-url"

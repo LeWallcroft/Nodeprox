@@ -1,30 +1,29 @@
 "use client";
 
+import { Pencil, Trash2, UserRoundPlus } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
-import { Pencil, Trash2, UserRoundPlus } from "lucide-react";
-import { PageHeader } from "../../../../components/layout/page-header";
-import { SeriesForm } from "../../../../components/domains/series/series-form";
-import { SeriesCoverPreview } from "../../../../components/domains/series/series-cover-preview";
-import { AssignSeriesUserDialog } from "../../../../components/domains/series/assign-series-user-dialog";
 import { errorMessage } from "../../../../components/domains/feedback";
-import { Button } from "../../../../components/ui/button";
+import { AssignSeriesUserDialog } from "../../../../components/domains/series/assign-series-user-dialog";
+import { SeriesCoverPreview } from "../../../../components/domains/series/series-cover-preview";
+import { SeriesForm } from "../../../../components/domains/series/series-form";
+import { PageHeader } from "../../../../components/layout/page-header";
 import { AppDialog } from "../../../../components/ui/app-dialog";
+import { Button } from "../../../../components/ui/button";
 import { ConfirmationDialog } from "../../../../components/ui/confirmation-dialog";
 import { EmptyState } from "../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../components/ui/error-state";
 import { Skeleton } from "../../../../components/ui/skeleton";
+import { hasCapability } from "../../../../lib/auth/visibility";
 import {
+  useAssignSeriesResponsible,
   useDeleteSeries,
-  useAssignSeriesUploader,
-  useClearSeriesUploader,
   useSeries,
   useSeriesCapabilities,
+  useSeriesResponsibleCandidates,
   useUpdateSeries,
-  useSeriesUploaderCandidates,
 } from "../../../../lib/domains/series/hooks";
-import { hasCapability } from "../../../../lib/auth/visibility";
 import type { SeriesInput } from "../../../../lib/domains/series/types";
 
 export default function SeriesDetailPage() {
@@ -39,14 +38,15 @@ export default function SeriesDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [confirmingClear, setConfirmingClear] = useState(false);
   const canManageAssignment = hasCapability(
     capabilities.data?.capabilities,
     "series.assignment.manage",
   );
-  const candidates = useSeriesUploaderCandidates(seriesId, canManageAssignment);
-  const assignUploader = useAssignSeriesUploader(seriesId);
-  const clearUploader = useClearSeriesUploader(seriesId);
+  const candidates = useSeriesResponsibleCandidates(
+    seriesId,
+    canManageAssignment,
+  );
+  const assignResponsible = useAssignSeriesResponsible(seriesId);
 
   async function handleUpdate(input: SeriesInput) {
     await update.mutateAsync({
@@ -134,19 +134,9 @@ export default function SeriesDetailPage() {
             {canManageAssignment ? (
               <Button type="button" onClick={() => setAssigning(true)}>
                 <UserRoundPlus aria-hidden="true" className="size-4" />
-                {series.principalUploader
+                {series.responsibleUser
                   ? "Cambiar responsable"
                   : "Asignar responsable"}
-              </Button>
-            ) : null}
-            {canManageAssignment && series.principalUploader ? (
-              <Button
-                className="border-border bg-surface-elevated text-text hover:bg-hover"
-                type="button"
-                disabled={clearUploader.isPending}
-                onClick={() => setConfirmingClear(true)}
-              >
-                Quitar responsable
               </Button>
             ) : null}
           </div>
@@ -183,10 +173,10 @@ export default function SeriesDetailPage() {
         </div>
         <div className="rounded-xl border border-border bg-surface p-5">
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">
-            Responsable principal
+            Responsable
           </span>
           <p className="mb-0 mt-2 text-muted">
-            {series.principalUploader?.email ?? "Sin responsable asignado."}
+            {series.responsibleUser?.email ?? "Sin responsable asignado."}
           </p>
         </div>
         <div className="rounded-xl border border-border bg-surface p-5">
@@ -209,10 +199,10 @@ export default function SeriesDetailPage() {
         candidates={candidates.data}
         isLoading={candidates.isPending}
         error={candidates.error instanceof Error ? candidates.error : null}
-        isSubmitting={assignUploader.isPending}
+        isSubmitting={assignResponsible.isPending}
         onClose={() => setAssigning(false)}
-        onAssign={async (uploaderId) => {
-          await assignUploader.mutateAsync(uploaderId);
+        onAssign={async (responsibleUserId) => {
+          await assignResponsible.mutateAsync(responsibleUserId);
           setAssigning(false);
         }}
       />
@@ -228,25 +218,6 @@ export default function SeriesDetailPage() {
           if (!open) setActionError(null);
         }}
         onConfirm={() => void handleDelete()}
-      />
-      <ConfirmationDialog
-        confirmLabel="Quitar responsable"
-        description="La serie quedará sin uploader principal hasta una nueva asignación."
-        error={actionError}
-        open={confirmingClear}
-        pending={clearUploader.isPending}
-        title="¿Quitar responsable?"
-        onOpenChange={(open) => {
-          setConfirmingClear(open);
-          if (!open) setActionError(null);
-        }}
-        onConfirm={() => {
-          setActionError(null);
-          void clearUploader
-            .mutateAsync()
-            .then(() => setConfirmingClear(false))
-            .catch((cause: unknown) => setActionError(errorMessage(cause)));
-        }}
       />
     </>
   );

@@ -1,5 +1,4 @@
-import type { Series } from "./types";
-import type { SeriesPrincipalUploader } from "./types";
+import type { Series, SeriesResponsibleUser } from "./types";
 
 export interface SeriesListItem {
   id: string;
@@ -7,7 +6,7 @@ export interface SeriesListItem {
   slug: string;
   description: string | null;
   coverUrl: string | null;
-  principalUploader: SeriesPrincipalUploader | null;
+  responsibleUser: SeriesResponsibleUser | null;
   updatedAt: string;
 }
 
@@ -18,7 +17,7 @@ export function toSeriesListItem(series: Series): SeriesListItem {
     slug: series.slug,
     description: series.description,
     coverUrl: series.coverUrl,
-    principalUploader: series.principalUploader,
+    responsibleUser: series.responsibleUser,
     updatedAt: series.updatedAt,
   };
 }

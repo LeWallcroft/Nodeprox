@@ -1,16 +1,21 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { ApiError } from "../../api/types";
 import { queryKeys } from "../query-keys";
 import {
+  assignSeriesResponsible,
   createSeries,
-  assignSeriesUploader,
-  clearSeriesUploader,
   deleteSeries,
   getSeries,
   getSeriesCapabilities,
   listSeries,
-  listSeriesUploaderCandidates,
+  listSeriesResponsibleCandidates,
   updateSeries,
 } from "./api";
 import type { SeriesInput } from "./types";
@@ -46,9 +51,38 @@ export function useCreateSeries() {
   return useMutation({
     mutationFn: createSeries,
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: queryKeys.series.list });
+      await refreshSeriesCreationProjections(queryClient);
+    },
+    onError: async (error) => {
+      if (
+        error instanceof ApiError &&
+        [
+          "series-creation-grant-not-found",
+          "series-creation-grant-not-owned",
+          "series-creation-grant-already-consumed",
+          "series-creation-grant-invalidated",
+        ].includes(error.code ?? "")
+      )
+        await refreshSeriesCreationGrantProjections(queryClient);
     },
   });
+}
+
+export function refreshSeriesCreationGrantProjections(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+) {
+  return queryClient.invalidateQueries({
+    queryKey: queryKeys.authorizations.all,
+  });
+}
+
+export function refreshSeriesCreationProjections(
+  queryClient: Pick<QueryClient, "invalidateQueries">,
+) {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: queryKeys.series.list }),
+    refreshSeriesCreationGrantProjections(queryClient),
+  ]);
 }
 
 export function useUpdateSeries(seriesId: string) {
@@ -75,10 +109,13 @@ export function useDeleteSeries() {
   });
 }
 
-export function useSeriesUploaderCandidates(seriesId: string, enabled: boolean) {
+export function useSeriesResponsibleCandidates(
+  seriesId: string,
+  enabled: boolean,
+) {
   return useQuery({
-    queryKey: queryKeys.series.uploaderCandidates(seriesId),
-    queryFn: () => listSeriesUploaderCandidates(seriesId),
+    queryKey: queryKeys.series.responsibleCandidates(seriesId),
+    queryFn: () => listSeriesResponsibleCandidates(seriesId),
     enabled: Boolean(seriesId) && enabled,
     retry: false,
   });
@@ -90,27 +127,20 @@ function invalidateSeriesAssignment(
 ) {
   return Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.series.list }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.series.detail(seriesId) }),
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.series.detail(seriesId),
+    }),
     queryClient.invalidateQueries({
       queryKey: queryKeys.series.capabilities(seriesId),
     }),
   ]);
 }
 
-export function useAssignSeriesUploader(seriesId: string) {
+export function useAssignSeriesResponsible(seriesId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (uploaderId: string) => assignSeriesUploader(seriesId, uploaderId),
-    onSuccess: async () => {
-      await invalidateSeriesAssignment(queryClient, seriesId);
-    },
-  });
-}
-
-export function useClearSeriesUploader(seriesId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => clearSeriesUploader(seriesId),
+    mutationFn: (responsibleUserId: string) =>
+      assignSeriesResponsible(seriesId, responsibleUserId),
     onSuccess: async () => {
       await invalidateSeriesAssignment(queryClient, seriesId);
     },

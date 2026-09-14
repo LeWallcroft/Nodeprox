@@ -15,7 +15,11 @@ const series = {
   slug: "raven",
   description: "Una serie real",
   coverUrl: "https://i.imgur.com/raven.jpg",
-  principalUploader: { id: "uploader-1", email: "uploader@example.com" },
+  responsibleUser: {
+    id: "uploader-1",
+    email: "uploader@example.com",
+    role: "uploader" as const,
+  },
   createdBy: "user-1",
   createdAt: "2026-08-01T00:00:00.000Z",
   updatedAt: "2026-08-02T00:00:00.000Z",
@@ -62,8 +66,7 @@ describe("Series management presentation", () => {
         assignmentPending={false}
         updatePending={false}
         deletePending={false}
-        onAssignUploader={async () => undefined}
-        onClearUploader={async () => undefined}
+        onAssignResponsible={async () => undefined}
       />,
     );
 
@@ -145,8 +148,7 @@ describe("Series management presentation", () => {
         assignmentPending={false}
         updatePending={false}
         deletePending={false}
-        onAssignUploader={async () => undefined}
-        onClearUploader={async () => undefined}
+        onAssignResponsible={async () => undefined}
       />,
     );
     expect(markup).toContain("Detalle de la serie");
@@ -173,8 +175,7 @@ describe("Series management presentation", () => {
           assignmentPending={false}
           updatePending={false}
           deletePending={false}
-          onAssignUploader={async () => undefined}
-          onClearUploader={async () => undefined}
+          onAssignResponsible={async () => undefined}
         />
       </SeriesContextPanel>,
     );
@@ -199,8 +200,7 @@ describe("Series management presentation", () => {
         assignmentPending={false}
         updatePending={false}
         deletePending={false}
-        onAssignUploader={async () => undefined}
-        onClearUploader={async () => undefined}
+        onAssignResponsible={async () => undefined}
       />,
     );
     expect(markup).not.toContain("Editar series");
@@ -224,8 +224,7 @@ describe("Series management presentation", () => {
         assignmentPending={false}
         updatePending={false}
         deletePending={false}
-        onAssignUploader={async () => undefined}
-        onClearUploader={async () => undefined}
+        onAssignResponsible={async () => undefined}
       />,
     );
     expect(markup).toContain("Gestionar capítulos");
