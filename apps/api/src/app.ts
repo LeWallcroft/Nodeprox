@@ -25,6 +25,7 @@ import { DiscordGatewayService } from "./modules/discord/application/discord-gat
 import { DiscordRoleConfigurationService } from "./modules/discord/application/discord-role-configuration.service.js";
 import { ListSeriesCreationGrantsForAdministrationService } from "./modules/discord/application/list-series-creation-grants-for-administration.service.js";
 import { DiscordBotGuildRoleVerifier } from "./modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
+import { DiscordBotSeriesChannelGateway } from "./modules/discord/infrastructure/discord-bot-series-channel-gateway.js";
 import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "./modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
 import { RedisLinkCodeStore } from "./modules/discord/infrastructure/redis-link-code.store.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
@@ -44,6 +45,8 @@ import { DrizzleImageVersionResultRepository } from "./modules/images/infrastruc
 import { DrizzleMediaReplacementRepository } from "./modules/images/infrastructure/persistence/drizzle/media-replacement.repository.js";
 import { registerImagePlugin } from "./modules/images/presentation/image.plugin.js";
 import { registerImportBatchPlugin } from "./modules/ingestion/presentation/import-batch.plugin.js";
+import { DrizzleNotificationRepository } from "./modules/notifications/infrastructure/persistence/drizzle-notification.repository.js";
+import { registerNotificationPlugin } from "./modules/notifications/presentation/notification.plugin.js";
 import { registerOverviewPlugin } from "./modules/overview/presentation/overview.plugin.js";
 import { GetPublishedChapter } from "./modules/publication/application/services/get-published-chapter.js";
 import { DrizzlePublishedChapterRepository } from "./modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
@@ -116,6 +119,13 @@ export function buildApp(
       authentication,
     );
     const domainEvents = new DrizzleDomainEventOutbox();
+    const seriesChannelGateway =
+      dependencies.discord?.botInternalUrl && dependencies.discord.internalToken
+        ? new DiscordBotSeriesChannelGateway(
+            dependencies.discord.botInternalUrl,
+            dependencies.discord.internalToken,
+          )
+        : undefined;
     if (dependencies.discord) {
       const discordService = new DiscordGatewayService(
         dependencies.database,
@@ -134,6 +144,7 @@ export function buildApp(
               dependencies.discord.internalToken,
             )
           : undefined,
+        seriesChannelGateway,
         (error) =>
           app.log.error(
             { err: error },
@@ -149,6 +160,7 @@ export function buildApp(
           ),
         internalToken: dependencies.discord.internalToken,
         authentication,
+        authorization,
       });
       if (
         dependencies.discord.botInternalUrl &&
@@ -174,6 +186,10 @@ export function buildApp(
       authentication,
       authorization,
     );
+    registerNotificationPlugin(app, {
+      repository: new DrizzleNotificationRepository(dependencies.database),
+      authentication,
+    });
     registerAuditPlugin(
       app,
       dependencies.database,
@@ -205,6 +221,7 @@ export function buildApp(
       authorization,
       chapterPermissions,
       domainEvents,
+      seriesChannelGateway,
     );
     const storageConfig = dependencies.storage ?? {
       provider: "filesystem" as const,

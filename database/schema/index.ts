@@ -45,6 +45,7 @@ export {
   mediaEffectStatusEnum,
   mediaEffectTypeEnum,
 } from "./media-effect-outbox.js";
+export { notifications } from "./notifications.js";
 export {
   processingOutbox,
   processingOutboxStatusEnum,

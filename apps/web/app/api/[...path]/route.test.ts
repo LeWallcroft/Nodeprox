@@ -181,6 +181,141 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("proxies only GET for the authenticated selectable Series channels endpoint", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", backend);
+
+    const allowed = await GET(
+      new Request("http://localhost:3000/api/me/discord/series-channels", {
+        headers: { cookie: "nodeprox_session=active" },
+      }),
+      context(["me", "discord", "series-channels"]),
+    );
+    const denied = await POST(
+      new Request("http://localhost:3000/api/me/discord/series-channels", {
+        method: "POST",
+      }),
+      context(["me", "discord", "series-channels"]),
+    );
+
+    expect(allowed.status).toBe(200);
+    expect(denied.status).toBe(404);
+    expect(backend).toHaveBeenCalledWith(
+      "http://localhost:3001/me/discord/series-channels",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(new Headers(backend.mock.calls[0]?.[1].headers).get("cookie")).toBe(
+      "nodeprox_session=active",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies notification reads with query strings and authenticated cookies", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [], nextCursor: null }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ count: 6 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", backend);
+
+    const list = await GET(
+      new Request("http://localhost:3000/api/me/notifications?limit=8", {
+        headers: { cookie: "nodeprox_session=active" },
+      }),
+      context(["me", "notifications"]),
+    );
+    const unread = await GET(
+      new Request("http://localhost:3000/api/me/notifications/unread-count", {
+        headers: { cookie: "nodeprox_session=active" },
+      }),
+      context(["me", "notifications", "unread-count"]),
+    );
+
+    expect(list.status).toBe(200);
+    expect(unread.status).toBe(200);
+    await expect(unread.json()).resolves.toEqual({ count: 6 });
+    expect(backend.mock.calls.map(([url]) => url)).toEqual([
+      "http://localhost:3001/me/notifications?limit=8",
+      "http://localhost:3001/me/notifications/unread-count",
+    ]);
+    expect(new Headers(backend.mock.calls[0]?.[1].headers).get("cookie")).toBe(
+      "nodeprox_session=active",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies only the explicit notification read mutations", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ read: true }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", backend);
+
+    const one = await PATCH(
+      new Request(
+        "http://localhost:3000/api/me/notifications/notification-1/read",
+        {
+          method: "PATCH",
+        },
+      ),
+      context(["me", "notifications", "notification-1", "read"]),
+    );
+    const all = await POST(
+      new Request("http://localhost:3000/api/me/notifications/read-all", {
+        method: "POST",
+      }),
+      context(["me", "notifications", "read-all"]),
+    );
+    const denied = await POST(
+      new Request("http://localhost:3000/api/me/notifications", {
+        method: "POST",
+      }),
+      context(["me", "notifications"]),
+    );
+
+    expect(one.status).toBe(200);
+    expect(all.status).toBe(200);
+    expect(denied.status).toBe(404);
+    expect(backend.mock.calls.map(([, options]) => options.method)).toEqual([
+      "PATCH",
+      "POST",
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  it.each([401, 403, 404])(
+    "preserves notification backend status %s",
+    async (status) => {
+      const backend = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ status }), {
+          status,
+          headers: { "content-type": "application/problem+json" },
+        }),
+      );
+      vi.stubGlobal("fetch", backend);
+      const response = await GET(
+        new Request("http://localhost:3000/api/me/notifications"),
+        context(["me", "notifications"]),
+      );
+      expect(response.status).toBe(status);
+      vi.unstubAllGlobals();
+    },
+  );
+
   it("supports PATCH, DELETE and upload metadata without proxying ZIP bytes", async () => {
     const backend = vi
       .fn()

@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { AuthenticatedUserView } from "../../lib/api/types";
+import { NotificationBell } from "../domains/notifications/notification-bell";
 import { UserMenu } from "./user-menu";
 
 export function Topbar({
@@ -34,6 +35,7 @@ export function Topbar({
       </div>
       <div className="flex items-center gap-3">
         {actions}
+        <NotificationBell />
         <UserMenu user={user} />
       </div>
     </header>
