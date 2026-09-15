@@ -46,6 +46,16 @@ export class ApiError extends Error {
   }
 }
 
+export class ApiUnavailableError extends Error {
+  readonly code = "api-unavailable";
+  readonly status = 503;
+
+  constructor() {
+    super("api-unavailable");
+    this.name = "ApiUnavailableError";
+  }
+}
+
 export function normalizeApiError(status: number, payload?: unknown): ApiError {
   const body = isProblemDetails(payload) ? payload : undefined;
   const message =
