@@ -69,6 +69,7 @@ const replaceAuthorizedRolesInput = z
       .max(100),
   })
   .strict();
+const emptyBody = z.undefined();
 const idSchema = z.object({ id: z.uuid() }).strict();
 const statusSchema = z
   .object({
@@ -108,11 +109,14 @@ function mapError(error: unknown): never {
     error.code === "series-creation-grant-not-found"
       ? 404
       : error.code === "discord-id-already-linked" ||
+          error.code === "discord-link-already-exists" ||
+          error.code === "discord-link-challenge-claimed" ||
           error.code === "discord-interaction-already-processed" ||
           error.code === "series-creation-grant-invalidated"
         ? 409
         : error.code === "discord-not-linked" ||
-            error.code === "discord-actor-role-not-authorized"
+            error.code === "discord-actor-role-not-authorized" ||
+            error.code === "discord-link-user-inactive"
           ? 403
           : error.code === "discord-link-code-invalid"
             ? 400
@@ -251,9 +255,25 @@ export function registerDiscordPlugin(
       }
     },
   );
-  app.post("/me/discord/link-code", { preHandler: sessionGuard }, async () =>
-    input.service.createLinkCode(sessionContext()),
+  app.post(
+    "/me/discord/link-code",
+    { preHandler: sessionGuard },
+    async (request) => {
+      parsed(emptyBody, request.body);
+      try {
+        return await input.service.createLinkCode(sessionContext());
+      } catch (error) {
+        return mapError(error);
+      }
+    },
   );
+  app.get("/me/discord-link", { preHandler: sessionGuard }, async () => {
+    try {
+      return await input.service.linkStatus(sessionContext());
+    } catch (error) {
+      return mapError(error);
+    }
+  });
   app.get(
     "/me/series-creation-grants",
     { preHandler: sessionGuard },

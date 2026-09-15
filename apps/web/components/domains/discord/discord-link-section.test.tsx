@@ -12,10 +12,10 @@ const source = readFileSync(
 
 describe("Discord link-code section", () => {
   it("renders the generation action and Discord instructions", () => {
-    expect(source).toContain("Generar código de vinculación");
+    expect(source).toContain("Vincular Discord");
     expect(source).toContain("Código de vinculación");
     expect(source).toContain("/vincular codigo:");
-    expect(source).toContain("expiresInSeconds");
+    expect(source).toContain("expiresAt");
     expect(source).toContain("CopyButton");
   });
 
@@ -29,5 +29,7 @@ describe("Discord link-code section", () => {
     expect(source).not.toContain("localStorage");
     expect(source).not.toContain("sessionStorage");
     expect(source).not.toContain("window.location");
+    expect(source).not.toContain("Desvincular");
+    expect(source).not.toContain("localStorage");
   });
 });

@@ -1,5 +1,5 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
   auditLogs,
@@ -12,10 +12,10 @@ import {
 import type { NodeProxTransaction } from "../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
 import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
 import {
+  type DiscordBotCapability,
   hasDiscordCapability,
   mapDiscordAuthorizedRoleWrite,
   projectDiscordAuthorizedRole,
-  type DiscordBotCapability,
 } from "./discord-authorization-policy.js";
 import type { DiscordGuildRoleVerifier } from "./discord-guild-role-verifier.js";
 
@@ -27,31 +27,135 @@ export class DiscordGatewayError extends Error {
   }
 }
 
-export interface LinkCodeStore {
-  create(userId: string, code: string, ttlSeconds: number): Promise<void>;
-  consume(code: string): Promise<string | null>;
+export const DISCORD_LINK_CHALLENGE_TTL_SECONDS = 600;
+
+export type DiscordLinkChallengeStoreClaimResult =
+  | { status: "claimed"; userId: string }
+  | { status: "already_claimed_same_interaction"; userId: string }
+  | { status: "claimed_by_other" }
+  | { status: "not_found" };
+
+export interface DiscordLinkChallengeStore {
+  createReplacingPrevious(input: {
+    userId: string;
+    codeDigest: string;
+    expiresAt: Date;
+    ttlSeconds: number;
+  }): Promise<void>;
+  getActiveForUser(userId: string): Promise<{
+    codeDigest: string;
+    expiresAt: Date;
+  } | null>;
+  claim(input: {
+    codeDigest: string;
+    interactionId: string;
+  }): Promise<DiscordLinkChallengeStoreClaimResult>;
+  releaseClaim(input: {
+    codeDigest: string;
+    interactionId: string;
+  }): Promise<void>;
+  finalize(input: {
+    userId: string;
+    codeDigest: string;
+    interactionId: string;
+  }): Promise<void>;
 }
 
-export class InMemoryLinkCodeStore implements LinkCodeStore {
-  private readonly values = new Map<
+export class InMemoryLinkCodeStore implements DiscordLinkChallengeStore {
+  private readonly byUser = new Map<
     string,
-    { userId: string; expiresAt: number }
+    { codeDigest: string; expiresAt: Date }
   >();
-  async create(userId: string, code: string, ttlSeconds: number) {
-    this.values.set(code, {
-      userId,
-      expiresAt: Date.now() + ttlSeconds * 1000,
+  private readonly byDigest = new Map<
+    string,
+    { userId: string; claimInteractionId?: string }
+  >();
+
+  async createReplacingPrevious(input: {
+    userId: string;
+    codeDigest: string;
+    expiresAt: Date;
+    ttlSeconds: number;
+  }) {
+    const previous = this.byUser.get(input.userId);
+    if (previous) this.byDigest.delete(previous.codeDigest);
+    this.byUser.set(input.userId, {
+      codeDigest: input.codeDigest,
+      expiresAt: input.expiresAt,
     });
+    this.byDigest.set(input.codeDigest, { userId: input.userId });
   }
-  async consume(code: string) {
-    const found = this.values.get(code);
-    this.values.delete(code);
-    return found && found.expiresAt > Date.now() ? found.userId : null;
+
+  async getActiveForUser(userId: string) {
+    const challenge = this.byUser.get(userId);
+    if (!challenge || challenge.expiresAt <= new Date()) {
+      if (challenge) {
+        this.byUser.delete(userId);
+        this.byDigest.delete(challenge.codeDigest);
+      }
+      return null;
+    }
+    return challenge;
+  }
+
+  async claim(input: { codeDigest: string; interactionId: string }) {
+    const found = this.byDigest.get(input.codeDigest);
+    if (!found) return { status: "not_found" } as const;
+    const active = await this.getActiveForUser(found.userId);
+    if (!active || active.codeDigest !== input.codeDigest)
+      return { status: "not_found" } as const;
+    if (!found.claimInteractionId) {
+      found.claimInteractionId = input.interactionId;
+      return { status: "claimed", userId: found.userId } as const;
+    }
+    if (found.claimInteractionId === input.interactionId)
+      return {
+        status: "already_claimed_same_interaction",
+        userId: found.userId,
+      } as const;
+    return { status: "claimed_by_other" } as const;
+  }
+
+  async releaseClaim(input: { codeDigest: string; interactionId: string }) {
+    const found = this.byDigest.get(input.codeDigest);
+    if (found?.claimInteractionId === input.interactionId)
+      delete found.claimInteractionId;
+  }
+
+  async finalize(input: {
+    userId: string;
+    codeDigest: string;
+    interactionId: string;
+  }) {
+    const found = this.byDigest.get(input.codeDigest);
+    if (
+      found?.userId === input.userId &&
+      found.claimInteractionId === input.interactionId
+    )
+      this.byDigest.delete(input.codeDigest);
+    const pointer = this.byUser.get(input.userId);
+    if (pointer?.codeDigest === input.codeDigest)
+      this.byUser.delete(input.userId);
   }
 }
 
 const opaqueCode = (prefix: string) =>
   `${prefix}${randomBytes(9).toString("base64url").toUpperCase()}`;
+
+const discordLinkCode = () =>
+  `NPX-LINK-${randomBytes(16).toString("hex").toUpperCase()}`;
+
+export const digestDiscordLinkCode = (code: string) =>
+  createHash("sha256").update(code).digest("hex");
+
+function isUniqueViolation(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505"
+  );
+}
 
 const cleanReference = (value: string | undefined) => {
   const cleaned = value?.trim().replace(/[<>]/g, "") ?? "";
@@ -62,7 +166,7 @@ const cleanReference = (value: string | undefined) => {
 export class DiscordGatewayService {
   constructor(
     private readonly db: NodeProxDatabase,
-    private readonly links: LinkCodeStore,
+    private readonly links: DiscordLinkChallengeStore,
     private readonly events: DomainEventOutbox,
     private readonly bootstrap?:
       | {
@@ -71,6 +175,9 @@ export class DiscordGatewayService {
         }
       | undefined,
     private readonly roleVerifier?: DiscordGuildRoleVerifier,
+    private readonly onChallengeFinalizeFailure: (
+      error: unknown,
+    ) => void = () => {},
   ) {}
 
   async bootstrapIntegration() {
@@ -82,9 +189,60 @@ export class DiscordGatewayService {
   }
 
   async createLinkCode(userId: string) {
-    const code = opaqueCode("NPX-LINK-");
-    await this.links.create(userId, code, 600);
-    return { code, expiresInSeconds: 600 };
+    const [user] = await this.db
+      .select({
+        id: users.id,
+        status: users.status,
+        discordId: users.discordId,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new DiscordGatewayError("resource-not-found");
+    if (user.status !== "active")
+      throw new DiscordGatewayError("discord-link-user-inactive");
+    if (user.discordId)
+      throw new DiscordGatewayError("discord-link-already-exists");
+    const code = discordLinkCode();
+    const expiresAt = new Date(
+      Date.now() + DISCORD_LINK_CHALLENGE_TTL_SECONDS * 1000,
+    );
+    await this.links.createReplacingPrevious({
+      userId,
+      codeDigest: digestDiscordLinkCode(code),
+      expiresAt,
+      ttlSeconds: DISCORD_LINK_CHALLENGE_TTL_SECONDS,
+    });
+    return {
+      code,
+      expiresAt: expiresAt.toISOString(),
+      expiresInSeconds: DISCORD_LINK_CHALLENGE_TTL_SECONDS,
+    };
+  }
+
+  async linkStatus(userId: string) {
+    const [user] = await this.db
+      .select({
+        id: users.id,
+        discordId: users.discordId,
+        linkedAt: users.discordLinkedAt,
+      })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (!user) throw new DiscordGatewayError("resource-not-found");
+    if (user.discordId)
+      return {
+        state: "linked" as const,
+        linkedAt: user.linkedAt?.toISOString() ?? null,
+      };
+    const pending = await this.links.getActiveForUser(userId);
+    if (pending)
+      return {
+        state: "pending" as const,
+        expiresAt: pending.expiresAt.toISOString(),
+      };
+    return { state: "unlinked" as const };
   }
 
   async confirmLink(input: {
@@ -95,71 +253,123 @@ export class DiscordGatewayService {
     interactionId: string;
     actorDiscordId: string;
   }) {
-    const userId = await this.links.consume(input.code);
-    if (!userId) throw new DiscordGatewayError("discord-link-code-invalid");
-    return this.db.transaction(async (tx) => {
-      await this.lockInteraction(tx, input.interactionId);
-      const integration = await this.requireIntegration(
-        tx,
-        input.guildId,
-        input.channelId,
-      );
-      const previous = await this.findInteraction(tx, input.interactionId);
-      if (previous) return { linked: true, idempotent: true };
-      const [linked] = await tx
-        .select({ id: users.id })
-        .from(users)
-        .where(eq(users.discordId, input.discordId))
-        .limit(1)
-        .for("update");
-      if (linked && linked.id !== userId)
-        throw new DiscordGatewayError("discord-id-already-linked");
-      const [updated] = await tx
-        .update(users)
-        .set({
-          discordId: input.discordId,
-          discordLinkedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId))
-        .returning({ id: users.id });
-      if (!updated) throw new DiscordGatewayError("resource-not-found");
-      await tx.insert(discordInteractions).values({
-        interactionId: input.interactionId,
-        interactionType: "identity.linked",
-        actorDiscordId: input.actorDiscordId,
-        guildId: integration.guildId,
-        channelId: input.channelId,
-        result: "linked",
-      });
-      await tx.insert(auditLogs).values({
-        actorId: userId,
-        action: "discord.identity.linked",
-        resourceType: "user",
-        resourceId: userId,
-        metadata: {
+    if (input.discordId !== input.actorDiscordId)
+      throw new DiscordGatewayError("validation-failed");
+    const previous = await this.findSuccessfulLinkInteraction(
+      input.interactionId,
+    );
+    if (previous) return { linked: true, idempotent: true };
+    const codeDigest = digestDiscordLinkCode(input.code);
+    const claim = await this.links.claim({
+      codeDigest,
+      interactionId: input.interactionId,
+    });
+    if (claim.status === "not_found")
+      throw new DiscordGatewayError("discord-link-code-invalid");
+    if (claim.status === "claimed_by_other")
+      throw new DiscordGatewayError("discord-link-challenge-claimed");
+    try {
+      const result = await this.db.transaction(async (tx) => {
+        await this.lockInteraction(tx, input.interactionId);
+        const integration = await this.requireIntegration(
+          tx,
+          input.guildId,
+          input.channelId,
+        );
+        const previousInTransaction = await this.findInteraction(
+          tx,
+          input.interactionId,
+        );
+        if (previousInTransaction) return { linked: true, idempotent: true };
+        const [user] = await tx
+          .select({
+            id: users.id,
+            status: users.status,
+            discordId: users.discordId,
+          })
+          .from(users)
+          .where(eq(users.id, claim.userId))
+          .limit(1)
+          .for("update");
+        if (!user) throw new DiscordGatewayError("resource-not-found");
+        if (user.status !== "active")
+          throw new DiscordGatewayError("discord-link-user-inactive");
+        if (user.discordId)
+          throw new DiscordGatewayError("discord-link-already-exists");
+        const [linked] = await tx
+          .select({ id: users.id })
+          .from(users)
+          .where(eq(users.discordId, input.discordId))
+          .limit(1)
+          .for("update");
+        if (linked && linked.id !== user.id)
+          throw new DiscordGatewayError("discord-id-already-linked");
+        const [updated] = await tx
+          .update(users)
+          .set({
+            discordId: input.discordId,
+            discordLinkedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(users.id, user.id), isNull(users.discordId)))
+          .returning({ id: users.id });
+        if (!updated)
+          throw new DiscordGatewayError("discord-link-already-exists");
+        await tx.insert(discordInteractions).values({
+          interactionId: input.interactionId,
+          interactionType: "identity.linked",
           actorDiscordId: input.actorDiscordId,
-          guildId: input.guildId,
+          guildId: integration.guildId,
           channelId: input.channelId,
-        },
-      });
-      await this.events.append(
-        {
-          type: "discord.identity.linked",
-          aggregateType: "user",
-          aggregateId: userId,
-          actorUserId: userId,
-          payload: {
+          result: "linked",
+        });
+        await tx.insert(auditLogs).values({
+          actorId: user.id,
+          action: "discord.identity.linked",
+          resourceType: "user",
+          resourceId: user.id,
+          metadata: {
             actorDiscordId: input.actorDiscordId,
             guildId: input.guildId,
             channelId: input.channelId,
           },
-          occurredAt: new Date(),
-        },
-        tx,
-      );
-      return { linked: true, idempotent: false };
-    });
+        });
+        await this.events.append(
+          {
+            type: "discord.identity.linked",
+            aggregateType: "user",
+            aggregateId: user.id,
+            actorUserId: user.id,
+            payload: {
+              actorDiscordId: input.actorDiscordId,
+              guildId: input.guildId,
+              channelId: input.channelId,
+            },
+            occurredAt: new Date(),
+          },
+          tx,
+        );
+        return { linked: true, idempotent: false };
+      });
+      try {
+        await this.links.finalize({
+          userId: claim.userId,
+          codeDigest,
+          interactionId: input.interactionId,
+        });
+      } catch (error) {
+        this.onChallengeFinalizeFailure(error);
+      }
+      return result;
+    } catch (error) {
+      await this.links.releaseClaim({
+        codeDigest,
+        interactionId: input.interactionId,
+      });
+      if (isUniqueViolation(error))
+        throw new DiscordGatewayError("discord-id-already-linked");
+      throw error;
+    }
   }
 
   async issueGrant(input: {
@@ -495,6 +705,20 @@ export class DiscordGatewayService {
       .where(eq(discordInteractions.interactionId, interactionId))
       .limit(1)
       .for("update");
+    return row ?? null;
+  }
+
+  private async findSuccessfulLinkInteraction(interactionId: string) {
+    const [row] = await this.db
+      .select({ interactionId: discordInteractions.interactionId })
+      .from(discordInteractions)
+      .where(
+        and(
+          eq(discordInteractions.interactionId, interactionId),
+          eq(discordInteractions.interactionType, "identity.linked"),
+        ),
+      )
+      .limit(1);
     return row ?? null;
   }
 

@@ -34,6 +34,7 @@ export const queryKeys = {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,
   },
   discord: {
+    linkStatus: ["discord", "link", "status"] as const,
     authorizationConfiguration: [
       "admin",
       "discord",

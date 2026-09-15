@@ -68,6 +68,41 @@ describe("/vincular", () => {
     );
   });
 
+  it("treats an idempotent confirmation as the same safe success", async () => {
+    const api = {
+      confirmLink: vi
+        .fn()
+        .mockResolvedValue({ linked: true, idempotent: true }),
+      getIntegration: vi.fn(),
+      issueSeriesCreationGrant: vi.fn(),
+    };
+    const command = new LinkCommand(new LinkDiscordAccount(api));
+    const target = interaction();
+    await command.execute(target as never);
+    expect(target.editReply.mock.calls[0]?.[0].embeds[0].data.title).toBe(
+      "✅ Cuenta vinculada",
+    );
+  });
+
+  it("maps an already linked NodeProx account without exposing internals", async () => {
+    const api = {
+      confirmLink: vi
+        .fn()
+        .mockRejectedValue(
+          new NodeProxApiError("discord-link-already-exists", 409),
+        ),
+      getIntegration: vi.fn(),
+      issueSeriesCreationGrant: vi.fn(),
+    };
+    const command = new LinkCommand(new LinkDiscordAccount(api));
+    await expect(command.execute(interaction() as never)).rejects.toMatchObject(
+      {
+        userMessage:
+          "Tu cuenta de NodeProx ya tiene una cuenta de Discord vinculada.",
+      },
+    );
+  });
+
   it("does not expose API failures", async () => {
     const api = {
       confirmLink: vi.fn().mockRejectedValue(new NodeProxApiError(null, 0)),
