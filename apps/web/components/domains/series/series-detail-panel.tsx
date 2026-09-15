@@ -138,6 +138,18 @@ export function SeriesDetailPanel({
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+            Canal Discord
+          </dt>
+          <dd className="mt-1 text-muted">
+            {series.discordChannelId
+              ? series.discordChannelNameSnapshot
+                ? `#${series.discordChannelNameSnapshot}`
+                : "Canal vinculado"
+              : "Sin canal vinculado."}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
             Creada
           </dt>
           <dd className="mt-1 text-muted">

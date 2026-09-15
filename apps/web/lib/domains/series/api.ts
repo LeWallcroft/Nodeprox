@@ -1,10 +1,17 @@
 import { apiRequestBrowser } from "../../api/browser";
 import type {
+  SelectableDiscordSeriesChannel,
   Series,
   SeriesCapabilitiesProjection,
   SeriesInput,
   SeriesResponsibleCandidate,
 } from "./types";
+
+export function getSelectableSeriesChannels() {
+  return apiRequestBrowser<{ items: SelectableDiscordSeriesChannel[] }>(
+    "/me/discord/series-channels",
+  );
+}
 
 export function listSeries() {
   return apiRequestBrowser<Series[]>("/series");

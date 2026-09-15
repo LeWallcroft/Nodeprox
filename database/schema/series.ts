@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   index,
   pgTable,
@@ -31,6 +32,9 @@ export const series = pgTable(
   },
   (table) => [
     uniqueIndex("series_slug_unique").on(table.slug),
+    uniqueIndex("series_discord_channel_id_unique")
+      .on(table.discordChannelId)
+      .where(sql`${table.discordChannelId} IS NOT NULL`),
     index("series_created_by_idx").on(table.createdBy),
   ],
 );

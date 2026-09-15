@@ -57,6 +57,31 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
       severity: "warning",
       presentation: "inline",
     },
+    "series-channel-required": {
+      title: "Canal Discord requerido",
+      message: "Selecciona un canal Discord para crear la Serie.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-channel-invalid": {
+      title: "Canal Discord no disponible",
+      message: "El canal seleccionado ya no está disponible. Selecciona otro.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-channel-already-bound": {
+      title: "Canal Discord ya vinculado",
+      message:
+        "El canal seleccionado ya está vinculado a otra Serie. Elige otro canal.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-channel-validation-unavailable": {
+      title: "Canales Discord no disponibles",
+      message: "No se pudo validar el canal Discord. Inténtalo nuevamente.",
+      severity: "error",
+      presentation: "inline",
+    },
     forbidden: {
       title: "Acción no permitida",
       message: "No tienes permisos para realizar esta operación.",

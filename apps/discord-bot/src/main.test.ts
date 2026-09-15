@@ -8,6 +8,7 @@ import {
   registerShutdownHandlers,
 } from "./discord/lifecycle.js";
 import { BotHealthState } from "./health/health.js";
+import { NodeProxApiError } from "./infrastructure/nodeprox-api/nodeprox-api.client.js";
 
 describe("Discord bot lifecycle", () => {
   it("marks ready after ClientReady and destroys the client on shutdown", async () => {
@@ -152,6 +153,188 @@ describe("Discord bot startup", () => {
     expect(registerCommands).toHaveBeenCalledOnce();
     expect(client.login).toHaveBeenCalledWith(config.DISCORD_BOT_TOKEN);
     expect(logger.info).toHaveBeenCalledWith("discord_bot.gateway.login.start");
+  });
+
+  it("recovers integration validation after a transient transport failure", async () => {
+    const client = new EventEmitter() as EventEmitter & {
+      destroy: ReturnType<typeof vi.fn>;
+      login: ReturnType<typeof vi.fn>;
+    };
+    client.destroy = vi.fn();
+    client.login = vi.fn().mockResolvedValue("bot-token");
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined),
+    };
+    const getIntegration = vi
+      .fn()
+      .mockRejectedValueOnce(new NodeProxApiError(null, 0))
+      .mockResolvedValue({
+        enabled: true,
+        guildId: config.DISCORD_GUILD_ID,
+        controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
+      });
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await startBot({
+      config,
+      logger: logger as never,
+      api: {
+        getIntegration,
+        confirmLink: vi.fn(),
+        issueSeriesCreationGrant: vi.fn(),
+      },
+      client: client as never,
+      registerCommands: vi.fn().mockResolvedValue(undefined),
+      integrationRetryPolicy: {
+        maxAttempts: 2,
+        shouldRetry: (error, attempt) =>
+          error instanceof NodeProxApiError &&
+          error.status === 0 &&
+          attempt < 2,
+        delayMs: () => 1,
+      },
+      sleep,
+      installSignalHandlers: false,
+    });
+
+    expect(getIntegration).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(1);
+    expect(client.login).toHaveBeenCalledOnce();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 0, category: "transport" }),
+      "discord_bot.integration.validation.retry",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      { attempts: 2 },
+      "discord_bot.integration.validation.recovered",
+    );
+  });
+
+  it("fails startup after the transient retry budget is exhausted", async () => {
+    const client = new EventEmitter() as EventEmitter & {
+      destroy: ReturnType<typeof vi.fn>;
+      login: ReturnType<typeof vi.fn>;
+    };
+    client.destroy = vi.fn();
+    client.login = vi.fn();
+    const logger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      flush: vi.fn().mockResolvedValue(undefined),
+    };
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const transportError = new NodeProxApiError(null, 0);
+
+    await expect(
+      startBot({
+        config,
+        logger: logger as never,
+        api: {
+          getIntegration: vi.fn().mockRejectedValue(transportError),
+          confirmLink: vi.fn(),
+          issueSeriesCreationGrant: vi.fn(),
+        },
+        client: client as never,
+        registerCommands: vi.fn(),
+        integrationRetryPolicy: {
+          maxAttempts: 2,
+          shouldRetry: (_error, attempt) => attempt < 2,
+          delayMs: () => 1,
+        },
+        sleep,
+        installSignalHandlers: false,
+      }),
+    ).rejects.toBe(transportError);
+
+    expect(sleep).toHaveBeenCalledOnce();
+    expect(client.login).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        health: expect.objectContaining({ status: "degraded" }),
+      }),
+      "discord_bot.startup.failed",
+    );
+  });
+
+  it.each([401, 403])(
+    "fails fast for integration status %s",
+    async (status) => {
+      const client = new EventEmitter() as EventEmitter & {
+        destroy: ReturnType<typeof vi.fn>;
+        login: ReturnType<typeof vi.fn>;
+      };
+      client.destroy = vi.fn();
+      client.login = vi.fn();
+      const sleep = vi.fn().mockResolvedValue(undefined);
+
+      await expect(
+        startBot({
+          config,
+          logger: {
+            info: vi.fn(),
+            error: vi.fn(),
+            warn: vi.fn(),
+            flush: vi.fn().mockResolvedValue(undefined),
+          } as never,
+          api: {
+            getIntegration: vi
+              .fn()
+              .mockRejectedValue(new NodeProxApiError(null, status)),
+            confirmLink: vi.fn(),
+            issueSeriesCreationGrant: vi.fn(),
+          },
+          client: client as never,
+          registerCommands: vi.fn(),
+          sleep,
+          installSignalHandlers: false,
+        }),
+      ).rejects.toEqual(new NodeProxApiError(null, status));
+
+      expect(sleep).not.toHaveBeenCalled();
+      expect(client.login).not.toHaveBeenCalled();
+    },
+  );
+
+  it("fails fast when the returned integration configuration is invalid", async () => {
+    const client = new EventEmitter() as EventEmitter & {
+      destroy: ReturnType<typeof vi.fn>;
+      login: ReturnType<typeof vi.fn>;
+    };
+    client.destroy = vi.fn();
+    client.login = vi.fn();
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      startBot({
+        config,
+        logger: {
+          info: vi.fn(),
+          error: vi.fn(),
+          warn: vi.fn(),
+          flush: vi.fn().mockResolvedValue(undefined),
+        } as never,
+        api: {
+          getIntegration: vi.fn().mockResolvedValue({
+            enabled: false,
+            guildId: config.DISCORD_GUILD_ID,
+            controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
+          }),
+          confirmLink: vi.fn(),
+          issueSeriesCreationGrant: vi.fn(),
+        },
+        client: client as never,
+        registerCommands: vi.fn(),
+        sleep,
+        installSignalHandlers: false,
+      }),
+    ).rejects.toThrow("Discord bot integration configuration does not match.");
+
+    expect(sleep).not.toHaveBeenCalled();
+    expect(client.login).not.toHaveBeenCalled();
   });
 
   it("rejects startup when gateway login fails", async () => {

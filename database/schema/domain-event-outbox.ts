@@ -25,6 +25,12 @@ export const domainEventOutbox = pgTable(
       .defaultNow(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     attemptCount: integer("attempt_count").notNull().default(0),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimToken: text("claim_token"),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    lastErrorCode: text("last_error_code"),
   },
   (table) => [
     index("domain_event_outbox_pending_idx").on(
@@ -34,6 +40,12 @@ export const domainEventOutbox = pgTable(
     index("domain_event_outbox_aggregate_idx").on(
       table.aggregateType,
       table.aggregateId,
+    ),
+    index("domain_event_outbox_claimable_idx").on(
+      table.processedAt,
+      table.nextAttemptAt,
+      table.lockedUntil,
+      table.occurredAt,
     ),
   ],
 );

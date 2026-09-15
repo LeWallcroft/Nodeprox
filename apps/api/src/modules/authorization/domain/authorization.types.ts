@@ -24,5 +24,6 @@ export type AuthorizationDecision =
   | { allowed: false; reason: AuthorizationDenyReason };
 
 export type CapabilityProjection = {
+  role: Role | null;
   capabilities: readonly Permission[];
 };

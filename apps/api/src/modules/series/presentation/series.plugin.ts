@@ -16,6 +16,7 @@ import { ChapterCoreService } from "../../chapters/application/services/chapter-
 import { ChapterDeleteService } from "../../chapters/application/services/chapter-delete.service.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
 import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
+import type { DiscordSeriesChannelGateway } from "../../discord/application/discord-series-channel-gateway.js";
 import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
 import { SeriesService } from "../application/services/series.service.js";
 import { InvalidSeriesSlugError } from "../domain/series-slug.js";
@@ -50,7 +51,6 @@ const seriesCreateSchema = z
     coverUrl: externalCoverUrlSchema.nullable().optional(),
     grantId: z.uuid().optional(),
     discordChannelId: z.string().trim().min(1).max(64).optional(),
-    discordChannelNameSnapshot: z.string().trim().min(1).max(200).optional(),
   })
   .strict();
 const seriesPatchSchema = z
@@ -159,6 +159,7 @@ export function registerSeriesPlugin(
   authorization: AuthorizationService,
   chapterPermissions: ChapterPermissionService,
   events?: DomainEventOutbox,
+  seriesChannels?: DiscordSeriesChannelGateway,
 ) {
   const session = requireSession(
     authentication.service,
@@ -173,6 +174,7 @@ export function registerSeriesPlugin(
     repository,
     new UserRepository(db),
     repository,
+    seriesChannels,
   );
   const chapterCore = new ChapterCoreService(
     chapters,
@@ -200,6 +202,27 @@ export function registerSeriesPlugin(
             "A Discord channel is required.",
             422,
             "Discord channel required",
+          );
+        if (result.outcome === "channel-invalid")
+          throw error(
+            "series-channel-invalid",
+            "The selected Discord channel is unavailable.",
+            422,
+            "Discord channel invalid",
+          );
+        if (result.outcome === "channel-already-bound")
+          throw error(
+            "series-channel-already-bound",
+            "The selected Discord channel is already bound to another Series.",
+            409,
+            "Discord channel already bound",
+          );
+        if (result.outcome === "channel-validation-unavailable")
+          throw error(
+            "series-channel-validation-unavailable",
+            "Discord channel validation is temporarily unavailable.",
+            503,
+            "Discord channel validation unavailable",
           );
         if (result.outcome === "grant-not-owned")
           throw error(

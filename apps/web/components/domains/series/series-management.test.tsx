@@ -15,6 +15,8 @@ const series = {
   slug: "raven",
   description: "Una serie real",
   coverUrl: "https://i.imgur.com/raven.jpg",
+  discordChannelId: "channel-1",
+  discordChannelNameSnapshot: "serie-raven",
   responsibleUser: {
     id: "uploader-1",
     email: "uploader@example.com",
@@ -74,6 +76,8 @@ describe("Series management presentation", () => {
     expect(markup).toContain("Muy pronto");
     expect(markup).toContain("Disponible en una próxima versión.");
     expect(markup).not.toContain("12,450");
+    expect(markup).toContain("Canal Discord");
+    expect(markup).toContain("#serie-raven");
   });
 
   it("makes chapter management available from the initial real Series selection", () => {
@@ -94,6 +98,23 @@ describe("Series management presentation", () => {
     );
     expect(markup).toContain("El slug público se genera automáticamente");
     expect(markup).not.toContain('id="series-slug"');
+  });
+
+  it("renders the Discord channel selector only when the caller requires it", () => {
+    const gestor = renderToStaticMarkup(
+      <SeriesForm
+        requiresDiscordChannel
+        selectableChannels={[{ id: "channel-1", name: "series-manga" }]}
+        onSubmit={async () => undefined}
+      />,
+    );
+    const admin = renderToStaticMarkup(
+      <SeriesForm onSubmit={async () => undefined} />,
+    );
+
+    expect(gestor).toContain("Canal Discord");
+    expect(gestor).toContain("#series-manga");
+    expect(admin).not.toContain("Canal Discord");
   });
 
   it("renders a selectable list from Series contract data", () => {

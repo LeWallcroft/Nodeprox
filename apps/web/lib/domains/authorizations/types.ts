@@ -10,6 +10,7 @@ export interface SeriesCreationGrantListItem {
   reference: string | null;
   status: SeriesCreationGrantStatus;
   issuedAt: string;
+  applicable?: boolean;
 }
 
 export interface AdminSeriesCreationGrantListItem

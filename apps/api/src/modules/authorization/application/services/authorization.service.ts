@@ -51,6 +51,7 @@ export class AuthorizationService {
   async projectCapabilities(
     context: AuthorizationContext,
   ): Promise<CapabilityProjection> {
+    const role = await this.roles.findRoleByUserId(context.userId);
     const decisions = await Promise.all(
       PERMISSION_CATALOG.map(async (permission) => ({
         permission,
@@ -58,10 +59,28 @@ export class AuthorizationService {
       })),
     );
     return {
+      role:
+        role === "admin" || role === "gestor" || role === "uploader"
+          ? role
+          : null,
       capabilities: decisions
         .filter(({ decision }) => decision.allowed)
         .map(({ permission }) => permission),
     };
+  }
+
+  async getActorRole(
+    context: AuthorizationContext,
+  ): Promise<"admin" | "gestor" | "uploader" | null> {
+    if (!context.userId || !context.sessionId) return null;
+    try {
+      const role = await this.roles.findRoleByUserId(context.userId);
+      return role === "admin" || role === "gestor" || role === "uploader"
+        ? role
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   async getHelperCooldownDays(): Promise<number> {

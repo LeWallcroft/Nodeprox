@@ -2,6 +2,7 @@ import type { AuthorizationService } from "../../../authorization/application/se
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
+import type { DiscordSeriesChannelGateway } from "../../../discord/application/discord-series-channel-gateway.js";
 import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
 import { canBeSeriesResponsible } from "../../domain/series-responsibility.policy.js";
 import { SeriesSlug } from "../../domain/series-slug.js";
@@ -21,6 +22,7 @@ export class SeriesService {
     private readonly assignments: SeriesAssignmentRepositoryPort,
     private readonly users: SeriesUserPort,
     private readonly mutations: SeriesMutationBoundaryPort,
+    private readonly seriesChannels?: DiscordSeriesChannelGateway,
   ) {}
 
   async create(
@@ -31,7 +33,6 @@ export class SeriesService {
       coverUrl?: string | null | undefined;
       grantId?: string | undefined;
       discordChannelId?: string | undefined;
-      discordChannelNameSnapshot?: string | undefined;
     },
   ) {
     this.requireSession(context);
@@ -47,13 +48,55 @@ export class SeriesService {
       );
     if (!decision.allowed || !decision.role)
       return { forbidden: true as const };
+    const channel = await this.resolveSeriesChannel(
+      decision.role,
+      input.discordChannelId,
+    );
+    if (channel && "outcome" in channel) return channel;
+    if (channel && (await this.series.isDiscordChannelBound?.(channel.id)))
+      return { outcome: "channel-already-bound" as const };
     const result = await this.series.createWithCreationPolicy({
-      ...input,
+      title: input.title,
+      description: input.description,
+      coverUrl: input.coverUrl,
+      grantId: input.grantId,
+      ...(channel
+        ? {
+            discordChannelId: channel.id,
+            discordChannelNameSnapshot: channel.name,
+          }
+        : {}),
       slug,
       createdBy: context.userId,
       actorRole: decision.role,
     });
     return result.outcome === "created" ? result.series : result;
+  }
+
+  private async resolveSeriesChannel(
+    role: "admin" | "gestor" | "uploader",
+    channelId: string | undefined,
+  ): Promise<
+    | { id: string; name: string }
+    | undefined
+    | {
+        outcome:
+          | "channel-required"
+          | "channel-invalid"
+          | "channel-already-bound"
+          | "channel-validation-unavailable";
+      }
+  > {
+    if (role !== "gestor") return undefined;
+    if (!channelId) return { outcome: "channel-required" };
+    if (!this.seriesChannels)
+      return { outcome: "channel-validation-unavailable" };
+    try {
+      const result = await this.seriesChannels.validateChannel(channelId);
+      return result.valid ? result.channel : { outcome: "channel-invalid" };
+    } catch {
+      return { outcome: "channel-validation-unavailable" };
+    }
   }
 
   async list(context: AuthorizationContext) {

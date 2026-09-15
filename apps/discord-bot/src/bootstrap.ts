@@ -18,6 +18,11 @@ import type { NodeProxDiscordApi } from "./infrastructure/nodeprox-api/contracts
 import { NodeProxApiClient } from "./infrastructure/nodeprox-api/nodeprox-api.client.js";
 import { createGuildRoleVerifierServer } from "./internal/guild-role-verifier.server.js";
 import { createBotLogger } from "./observability/logger.js";
+import {
+  DEFAULT_STARTUP_RETRY_POLICY,
+  type StartupRetryPolicy,
+  startupRetryErrorDetails,
+} from "./startup/integration-retry.policy.js";
 
 type RegisterCommands = typeof registerGuildCommands;
 
@@ -28,12 +33,20 @@ export type StartBotDependencies = {
   client?: Client;
   registerCommands?: RegisterCommands;
   installSignalHandlers?: boolean;
+  integrationRetryPolicy?: StartupRetryPolicy;
+  sleep?: (milliseconds: number) => Promise<void>;
 };
 
 export async function startBot(dependencies: StartBotDependencies = {}) {
   const config = dependencies.config ?? loadDiscordBotConfig();
   const logger = dependencies.logger ?? createBotLogger(config.LOG_LEVEL);
   const health = new BotHealthState();
+  const retryPolicy =
+    dependencies.integrationRetryPolicy ?? DEFAULT_STARTUP_RETRY_POLICY;
+  const sleep =
+    dependencies.sleep ??
+    ((milliseconds: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
 
   try {
     logger.info("discord_bot.bootstrap.start");
@@ -43,7 +56,12 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
         config.NODEPROX_INTERNAL_API_URL,
         config.DISCORD_BOT_INTERNAL_TOKEN,
       );
-    const integration = await api.getIntegration();
+    const integration = await validateIntegrationWithRetry({
+      api,
+      logger,
+      retryPolicy,
+      sleep,
+    });
     if (
       !integration.enabled ||
       integration.guildId !== config.DISCORD_GUILD_ID ||
@@ -88,6 +106,7 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
       client,
       expectedToken: config.DISCORD_BOT_INTERNAL_TOKEN,
       guildId: config.DISCORD_GUILD_ID,
+      controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
       logger,
     });
     await verifier.start(
@@ -109,5 +128,42 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
       "discord_bot.startup.failed",
     );
     throw error;
+  }
+}
+
+async function validateIntegrationWithRetry(input: {
+  api: NodeProxDiscordApi;
+  logger: Logger;
+  retryPolicy: StartupRetryPolicy;
+  sleep: (milliseconds: number) => Promise<void>;
+}) {
+  const startedAt = Date.now();
+  let attempt = 1;
+  while (true) {
+    try {
+      const integration = await input.api.getIntegration();
+      if (attempt > 1)
+        input.logger.info(
+          { attempts: attempt },
+          "discord_bot.integration.validation.recovered",
+        );
+      return integration;
+    } catch (error) {
+      const elapsedMs = Date.now() - startedAt;
+      if (!input.retryPolicy.shouldRetry(error, attempt, elapsedMs))
+        throw error;
+      const delayMs = input.retryPolicy.delayMs(attempt);
+      input.logger.warn(
+        {
+          attempt,
+          maxAttempts: input.retryPolicy.maxAttempts,
+          delayMs,
+          ...startupRetryErrorDetails(error),
+        },
+        "discord_bot.integration.validation.retry",
+      );
+      await input.sleep(delayMs);
+      attempt += 1;
+    }
   }
 }

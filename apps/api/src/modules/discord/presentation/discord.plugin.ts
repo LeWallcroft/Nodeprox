@@ -5,6 +5,8 @@ import { getRequestContext } from "../../../plugins/request-context.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
+import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
+import { PERMISSIONS } from "../../authorization/domain/permissions.js";
 import {
   DiscordGatewayError,
   type DiscordGatewayService,
@@ -123,7 +125,8 @@ function mapError(error: unknown): never {
             : error.code === "configuration-lockout" ||
                 error.code === "configuration-invalid-role"
               ? 422
-              : error.code === "discord-role-verification-unavailable"
+              : error.code === "discord-role-verification-unavailable" ||
+                  error.code === "discord-series-channels-unavailable"
                 ? 503
                 : 403;
   throw problem(error.code, status);
@@ -156,6 +159,7 @@ export function registerDiscordPlugin(
     grantAdministration: ListSeriesCreationGrantsForAdministrationService;
     internalToken?: string | undefined;
     authentication: { service: SessionService; cookies: SessionCookieAdapter };
+    authorization: AuthorizationService;
   },
 ) {
   const internalGuard = internal(input.internalToken);
@@ -275,12 +279,32 @@ export function registerDiscordPlugin(
     }
   });
   app.get(
+    "/me/discord/series-channels",
+    { preHandler: sessionGuard },
+    async () => {
+      try {
+        const decision = await input.authorization.authorize(
+          sessionActor(),
+          PERMISSIONS.SERIES_CREATE,
+        );
+        if (!decision.allowed)
+          throw new DiscordGatewayError("authorization-denied");
+        return { items: await input.service.listSelectableSeriesChannels() };
+      } catch (error) {
+        return mapError(error);
+      }
+    },
+  );
+  app.get(
     "/me/series-creation-grants",
     { preHandler: sessionGuard },
-    async (request) =>
-      input.service.listGrantsForUser(
+    async (request) => {
+      const role = await input.authorization.getActorRole(sessionActor());
+      return input.service.listGrantsForUser(
         sessionContext(),
         parsed(statusSchema, request.query).status,
-      ),
+        role === "uploader",
+      );
+    },
   );
 }

@@ -6,6 +6,7 @@ import {
   discordAuthorizedRoles,
   discordIntegrations,
   discordInteractions,
+  series,
   seriesCreationGrants,
   users,
 } from "../../../../../../database/schema/index.js";
@@ -18,6 +19,11 @@ import {
   projectDiscordAuthorizedRole,
 } from "./discord-authorization-policy.js";
 import type { DiscordGuildRoleVerifier } from "./discord-guild-role-verifier.js";
+import type {
+  DiscordSeriesChannelGateway,
+  SelectableSeriesChannel,
+  SeriesChannelValidationResult,
+} from "./discord-series-channel-gateway.js";
 
 export type GrantStatus = "available" | "reserved" | "consumed" | "invalidated";
 
@@ -175,6 +181,7 @@ export class DiscordGatewayService {
         }
       | undefined,
     private readonly roleVerifier?: DiscordGuildRoleVerifier,
+    private readonly seriesChannelGateway?: DiscordSeriesChannelGateway,
     private readonly onChallengeFinalizeFailure: (
       error: unknown,
     ) => void = () => {},
@@ -550,7 +557,11 @@ export class DiscordGatewayService {
     });
   }
 
-  async listGrantsForUser(userId: string, status?: GrantStatus) {
+  async listGrantsForUser(
+    userId: string,
+    status?: GrantStatus,
+    requiresGrant = false,
+  ) {
     const rows = await this.db
       .select()
       .from(seriesCreationGrants)
@@ -562,7 +573,10 @@ export class DiscordGatewayService {
             )
           : eq(seriesCreationGrants.targetUserId, userId),
       );
-    return rows.map((grant) => this.projectGrant(grant));
+    return rows.map((grant) => ({
+      ...this.projectGrant(grant),
+      applicable: grant.status === "available" && requiresGrant,
+    }));
   }
 
   async integration() {
@@ -586,6 +600,40 @@ export class DiscordGatewayService {
 
   async configuration() {
     return this.integration();
+  }
+
+  async listSelectableSeriesChannels(): Promise<
+    readonly SelectableSeriesChannel[]
+  > {
+    await this.requireActiveIntegrationForSeriesChannels();
+    if (!this.seriesChannelGateway)
+      throw new DiscordGatewayError("discord-series-channels-unavailable");
+    const channels = await this.seriesChannelGateway.listSelectableChannels();
+    if (channels.length === 0) return channels;
+    const bindings = await this.db
+      .select({ discordChannelId: series.discordChannelId })
+      .from(series)
+      .where(
+        inArray(
+          series.discordChannelId,
+          channels.map(({ id }) => id),
+        ),
+      );
+    const boundChannelIds = new Set(
+      bindings.flatMap(({ discordChannelId }) =>
+        discordChannelId ? [discordChannelId] : [],
+      ),
+    );
+    return channels.filter((channel) => !boundChannelIds.has(channel.id));
+  }
+
+  async validateSeriesChannel(
+    channelId: string,
+  ): Promise<SeriesChannelValidationResult> {
+    await this.requireActiveIntegrationForSeriesChannels();
+    if (!this.seriesChannelGateway)
+      throw new DiscordGatewayError("discord-series-channels-unavailable");
+    return this.seriesChannelGateway.validateChannel(channelId);
   }
 
   async replaceAuthorizedRoles(input: {
@@ -746,6 +794,19 @@ export class DiscordGatewayService {
       throw new DiscordGatewayError("discord-integration-disabled");
     if (integration.controlChannelId !== channelId)
       throw new DiscordGatewayError("discord-control-channel-required");
+    return integration;
+  }
+
+  private async requireActiveIntegrationForSeriesChannels() {
+    const [integration] = await this.db
+      .select({
+        id: discordIntegrations.id,
+        enabled: discordIntegrations.enabled,
+      })
+      .from(discordIntegrations)
+      .limit(1);
+    if (!integration?.enabled)
+      throw new DiscordGatewayError("discord-integration-disabled");
     return integration;
   }
 

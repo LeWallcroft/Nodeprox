@@ -3,6 +3,7 @@ import type { SessionView } from "../../api/types";
 export type { SessionView };
 
 export interface CapabilityProjection {
+  role: "admin" | "gestor" | "uploader" | null;
   capabilities: readonly string[];
 }
 

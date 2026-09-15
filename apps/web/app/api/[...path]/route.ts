@@ -29,7 +29,12 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (value === "auth/session" || value === "auth/capabilities")
     return method === "GET";
   if (value === "me/discord/link-code") return method === "POST";
+  if (value === "me/discord/series-channels") return method === "GET";
   if (value === "me/series-creation-grants") return method === "GET";
+  if (value === "me/notifications") return method === "GET";
+  if (value === "me/notifications/unread-count") return method === "GET";
+  if (/^me\/notifications\/[^/]+\/read$/.test(value)) return method === "PATCH";
+  if (value === "me/notifications/read-all") return method === "POST";
   if (value === "admin/users") return method === "GET";
   if (value === "admin/audit") return method === "GET";
   if (value === "admin/settings") return method === "GET" || method === "PATCH";

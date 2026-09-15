@@ -1,13 +1,19 @@
 import { timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { Client } from "discord.js";
+import type { Client, GuildBasedChannel } from "discord.js";
 import type { Logger } from "pino";
+import {
+  canViewSeriesChannel,
+  evaluateSeriesChannelEligibility,
+  type SeriesChannelEligibility,
+} from "./series-channel-eligibility.policy.js";
 
 const snowflake = /^\d{17,20}$/;
 const maxRoleIds = 100;
 const maxBodyBytes = 32 * 1024;
 
 type VerifyRequest = { guildId: string; roleIds: string[] };
+type ValidateSeriesChannelRequest = { channelId: string };
 
 export type DiscordGuildRoleVerification = {
   guildId: string;
@@ -45,6 +51,18 @@ function validRequest(value: unknown): value is VerifyRequest {
   );
 }
 
+function validSeriesChannelRequest(
+  value: unknown,
+): value is ValidateSeriesChannelRequest {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "channelId" in value &&
+    typeof value.channelId === "string" &&
+    snowflake.test(value.channelId)
+  );
+}
+
 function send(
   response: import("node:http").ServerResponse,
   status: number,
@@ -68,10 +86,35 @@ async function readJson(
   return JSON.parse(Buffer.concat(parts).toString("utf8"));
 }
 
+function toSeriesChannelCandidate(
+  channel: GuildBasedChannel,
+  botUser: Client["user"],
+) {
+  return {
+    id: channel.id,
+    guildId: channel.guildId,
+    name: channel.name,
+    type: channel.type,
+    viewable: canViewSeriesChannel(
+      botUser ? channel.permissionsFor(botUser) : undefined,
+    ),
+  };
+}
+
+function isUnknownDiscordChannel(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === 10003
+  );
+}
+
 export function createGuildRoleVerifierServer(input: {
-  client: Pick<Client, "guilds">;
+  client: Pick<Client, "guilds" | "channels" | "user">;
   expectedToken: string;
   guildId: string;
+  controlChannelId: string;
   logger: Logger;
 }) {
   let server: Server | undefined;
@@ -81,19 +124,102 @@ export function createGuildRoleVerifierServer(input: {
     response: import("node:http").ServerResponse,
   ) => {
     if (
-      request.method !== "POST" ||
-      request.url !== "/internal/discord/guild-roles/verify"
-    ) {
-      send(response, 404, { code: "not-found" });
-      return;
-    }
-    if (
       !hasInternalToken(
         bearer(request.headers.authorization),
         input.expectedToken,
       )
     ) {
       send(response, 401, { code: "internal-authentication-required" });
+      return;
+    }
+    const pathname = request.url?.split("?", 1)[0];
+    if (
+      request.method === "GET" &&
+      pathname === "/internal/discord/series-channels"
+    ) {
+      const guild = input.client.guilds.cache.get(input.guildId);
+      if (!guild) {
+        send(response, 503, { code: "discord-guild-unavailable" });
+        return;
+      }
+      try {
+        const channels = await guild.channels.fetch();
+        const items = [...channels.values()]
+          .filter((channel) => channel !== null)
+          .map((channel) =>
+            evaluateSeriesChannelEligibility({
+              channel: toSeriesChannelCandidate(channel, input.client.user),
+              guildId: input.guildId,
+              controlChannelId: input.controlChannelId,
+            }),
+          )
+          .filter(
+            (
+              result,
+            ): result is Extract<SeriesChannelEligibility, { valid: true }> =>
+              result.valid,
+          )
+          .map((result) => result.channel)
+          .sort((left, right) => left.name.localeCompare(right.name));
+        send(response, 200, { items });
+      } catch (error) {
+        input.logger.warn(
+          { err: error, guildId: input.guildId },
+          "discord_bot.series_channels.list.failed",
+        );
+        send(response, 503, { code: "discord-series-channels-unavailable" });
+      }
+      return;
+    }
+    if (
+      request.method === "POST" &&
+      pathname === "/internal/discord/series-channels/validate"
+    ) {
+      let body: unknown;
+      try {
+        body = await readJson(request);
+      } catch {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      if (!validSeriesChannelRequest(body)) {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      const guild = input.client.guilds.cache.get(input.guildId);
+      if (!guild) {
+        send(response, 503, { code: "discord-guild-unavailable" });
+        return;
+      }
+      try {
+        const resolved = await input.client.channels.fetch(body.channelId);
+        const result = evaluateSeriesChannelEligibility({
+          channel:
+            resolved && "guildId" in resolved && "name" in resolved
+              ? toSeriesChannelCandidate(resolved, input.client.user)
+              : null,
+          guildId: input.guildId,
+          controlChannelId: input.controlChannelId,
+        });
+        send(response, 200, result);
+      } catch (error) {
+        if (isUnknownDiscordChannel(error)) {
+          send(response, 200, { valid: false, reason: "not_found" });
+          return;
+        }
+        input.logger.warn(
+          { err: error, channelId: body.channelId },
+          "discord_bot.series_channels.validate.failed",
+        );
+        send(response, 503, { code: "discord-series-channels-unavailable" });
+      }
+      return;
+    }
+    if (
+      request.method !== "POST" ||
+      pathname !== "/internal/discord/guild-roles/verify"
+    ) {
+      send(response, 404, { code: "not-found" });
       return;
     }
     let body: unknown;

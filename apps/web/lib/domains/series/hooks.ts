@@ -12,6 +12,7 @@ import {
   assignSeriesResponsible,
   createSeries,
   deleteSeries,
+  getSelectableSeriesChannels,
   getSeries,
   getSeriesCapabilities,
   listSeries,
@@ -24,6 +25,15 @@ export function useSeriesList() {
   return useQuery({
     queryKey: queryKeys.series.list,
     queryFn: listSeries,
+    retry: false,
+  });
+}
+
+export function useSelectableSeriesChannels(enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.discord.seriesChannels,
+    queryFn: getSelectableSeriesChannels,
+    enabled,
     retry: false,
   });
 }

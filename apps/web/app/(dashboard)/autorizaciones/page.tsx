@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { AuthorizationList } from "../../../components/domains/authorizations/authorization-list";
 import { errorMessage } from "../../../components/domains/feedback";
+import { SeriesForm } from "../../../components/domains/series/series-form";
 import { PageHeader } from "../../../components/layout/page-header";
+import { AppDialog } from "../../../components/ui/app-dialog";
 import { Button } from "../../../components/ui/button";
 import { EmptyState } from "../../../components/ui/empty-state";
 import { ErrorState } from "../../../components/ui/error-state";
@@ -14,7 +16,12 @@ import {
   useAdminSeriesCreationGrants,
   useMySeriesCreationGrants,
 } from "../../../lib/domains/authorizations/hooks";
-import type { SeriesCreationGrantStatus } from "../../../lib/domains/authorizations/types";
+import type {
+  SeriesCreationGrantListItem,
+  SeriesCreationGrantStatus,
+} from "../../../lib/domains/authorizations/types";
+import { useCreateSeries } from "../../../lib/domains/series/hooks";
+import type { SeriesInput } from "../../../lib/domains/series/types";
 
 const filters: Array<{ label: string; value?: SeriesCreationGrantStatus }> = [
   { label: "Todas" },
@@ -27,6 +34,9 @@ export default function AuthorizationsPage() {
   const capabilities = useCapabilities();
   const [status, setStatus] = useState<SeriesCreationGrantStatus>();
   const [scope, setScope] = useState<"mine" | "all">("mine");
+  const [grantToUse, setGrantToUse] =
+    useState<SeriesCreationGrantListItem | null>(null);
+  const createSeries = useCreateSeries();
   const canReadAll = hasCapability(
     capabilities.data?.capabilities,
     "discord.series-grant.read",
@@ -43,6 +53,18 @@ export default function AuthorizationsPage() {
     () => grants.some((grant) => grant.status === "available"),
     [grants],
   );
+  const applicableGrants = useMemo(
+    () =>
+      (mineQuery.data ?? []).filter(
+        (grant) => grant.status === "available" && grant.applicable,
+      ),
+    [mineQuery.data],
+  );
+
+  async function createFromAuthorization(input: SeriesInput) {
+    await createSeries.mutateAsync(input);
+    setGrantToUse(null);
+  }
 
   return (
     <>
@@ -125,13 +147,38 @@ export default function AuthorizationsPage() {
         />
       ) : null}
       {grantsQuery.isSuccess && grants.length > 0 ? (
-        <AuthorizationList grants={grants} />
+        scope === "mine" ? (
+          <AuthorizationList
+            grants={grants}
+            onUse={(grant) => setGrantToUse(grant)}
+          />
+        ) : (
+          <AuthorizationList grants={grants} />
+        )
       ) : null}
       {grantsQuery.isSuccess && !hasAvailable && status === undefined ? (
         <p className="mt-4 text-sm text-muted">
           Solicita una autorización desde Discord para poder crear una Serie.
         </p>
       ) : null}
+      <AppDialog
+        open={Boolean(grantToUse)}
+        title="Nueva serie"
+        onOpenChange={(open) => {
+          if (!open) setGrantToUse(null);
+        }}
+      >
+        {grantToUse ? (
+          <SeriesForm
+            key={grantToUse.id}
+            availableGrants={applicableGrants}
+            initial={{ grantId: grantToUse.id }}
+            onCancel={() => setGrantToUse(null)}
+            onSubmit={createFromAuthorization}
+            requiresGrant
+          />
+        ) : null}
+      </AppDialog>
     </>
   );
 }

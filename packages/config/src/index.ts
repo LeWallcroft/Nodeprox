@@ -82,6 +82,38 @@ const mediaEffectsConfigSchema = z.object({
   CLOUDFLARE_ZONE_ID: z.string().trim().min(1),
   CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1),
 });
+const domainEventDispatchConfigSchema = z.object({
+  DOMAIN_EVENT_DISPATCH_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(20),
+  DOMAIN_EVENT_DISPATCH_POLL_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1000),
+  DOMAIN_EVENT_DISPATCH_LEASE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(30000),
+  DOMAIN_EVENT_DISPATCH_RETRY_BASE_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(1000),
+  DOMAIN_EVENT_DISPATCH_RETRY_MAX_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60000),
+  DOMAIN_EVENT_DISPATCH_NO_HANDLER_DELAY_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(300000),
+});
 
 export type NodeProxConfig = z.infer<typeof configSchema>;
 export type NodeProxDatabaseConfig = z.infer<typeof databaseConfigSchema>;
@@ -104,12 +136,16 @@ export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
 export type NodeProxMediaEffectsConfig = z.infer<
   typeof mediaEffectsConfigSchema
 >;
+export type NodeProxDomainEventDispatchConfig = z.infer<
+  typeof domainEventDispatchConfigSchema
+>;
 
 export {
   adminBootstrapConfigSchema,
   b2ConfigSchema,
   configSchema,
   databaseConfigSchema,
+  domainEventDispatchConfigSchema,
   mediaEffectsConfigSchema,
   processingConfigSchema,
 };
@@ -135,6 +171,12 @@ export function loadMediaEffectsConfig(
   );
   if (!configured && nodeEnv !== "production") return null;
   return mediaEffectsConfigSchema.parse(env);
+}
+
+export function loadDomainEventDispatchConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxDomainEventDispatchConfig {
+  return domainEventDispatchConfigSchema.parse(env);
 }
 
 export function loadDatabaseConfig(

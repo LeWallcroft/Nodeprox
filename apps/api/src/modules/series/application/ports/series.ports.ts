@@ -25,9 +25,13 @@ export interface SeriesRepositoryPort {
           | "grant-not-found"
           | "grant-not-owned"
           | "grant-unavailable"
-          | "channel-required";
+          | "channel-required"
+          | "channel-invalid"
+          | "channel-already-bound"
+          | "channel-validation-unavailable";
       }
   >;
+  isDiscordChannelBound?(discordChannelId: string): Promise<boolean>;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
   listAll(): Promise<SeriesRecord[]>;
   listWithHelperAccess(userId: string): Promise<SeriesRecord[]>;
