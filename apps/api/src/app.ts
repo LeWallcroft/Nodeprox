@@ -134,6 +134,11 @@ export function buildApp(
               dependencies.discord.internalToken,
             )
           : undefined,
+        (error) =>
+          app.log.error(
+            { err: error },
+            "Discord link challenge finalize failed after durable confirmation",
+          ),
       );
       registerDiscordPlugin(app, {
         service: discordService,

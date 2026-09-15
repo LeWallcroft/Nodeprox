@@ -19,6 +19,10 @@ function messageFor(error: unknown) {
     return "El código no es válido o ya expiró.";
   if (error.code === "discord-id-already-linked")
     return "Esta cuenta de Discord ya está vinculada a otra cuenta de NodeProx.";
+  if (error.code === "discord-link-already-exists")
+    return "Tu cuenta de NodeProx ya tiene una cuenta de Discord vinculada.";
+  if (error.code === "discord-link-challenge-claimed")
+    return "Este código se está procesando. Inténtalo nuevamente en unos segundos.";
   if (
     error.code === "discord-integration-disabled" ||
     error.code === "discord-guild-not-allowed" ||

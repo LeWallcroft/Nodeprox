@@ -1,32 +1,71 @@
 "use client";
 
-import { Link2 } from "lucide-react";
-import { useState } from "react";
+import { CheckCircle2, Link2 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { ApiError } from "../../../lib/api/types";
-import { useGenerateDiscordLinkCode } from "../../../lib/domains/discord-identity/hooks";
-import type { DiscordLinkCodeResponse } from "../../../lib/domains/discord-identity/types";
+import {
+  useDiscordLinkStatus,
+  useGenerateDiscordLinkCode,
+} from "../../../lib/domains/discord-identity/hooks";
+import type {
+  DiscordLinkCodeResponse,
+  DiscordLinkStatus,
+} from "../../../lib/domains/discord-identity/types";
 import { Button } from "../../ui/button";
 import { Card } from "../../ui/card";
 import { CopyButton } from "../../ui/copy-button";
 
-function expirationText(expiresInSeconds: number) {
-  const minutes = Math.max(1, Math.ceil(expiresInSeconds / 60));
+function expirationText(expiresAt: string) {
+  const seconds = Math.max(
+    0,
+    Math.ceil((Date.parse(expiresAt) - Date.now()) / 1000),
+  );
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
   return `Este código expira en aproximadamente ${minutes} minutos y sólo puede utilizarse una vez.`;
 }
 
 function linkCodeError(error: unknown) {
-  if (error instanceof ApiError && error.status === 401)
-    return "Tu sesión no es válida o ha expirado.";
-  if (error instanceof ApiError && error.status === 429)
+  if (!(error instanceof ApiError))
+    return "No se pudo generar el código de vinculación. Inténtalo nuevamente.";
+  if (error.status === 401) return "Tu sesión no es válida o ha expirado.";
+  if (error.status === 429)
     return "Has realizado demasiadas solicitudes. Inténtalo nuevamente en unos minutos.";
+  if (error.code === "discord-link-already-exists")
+    return "Esta cuenta de NodeProx ya tiene una cuenta de Discord vinculada.";
   return "No se pudo generar el código de vinculación. Inténtalo nuevamente.";
 }
 
+function linkedAtText(linkedAt: string | null) {
+  if (!linkedAt) return "Tu identidad Discord quedó conectada con NodeProx.";
+  return `Vinculada el ${new Intl.DateTimeFormat("es-PE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(linkedAt))}.`;
+}
+
+function pendingLinkStatus(status: DiscordLinkStatus | undefined) {
+  return status?.state === "pending" ? status : undefined;
+}
+
+function linkedLinkStatus(status: DiscordLinkStatus | undefined) {
+  return status?.state === "linked" ? status : undefined;
+}
+
 export function DiscordLinkSection() {
+  const status = useDiscordLinkStatus();
   const generate = useGenerateDiscordLinkCode();
   const [linkCode, setLinkCode] = useState<DiscordLinkCodeResponse | null>(
     null,
   );
+
+  useEffect(() => {
+    if (status.data?.state === "linked") setLinkCode(null);
+  }, [status.data?.state]);
+
+  const pendingStatus = pendingLinkStatus(status.data);
+  const linkedStatus = linkedLinkStatus(status.data);
+  const pending = Boolean(pendingStatus);
+  const linked = Boolean(linkedStatus);
 
   return (
     <Card className="max-w-2xl space-y-5">
@@ -35,32 +74,44 @@ export function DiscordLinkSection() {
           aria-hidden="true"
           className="grid size-10 shrink-0 place-items-center rounded-control bg-primary-soft text-primary"
         >
-          <Link2 className="size-5" />
+          {linked ? (
+            <CheckCircle2 className="size-5" />
+          ) : (
+            <Link2 className="size-5" />
+          )}
         </span>
         <div>
           <h2 className="m-0 text-lg font-semibold text-text">Discord</h2>
           <p className="mt-1 text-sm text-muted">
-            Conecta tu cuenta de Discord con NodeProx.
+            {linked
+              ? "Discord vinculado"
+              : "Vincula tu cuenta de Discord para utilizar las funciones de autorización e integración de NodeProx."}
           </p>
         </div>
       </div>
 
-      <Button
-        type="button"
-        disabled={generate.isPending}
-        onClick={() =>
-          generate.mutate(undefined, {
-            onSuccess: (result) => setLinkCode(result),
-          })
-        }
-      >
-        <Link2 aria-hidden="true" className="size-4" />
-        {generate.isPending
-          ? "Generando código…"
-          : linkCode
-            ? "Generar un nuevo código"
-            : "Generar código de vinculación"}
-      </Button>
+      {linked ? (
+        <p className="m-0 text-sm text-success">
+          {linkedAtText(linkedStatus?.linkedAt ?? null)}
+        </p>
+      ) : (
+        <Button
+          type="button"
+          disabled={generate.isPending}
+          onClick={() =>
+            generate.mutate(undefined, {
+              onSuccess: (result) => setLinkCode(result),
+            })
+          }
+        >
+          <Link2 aria-hidden="true" className="size-4" />
+          {generate.isPending
+            ? "Generando código…"
+            : pending || linkCode
+              ? "Generar un nuevo código"
+              : "Vincular Discord"}
+        </Button>
+      )}
 
       {generate.isError ? (
         <p className="text-sm text-danger" role="alert">
@@ -94,7 +145,20 @@ export function DiscordLinkSection() {
             </li>
           </ol>
           <p className="m-0 text-sm text-muted">
-            {expirationText(linkCode.expiresInSeconds)}
+            {expirationText(linkCode.expiresAt)}
+          </p>
+        </div>
+      ) : pending ? (
+        <div className="rounded-control border border-warning/40 bg-warning-soft/30 p-4 text-sm text-muted">
+          <p className="m-0 font-semibold text-text">
+            Tienes un código de vinculación pendiente.
+          </p>
+          <p className="mt-1 mb-0">
+            El código no se muestra de nuevo por seguridad. Genera uno nuevo si
+            ya no lo tienes.
+          </p>
+          <p className="mt-2 mb-0">
+            {pendingStatus ? expirationText(pendingStatus.expiresAt) : null}
           </p>
         </div>
       ) : null}
