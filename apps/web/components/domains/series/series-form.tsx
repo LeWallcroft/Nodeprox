@@ -1,9 +1,13 @@
 "use client";
 
 import { type FormEvent, useState } from "react";
+import { ApiError } from "../../../lib/api/types";
 import type { SeriesCreationGrantListItem } from "../../../lib/domains/authorizations/types";
 import { grantOptionLabel } from "../../../lib/domains/authorizations/view-model";
-import type { SeriesInput } from "../../../lib/domains/series/types";
+import type {
+  SelectableDiscordSeriesChannel,
+  SeriesInput,
+} from "../../../lib/domains/series/types";
 import { Button } from "../../ui/button";
 import { Select } from "../../ui/select";
 import { errorMessage } from "../feedback";
@@ -15,18 +19,33 @@ export function SeriesForm({
   onCancel,
   requiresGrant = false,
   availableGrants = [],
+  requiresDiscordChannel = false,
+  selectableChannels = [],
+  channelsLoading = false,
+  channelsError = false,
+  onRetryChannels,
 }: {
-  initial?: Partial<SeriesInput>;
+  initial?: Omit<Partial<SeriesInput>, "discordChannelId"> & {
+    discordChannelId?: string | null;
+  };
   onSubmit: (input: SeriesInput) => Promise<void>;
   submitLabel?: string;
   onCancel?: () => void;
   requiresGrant?: boolean;
   availableGrants?: readonly SeriesCreationGrantListItem[];
+  requiresDiscordChannel?: boolean;
+  selectableChannels?: readonly SelectableDiscordSeriesChannel[];
+  channelsLoading?: boolean;
+  channelsError?: boolean;
+  onRetryChannels?: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [coverUrl, setCoverUrl] = useState(initial?.coverUrl ?? "");
   const [grantId, setGrantId] = useState(initial?.grantId ?? "");
+  const [discordChannelId, setDiscordChannelId] = useState(
+    initial?.discordChannelId ?? "",
+  );
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -40,8 +59,18 @@ export function SeriesForm({
         description: description.trim() || null,
         coverUrl: coverUrl.trim() || null,
         ...(requiresGrant ? { grantId } : {}),
+        ...(requiresDiscordChannel ? { discordChannelId } : {}),
       });
     } catch (cause) {
+      if (
+        cause instanceof ApiError &&
+        ["series-channel-invalid", "series-channel-already-bound"].includes(
+          cause.code ?? "",
+        )
+      ) {
+        setDiscordChannelId("");
+        onRetryChannels?.();
+      }
       setError(errorMessage(cause));
     } finally {
       setLoading(false);
@@ -92,6 +121,60 @@ export function SeriesForm({
           </span>
         </label>
       ) : null}
+      {requiresDiscordChannel ? (
+        <label
+          className="grid gap-1.5 text-[13px] font-medium text-muted"
+          htmlFor="series-discord-channel"
+        >
+          Canal Discord *
+          {channelsLoading ? (
+            <span className="font-normal text-muted">
+              Cargando canales de Discord…
+            </span>
+          ) : null}
+          {channelsError ? (
+            <div className="grid gap-1.5">
+              <span className="font-normal text-danger">
+                No se pudieron cargar los canales de Discord.
+              </span>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onRetryChannels}
+              >
+                Reintentar
+              </Button>
+            </div>
+          ) : null}
+          {!channelsLoading && !channelsError ? (
+            <>
+              <Select
+                id="series-discord-channel"
+                required
+                disabled={selectableChannels.length === 0}
+                value={discordChannelId}
+                onChange={(event) => setDiscordChannelId(event.target.value)}
+              >
+                <option disabled value="">
+                  {selectableChannels.length
+                    ? "Selecciona un canal"
+                    : "No hay canales Discord disponibles para vincular"}
+                </option>
+                {selectableChannels.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    #{channel.name}
+                  </option>
+                ))}
+              </Select>
+              {selectableChannels.length === 0 ? (
+                <span className="font-normal text-muted">
+                  No hay canales Discord disponibles para vincular.
+                </span>
+              ) : null}
+            </>
+          ) : null}
+        </label>
+      ) : null}
       <label
         className="grid gap-1.5 text-[13px] font-medium text-muted"
         htmlFor="series-cover-url"
@@ -126,7 +209,14 @@ export function SeriesForm({
         </p>
       ) : null}
       <div className="flex gap-2 max-[640px]:flex-col">
-        <Button type="submit" disabled={loading}>
+        <Button
+          type="submit"
+          disabled={
+            loading ||
+            (requiresDiscordChannel &&
+              (channelsLoading || channelsError || !discordChannelId))
+          }
+        >
           {loading ? "Guardando…" : submitLabel}
         </Button>
         {onCancel ? (

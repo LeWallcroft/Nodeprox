@@ -4,6 +4,8 @@ export interface Series {
   slug: string;
   description: string | null;
   coverUrl: string | null;
+  discordChannelId: string | null;
+  discordChannelNameSnapshot: string | null;
   responsibleUser: SeriesResponsibleUser | null;
   createdBy: string;
   createdAt: string;
@@ -23,6 +25,12 @@ export interface SeriesInput {
   description?: string | null;
   coverUrl?: string | null;
   grantId?: string;
+  discordChannelId?: string;
+}
+
+export interface SelectableDiscordSeriesChannel {
+  id: string;
+  name: string;
 }
 
 export interface SeriesCapabilitiesProjection {

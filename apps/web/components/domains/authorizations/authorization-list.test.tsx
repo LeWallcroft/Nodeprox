@@ -10,6 +10,7 @@ const grants = [
     reference: "Manga semanal",
     status: "available" as const,
     issuedAt: "2026-09-11T12:00:00.000Z",
+    applicable: true,
   },
   {
     id: "b95822d0-4a53-4fab-92b2-d04f7a594d6f",
@@ -74,5 +75,34 @@ describe("Series creation authorizations presentation", () => {
     expect(markup).toContain("Usuario");
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("targetUserId");
+  });
+
+  it("only exposes Usar for available applicable own grants", () => {
+    const markup = renderToStaticMarkup(
+      <AuthorizationList grants={grants} onUse={() => undefined} />,
+    );
+    expect(markup).toContain("Usar");
+    expect(markup).toContain("Usar autorización NPX-SER-AVAILABLE");
+    expect(markup).not.toContain("Usar autorización NPX-SER-CONSUMED");
+  });
+
+  it("keeps an available but non-applicable grant visible without Usar", () => {
+    const markup = renderToStaticMarkup(
+      <AuthorizationList
+        grants={[
+          {
+            id: "c56aef0e-da3d-42fc-8548-8eadcda8bdce",
+            displayCode: "NPX-SER-AVAILABLE",
+            reference: "Manga semanal",
+            status: "available",
+            issuedAt: "2026-09-11T12:00:00.000Z",
+            applicable: false,
+          },
+        ]}
+        onUse={() => undefined}
+      />,
+    );
+    expect(markup).toContain("No requerido con tu rol actual");
+    expect(markup).not.toContain("Usar autorización");
   });
 });

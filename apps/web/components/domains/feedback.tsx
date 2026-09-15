@@ -17,7 +17,11 @@ export function errorMessage(
       error.code === "series-creation-grant-already-consumed" ||
       error.code === "series-creation-grant-invalidated" ||
       error.code === "series-creation-grant-not-owned" ||
-      error.code === "series-creation-grant-not-found"
+      error.code === "series-creation-grant-not-found" ||
+      error.code === "series-channel-required" ||
+      error.code === "series-channel-invalid" ||
+      error.code === "series-channel-already-bound" ||
+      error.code === "series-channel-validation-unavailable"
     )
       return `${presentation.message}${reference}`;
     if (error.status === 401) return "Tu sesión no es válida o ha expirado.";

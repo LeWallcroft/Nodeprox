@@ -35,6 +35,7 @@ export const queryKeys = {
   },
   discord: {
     linkStatus: ["discord", "link", "status"] as const,
+    seriesChannels: ["discord", "series-channels"] as const,
     authorizationConfiguration: [
       "admin",
       "discord",
@@ -47,5 +48,10 @@ export const queryKeys = {
       ["authorizations", "mine", status ?? "all"] as const,
     admin: (status?: string) =>
       ["authorizations", "admin", status ?? "all"] as const,
+  },
+  notifications: {
+    all: ["notifications"] as const,
+    list: () => ["notifications", "list"] as const,
+    unreadCount: () => ["notifications", "unread-count"] as const,
   },
 } as const;

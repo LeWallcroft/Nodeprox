@@ -36,6 +36,18 @@ describe("resolveErrorPresentation", () => {
     expect(presentation.message).not.toContain("technical text");
   });
 
+  it.each([
+    "series-channel-required",
+    "series-channel-invalid",
+    "series-channel-validation-unavailable",
+  ])("maps %s without exposing backend details", (code) => {
+    const presentation = resolveErrorPresentation(
+      new ApiError(422, "Discord REST error", code, { code }),
+    );
+    expect(presentation.presentation).toBe("inline");
+    expect(presentation.message).not.toContain("REST");
+  });
+
   it("does not expose internal details and retains the support reference", () => {
     const presentation = resolveErrorPresentation(
       new ApiError(500, "SQLSTATE leaked", "internal-error", {

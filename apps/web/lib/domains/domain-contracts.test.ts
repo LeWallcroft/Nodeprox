@@ -3,7 +3,12 @@ import { normalizeApiError } from "../api/types";
 import { createChapter, listChapters } from "./chapters/api";
 import { getPublicChapter } from "./publication/api";
 import { queryKeys } from "./query-keys";
-import { deleteSeries, listSeries } from "./series/api";
+import {
+  createSeries,
+  deleteSeries,
+  getSelectableSeriesChannels,
+  listSeries,
+} from "./series/api";
 import { uploadChapter } from "./uploads/api";
 
 describe("frontend domain contract adapters", () => {
@@ -33,6 +38,15 @@ describe("frontend domain contract adapters", () => {
       "public",
       "chapters",
       "chapter-1",
+    ]);
+    expect(queryKeys.notifications.list()).toEqual(["notifications", "list"]);
+    expect(queryKeys.notifications.unreadCount()).toEqual([
+      "notifications",
+      "unread-count",
+    ]);
+    expect(queryKeys.discord.seriesChannels).toEqual([
+      "discord",
+      "series-channels",
     ]);
   });
 
@@ -80,6 +94,34 @@ describe("frontend domain contract adapters", () => {
       "/api/series/series-1/chapters",
       "/api/series/series-1",
     ]);
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the authenticated channel listing and sends only a selected channel id", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "series" }), { status: 201 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSelectableSeriesChannels();
+    await createSeries({
+      title: "Series",
+      discordChannelId: "12345678901234567",
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/me/discord/series-channels",
+      "/api/series",
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[1]?.[1].body as string)).toEqual({
+      title: "Series",
+      discordChannelId: "12345678901234567",
+    });
     vi.unstubAllGlobals();
   });
 

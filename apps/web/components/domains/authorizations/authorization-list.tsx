@@ -3,17 +3,21 @@ import type {
   SeriesCreationGrantListItem,
 } from "../../../lib/domains/authorizations/types";
 import { authorizationStatusLabel } from "../../../lib/domains/authorizations/view-model";
+import { Button } from "../../ui/button";
 import { DataTable, DataTableEmptyRow } from "../../ui/data-table";
 
 export function AuthorizationList({
   grants,
+  onUse,
 }: {
   grants: readonly (
     | SeriesCreationGrantListItem
     | AdminSeriesCreationGrantListItem
   )[];
+  onUse?: (grant: SeriesCreationGrantListItem) => void;
 }) {
   const showsTarget = grants.some((grant) => "targetUser" in grant);
+  const showsActions = !showsTarget && Boolean(onUse);
   return (
     <DataTable label="Autorizaciones">
       <thead>
@@ -25,12 +29,15 @@ export function AuthorizationList({
           {showsTarget ? (
             <th className="px-4 py-3 font-medium">Usuario</th>
           ) : null}
+          {showsActions ? (
+            <th className="px-4 py-3 font-medium">Acciones</th>
+          ) : null}
         </tr>
       </thead>
       <tbody>
         {grants.length === 0 ? (
           <DataTableEmptyRow
-            colSpan={showsTarget ? 5 : 4}
+            colSpan={4 + Number(showsTarget) + Number(showsActions)}
             title="No se encontraron autorizaciones."
           />
         ) : (
@@ -65,6 +72,24 @@ export function AuthorizationList({
               {showsTarget ? (
                 <td className="px-4 py-3 text-sm text-muted">
                   {"targetUser" in grant ? grant.targetUser.displayName : "—"}
+                </td>
+              ) : null}
+              {showsActions ? (
+                <td className="px-4 py-3 text-sm">
+                  {grant.status === "available" && grant.applicable ? (
+                    <Button
+                      aria-label={`Usar autorización ${grant.displayCode}`}
+                      className="min-h-8 px-2 text-xs"
+                      type="button"
+                      onClick={() => onUse?.(grant)}
+                    >
+                      Usar
+                    </Button>
+                  ) : grant.status === "available" ? (
+                    <span className="text-xs text-muted">
+                      No requerido con tu rol actual
+                    </span>
+                  ) : null}
                 </td>
               ) : null}
             </tr>

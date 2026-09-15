@@ -26,6 +26,7 @@ import {
   useAssignSeriesResponsible,
   useCreateSeries,
   useDeleteSeries,
+  useSelectableSeriesChannels,
   useSeries,
   useSeriesCapabilities,
   useSeriesList,
@@ -72,6 +73,8 @@ export default function SeriesPage() {
   const requiresGrant = requiresSeriesCreationGrant(
     globalCapabilities.data?.capabilities,
   );
+  const isGestor = globalCapabilities.data?.role === "gestor";
+  const seriesChannels = useSelectableSeriesChannels(creating && isGestor);
   const availableGrants = useAvailableSeriesCreationGrants(requiresGrant);
   const canCreate = canCreateWithoutGrant || requiresGrant;
   const createBlockedByGrant =
@@ -178,6 +181,11 @@ export default function SeriesPage() {
           onSubmit={handleCreate}
           onCancel={() => setCreating(false)}
           requiresGrant={requiresGrant}
+          requiresDiscordChannel={isGestor}
+          selectableChannels={seriesChannels.data?.items ?? []}
+          channelsLoading={seriesChannels.isPending}
+          channelsError={seriesChannels.isError}
+          onRetryChannels={() => void seriesChannels.refetch()}
         />
       </AppDialog>
       {actionError ? (

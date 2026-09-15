@@ -74,6 +74,20 @@ const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
   updatedAt: row.updatedAt,
 });
 
+function isDiscordChannelUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const databaseError = error as {
+    code?: unknown;
+    constraint_name?: unknown;
+    constraint?: unknown;
+  };
+  return (
+    databaseError.code === "23505" &&
+    (databaseError.constraint_name === "series_discord_channel_id_unique" ||
+      databaseError.constraint === "series_discord_channel_id_unique")
+  );
+}
+
 export class DrizzleSeriesRepository
   implements SeriesRepositoryPort, SeriesMutationBoundaryPort
 {
@@ -98,128 +112,144 @@ export class DrizzleSeriesRepository
       return { outcome: "channel-required" as const };
     if (input.actorRole === "uploader" && !input.grantId)
       return { outcome: "grant-not-found" as const };
-    return this.db.transaction(async (tx) => {
-      let grant: typeof seriesCreationGrants.$inferSelect | undefined;
-      if (input.actorRole === "uploader") {
-        const grantId = input.grantId;
-        if (!grantId) return { outcome: "grant-not-found" as const };
-        [grant] = await tx
-          .select()
-          .from(seriesCreationGrants)
-          .where(eq(seriesCreationGrants.id, grantId))
-          .limit(1)
-          .for("update");
-        if (!grant) return { outcome: "grant-not-found" as const };
-        if (grant.targetUserId !== input.createdBy)
-          return { outcome: "grant-not-owned" as const };
-        if (grant.status !== "available" && grant.status !== "reserved")
-          return { outcome: "grant-unavailable" as const };
-      }
-      const [created] = await tx
-        .insert(series)
-        .values({
-          title: input.title,
-          slug: input.slug,
-          description: input.description,
-          coverUrl: input.coverUrl,
-          createdBy: input.createdBy,
-          ...(input.actorRole === "gestor" && discordChannelId
-            ? {
-                discordChannelId,
-                ...(input.discordChannelNameSnapshot
-                  ? {
-                      discordChannelNameSnapshot:
-                        input.discordChannelNameSnapshot,
-                    }
-                  : {}),
-              }
-            : {}),
-        })
-        .returning();
-      if (!created) throw new Error("series-create-failed");
-      await tx.insert(seriesAssignments).values({
-        seriesId: created.id,
-        responsibleUserId: input.createdBy,
-        assignedBy: input.createdBy,
-      });
-      await tx.insert(auditLogs).values({
-        actorId: input.createdBy,
-        action: "series.responsibility.assigned",
-        resourceType: "series",
-        resourceId: created.id,
-        metadata: {
-          responsibleUserId: input.createdBy,
-          initial: true,
-        },
-      });
-      await this.events?.append(
-        {
-          type: "series.responsibility.assigned",
-          aggregateType: "series",
-          aggregateId: created.id,
-          actorUserId: input.createdBy,
-          payload: { responsibleUserId: input.createdBy, initial: true },
-          occurredAt: new Date(),
-        },
-        tx,
-      );
-      if (grant) {
-        const [consumed] = await tx
-          .update(seriesCreationGrants)
-          .set({
-            status: "consumed",
-            consumedAt: new Date(),
-            consumedBySeriesId: created.id,
+    try {
+      return await this.db.transaction(async (tx) => {
+        let grant: typeof seriesCreationGrants.$inferSelect | undefined;
+        if (input.actorRole === "uploader") {
+          const grantId = input.grantId;
+          if (!grantId) return { outcome: "grant-not-found" as const };
+          [grant] = await tx
+            .select()
+            .from(seriesCreationGrants)
+            .where(eq(seriesCreationGrants.id, grantId))
+            .limit(1)
+            .for("update");
+          if (!grant) return { outcome: "grant-not-found" as const };
+          if (grant.targetUserId !== input.createdBy)
+            return { outcome: "grant-not-owned" as const };
+          if (grant.status !== "available" && grant.status !== "reserved")
+            return { outcome: "grant-unavailable" as const };
+        }
+        const [created] = await tx
+          .insert(series)
+          .values({
+            title: input.title,
+            slug: input.slug,
+            description: input.description,
+            coverUrl: input.coverUrl,
+            createdBy: input.createdBy,
+            ...(input.actorRole === "gestor" && discordChannelId
+              ? {
+                  discordChannelId,
+                  ...(input.discordChannelNameSnapshot
+                    ? {
+                        discordChannelNameSnapshot:
+                          input.discordChannelNameSnapshot,
+                      }
+                    : {}),
+                }
+              : {}),
           })
-          .where(
-            and(
-              eq(seriesCreationGrants.id, grant.id),
-              eq(seriesCreationGrants.status, grant.status),
-            ),
-          )
-          .returning({ id: seriesCreationGrants.id });
-        if (!consumed) throw new Error("series-creation-grant-consume-failed");
-        await tx.insert(auditLogs).values({
-          actorId: input.createdBy,
-          action: "discord.series_grant.consumed",
-          resourceType: "series_creation_grant",
-          resourceId: grant.id,
-          metadata: { grantId: grant.id, seriesId: created.id },
+          .returning();
+        if (!created) throw new Error("series-create-failed");
+        await tx.insert(seriesAssignments).values({
+          seriesId: created.id,
+          responsibleUserId: input.createdBy,
+          assignedBy: input.createdBy,
         });
-        await this.events?.append(
-          {
-            type: "series.creation_grant.consumed",
-            aggregateType: "series_creation_grant",
-            aggregateId: grant.id,
-            actorUserId: input.createdBy,
-            payload: { grantId: grant.id, seriesId: created.id },
-            occurredAt: new Date(),
-          },
-          tx,
-        );
-      }
-      if (input.actorRole === "gestor")
         await tx.insert(auditLogs).values({
           actorId: input.createdBy,
-          action: "series.channel.bound",
+          action: "series.responsibility.assigned",
           resourceType: "series",
           resourceId: created.id,
-          metadata: { channelId: input.discordChannelId },
+          metadata: {
+            responsibleUserId: input.createdBy,
+            initial: true,
+          },
         });
-      if (input.actorRole === "gestor")
         await this.events?.append(
           {
-            type: "series.channel.bound",
+            type: "series.responsibility.assigned",
             aggregateType: "series",
             aggregateId: created.id,
             actorUserId: input.createdBy,
-            payload: { channelId: discordChannelId },
+            payload: { responsibleUserId: input.createdBy, initial: true },
             occurredAt: new Date(),
           },
           tx,
         );
-      return { outcome: "created" as const, series: toSeries(created) };
-    });
+        if (grant) {
+          const [consumed] = await tx
+            .update(seriesCreationGrants)
+            .set({
+              status: "consumed",
+              consumedAt: new Date(),
+              consumedBySeriesId: created.id,
+            })
+            .where(
+              and(
+                eq(seriesCreationGrants.id, grant.id),
+                eq(seriesCreationGrants.status, grant.status),
+              ),
+            )
+            .returning({ id: seriesCreationGrants.id });
+          if (!consumed)
+            throw new Error("series-creation-grant-consume-failed");
+          await tx.insert(auditLogs).values({
+            actorId: input.createdBy,
+            action: "discord.series_grant.consumed",
+            resourceType: "series_creation_grant",
+            resourceId: grant.id,
+            metadata: { grantId: grant.id, seriesId: created.id },
+          });
+          await this.events?.append(
+            {
+              type: "series.creation_grant.consumed",
+              aggregateType: "series_creation_grant",
+              aggregateId: grant.id,
+              actorUserId: input.createdBy,
+              payload: { grantId: grant.id, seriesId: created.id },
+              occurredAt: new Date(),
+            },
+            tx,
+          );
+        }
+        if (input.actorRole === "gestor")
+          await tx.insert(auditLogs).values({
+            actorId: input.createdBy,
+            action: "series.channel.bound",
+            resourceType: "series",
+            resourceId: created.id,
+            metadata: { channelId: input.discordChannelId },
+          });
+        if (input.actorRole === "gestor")
+          await this.events?.append(
+            {
+              type: "series.channel.bound",
+              aggregateType: "series",
+              aggregateId: created.id,
+              actorUserId: input.createdBy,
+              payload: { channelId: discordChannelId },
+              occurredAt: new Date(),
+            },
+            tx,
+          );
+        return { outcome: "created" as const, series: toSeries(created) };
+      });
+    } catch (error) {
+      if (isDiscordChannelUniqueViolation(error))
+        return { outcome: "channel-already-bound" as const };
+      throw error;
+    }
+  }
+
+  async isDiscordChannelBound(discordChannelId: string) {
+    const [bound] = await this.db
+      .select({ id: series.id })
+      .from(series)
+      .where(eq(series.discordChannelId, discordChannelId))
+      .limit(1);
+    return Boolean(bound);
   }
 
   async appendAudit(input: {

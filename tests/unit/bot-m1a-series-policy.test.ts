@@ -7,8 +7,15 @@ const context = {
   sessionId: "session",
 };
 
-function fixture(role: "admin" | "gestor" | "uploader") {
+function fixture(
+  role: "admin" | "gestor" | "uploader",
+  channelResult: { valid: boolean; channel?: { id: string; name: string } } = {
+    valid: true,
+    channel: { id: "123", name: "series-manga" },
+  },
+) {
   const series = {
+    isDiscordChannelBound: vi.fn().mockResolvedValue(false),
     createWithCreationPolicy: vi.fn().mockResolvedValue({
       outcome: "created",
       series: {
@@ -44,6 +51,7 @@ function fixture(role: "admin" | "gestor" | "uploader") {
     {} as never,
     {} as never,
     {} as never,
+    { validateChannel: vi.fn().mockResolvedValue(channelResult) } as never,
   );
   return { series, authorization, service };
 }
@@ -68,15 +76,42 @@ describe("BOT-M1A Series creation policy", () => {
     );
   });
 
-  it("requires a Discord channel only for gestor creation", async () => {
+  it("requires and revalidates a Discord channel only for gestor creation", async () => {
     const target = fixture("gestor");
     await target.service.create(context, {
       title: "Title",
       discordChannelId: "123",
     });
     expect(target.series.createWithCreationPolicy).toHaveBeenCalledWith(
-      expect.objectContaining({ actorRole: "gestor", discordChannelId: "123" }),
+      expect.objectContaining({
+        actorRole: "gestor",
+        discordChannelId: "123",
+        discordChannelNameSnapshot: "series-manga",
+      }),
     );
+  });
+
+  it("rejects an invalid gestor channel before persistence", async () => {
+    const target = fixture("gestor", { valid: false });
+    await expect(
+      target.service.create(context, {
+        title: "Title",
+        discordChannelId: "123",
+      }),
+    ).resolves.toEqual({ outcome: "channel-invalid" });
+    expect(target.series.createWithCreationPolicy).not.toHaveBeenCalled();
+  });
+
+  it("rejects an already-bound gestor channel before persistence", async () => {
+    const target = fixture("gestor");
+    target.series.isDiscordChannelBound.mockResolvedValue(true);
+    await expect(
+      target.service.create(context, {
+        title: "Title",
+        discordChannelId: "123",
+      }),
+    ).resolves.toEqual({ outcome: "channel-already-bound" });
+    expect(target.series.createWithCreationPolicy).not.toHaveBeenCalled();
   });
 
   it("does not require a grant or Discord channel for admin creation", async () => {
