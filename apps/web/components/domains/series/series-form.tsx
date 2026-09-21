@@ -9,13 +9,15 @@ import type {
   SeriesInput,
 } from "../../../lib/domains/series/types";
 import { Button } from "../../ui/button";
-import { Select } from "../../ui/select";
+import { FieldShell, Textarea } from "../../ui/field-shell";
+import { Input } from "../../ui/input";
+import { SearchableCombobox } from "../../ui/searchable-combobox";
 import { errorMessage } from "../feedback";
 
 export function SeriesForm({
   initial,
   onSubmit,
-  submitLabel = "Crear Series",
+  submitLabel = "Crear serie",
   onCancel,
   requiresGrant = false,
   availableGrants = [],
@@ -79,140 +81,93 @@ export function SeriesForm({
 
   return (
     <form className="grid gap-3.5" onSubmit={handleSubmit}>
-      <label
-        className="grid gap-1.5 text-[13px] font-medium text-muted"
-        htmlFor="series-title"
+      <FieldShell
+        id="series-title"
+        label="Título"
+        required
+        description="El slug público se genera automáticamente y permanece estable."
       >
-        Título
-        <input
+        <Input
           id="series-title"
+          aria-describedby="series-title-description"
           required
           maxLength={200}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
         />
-        <span className="font-normal text-muted">
-          El slug público se genera automáticamente y permanece estable.
-        </span>
-      </label>
+      </FieldShell>
       {requiresGrant ? (
-        <label
-          className="grid gap-1.5 text-[13px] font-medium text-muted"
-          htmlFor="series-grant"
-        >
-          Autorización
-          <Select
-            id="series-grant"
-            required
-            value={grantId}
-            onChange={(event) => setGrantId(event.target.value)}
-          >
-            <option disabled value="">
-              Selecciona una autorización disponible
-            </option>
-            {availableGrants.map((grant) => (
-              <option key={grant.id} value={grant.id}>
-                {grantOptionLabel(grant)}
-              </option>
-            ))}
-          </Select>
-          <span className="font-normal text-muted">
-            Esta autorización se consume al crear la Serie.
-          </span>
-        </label>
+        <SearchableCombobox
+          id="series-grant"
+          label="Autorización"
+          required
+          value={grantId}
+          onChange={setGrantId}
+          options={availableGrants.map((grant) => ({
+            id: grant.id,
+            label: grantOptionLabel(grant),
+          }))}
+          placeholder="Buscar autorización disponible…"
+          emptyMessage="No hay autorizaciones disponibles."
+        />
       ) : null}
       {requiresDiscordChannel ? (
-        <label
-          className="grid gap-1.5 text-[13px] font-medium text-muted"
-          htmlFor="series-discord-channel"
-        >
-          Canal Discord *
-          {channelsLoading ? (
-            <span className="font-normal text-muted">
-              Cargando canales de Discord…
-            </span>
-          ) : null}
-          {channelsError ? (
-            <div className="grid gap-1.5">
-              <span className="font-normal text-danger">
-                No se pudieron cargar los canales de Discord.
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={onRetryChannels}
-              >
-                Reintentar
-              </Button>
-            </div>
-          ) : null}
-          {!channelsLoading && !channelsError ? (
-            <>
-              <Select
-                id="series-discord-channel"
-                required
-                disabled={selectableChannels.length === 0}
-                value={discordChannelId}
-                onChange={(event) => setDiscordChannelId(event.target.value)}
-              >
-                <option disabled value="">
-                  {selectableChannels.length
-                    ? "Selecciona un canal"
-                    : "No hay canales Discord disponibles para vincular"}
-                </option>
-                {selectableChannels.map((channel) => (
-                  <option key={channel.id} value={channel.id}>
-                    #{channel.name}
-                  </option>
-                ))}
-              </Select>
-              {selectableChannels.length === 0 ? (
-                <span className="font-normal text-muted">
-                  No hay canales Discord disponibles para vincular.
-                </span>
-              ) : null}
-            </>
-          ) : null}
-        </label>
+        <SearchableCombobox
+          id="series-discord-channel"
+          label="Canal Discord"
+          required
+          value={discordChannelId}
+          onChange={setDiscordChannelId}
+          options={selectableChannels.map((channel) => ({
+            id: channel.id,
+            label: `#${channel.name}`,
+          }))}
+          loading={channelsLoading}
+          error={
+            channelsError
+              ? "No se pudieron cargar los canales de Discord."
+              : undefined
+          }
+          onRetry={onRetryChannels}
+          placeholder="Buscar canal…"
+          emptyMessage="No hay canales Discord disponibles para vincular."
+        />
       ) : null}
-      <label
-        className="grid gap-1.5 text-[13px] font-medium text-muted"
-        htmlFor="series-cover-url"
+      <FieldShell
+        id="series-cover-url"
+        label="Portada"
+        description="URL externa de portada"
       >
-        Portada
-        <input
+        <Input
           id="series-cover-url"
+          aria-describedby="series-cover-url-description"
           type="url"
           maxLength={2048}
           placeholder="https://i.imgur.com/..."
           value={coverUrl ?? ""}
           onChange={(event) => setCoverUrl(event.target.value)}
         />
-        <span className="font-normal text-muted">URL externa de portada</span>
-      </label>
-      <label
-        className="grid gap-1.5 text-[13px] font-medium text-muted"
-        htmlFor="series-description"
-      >
-        Descripción
-        <textarea
+      </FieldShell>
+      <FieldShell id="series-description" label="Descripción">
+        <Textarea
           id="series-description"
           maxLength={5000}
           rows={4}
           value={description ?? ""}
           onChange={(event) => setDescription(event.target.value)}
         />
-      </label>
+      </FieldShell>
       {error ? (
         <p className="text-[13px] text-danger" role="alert">
           {error}
         </p>
       ) : null}
-      <div className="flex gap-2 max-[640px]:flex-col">
+      <div className="sticky bottom-0 flex flex-row-reverse gap-2 border-t border-[var(--border-subtle)] bg-surface-elevated pt-4 max-[640px]:flex-col">
         <Button
           type="submit"
           disabled={
             loading ||
+            (requiresGrant && !grantId) ||
             (requiresDiscordChannel &&
               (channelsLoading || channelsError || !discordChannelId))
           }
@@ -220,14 +175,14 @@ export function SeriesForm({
           {loading ? "Guardando…" : submitLabel}
         </Button>
         {onCancel ? (
-          <button
-            className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-medium text-text"
+          <Button
+            variant="secondary"
             type="button"
             disabled={loading}
             onClick={onCancel}
           >
             Cancelar
-          </button>
+          </Button>
         ) : null}
       </div>
     </form>

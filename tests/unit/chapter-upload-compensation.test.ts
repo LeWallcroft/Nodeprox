@@ -1,19 +1,19 @@
-import {
-  UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
-} from "../../packages/storage/dist/port.js";
 import { describe, expect, it, vi } from "vitest";
 import type { ChapterPermissionService } from "../../apps/api/src/modules/chapters/application/services/chapter-permission.service.js";
-import {
-  ChapterUploadService,
-  UploadedObjectMismatchError,
-  UploadedObjectNotFoundError,
-} from "../../apps/api/src/modules/uploads/application/services/chapter-upload.service.js";
 import type {
   UploadAuditPort,
   UploadLifecycleBoundaryPort,
   UploadRepositoryPort,
 } from "../../apps/api/src/modules/uploads/application/ports/upload.ports.js";
+import {
+  ChapterUploadService,
+  UploadedObjectMismatchError,
+  UploadedObjectNotFoundError,
+} from "../../apps/api/src/modules/uploads/application/services/chapter-upload.service.js";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+} from "../../packages/storage/dist/port.js";
 
 const permission = {
   check: vi.fn().mockResolvedValue({
@@ -99,7 +99,7 @@ function setup() {
 
 describe("chapter upload transfer lifecycle", () => {
   it("initiates pending state without marking the upload as uploaded", async () => {
-    const { service, lifecycle, transfer } = setup();
+    const { service, lifecycle, transfer, audit } = setup();
     await expect(
       service.initiate({
         context,
@@ -113,6 +113,29 @@ describe("chapter upload transfer lifecycle", () => {
       expect.objectContaining({ key: expect.stringContaining("chapter-1") }),
     );
     expect(lifecycle.finalizeIfAuthorized).not.toHaveBeenCalled();
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "chapter.upload.initiated",
+        result: null,
+        metadata: { result: "pending" },
+      }),
+    );
+  });
+
+  it("audits only the verified terminal completion as success", async () => {
+    const { service, audit } = setup();
+    await service.complete({
+      context,
+      chapterId: "chapter-1",
+      uploadId: "upload-1",
+    });
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "chapter.upload.completed",
+        result: "success",
+        metadata: { result: "completed" },
+      }),
+    );
   });
 
   it("does not report success when database finalization fails", async () => {

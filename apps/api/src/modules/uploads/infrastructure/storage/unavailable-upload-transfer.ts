@@ -1,6 +1,6 @@
 import {
-  UploadTransferProviderError,
   type UploadTransferPort,
+  UploadTransferProviderError,
 } from "@nodeprox/storage/port";
 
 export class UnavailableUploadTransfer implements UploadTransferPort {

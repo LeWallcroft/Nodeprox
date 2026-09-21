@@ -13,6 +13,16 @@ export const authorizationStatusLabel: Record<
   invalidated: "Invalidada",
 };
 
+export const authorizationStatusTone: Record<
+  SeriesCreationGrantStatus,
+  "success" | "neutral" | "warning" | "danger"
+> = {
+  available: "success",
+  reserved: "warning",
+  consumed: "neutral",
+  invalidated: "danger",
+};
+
 export function grantOptionLabel(grant: SeriesCreationGrantListItem): string {
   return grant.reference
     ? `${grant.displayCode} — ${grant.reference}`

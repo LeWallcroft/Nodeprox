@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { createImageCandidateStorageKey } from "../../domain/image-candidate-storage-key.js";
+import type { MediaReplacementRepositoryPort } from "../media-replacement.ports.js";
 import type { ImageReplacementOperationRepository } from "../image-replacement-operation.repository.js";
 import type {
   ChapterImageAuthorizationPort,
@@ -10,6 +11,7 @@ import type {
 export class ImageReplacementPrepareDeniedError extends Error {}
 export class ImageReplacementPrepareNotFoundError extends Error {}
 export class ImageReplacementPrepareInvalidError extends Error {}
+export class ImageReplacementPrepareConflictError extends Error {}
 
 const supportedContentTypes = new Set([
   "image/jpeg",
@@ -23,6 +25,7 @@ export class PrepareImageReplacementService {
     private readonly images: ImageRepositoryPort,
     private readonly authorization: ChapterImageAuthorizationPort,
     private readonly operations: ImageReplacementOperationRepository,
+    private readonly media: MediaReplacementRepositoryPort,
     private readonly maxSizeBytes: number,
   ) {}
 
@@ -56,10 +59,14 @@ export class PrepareImageReplacementService {
       input.sizeBytes > this.maxSizeBytes
     )
       throw new ImageReplacementPrepareInvalidError();
+    const candidateContext = await this.media.findCandidateContext(image.id);
+    if (!candidateContext || candidateContext.chapterId !== input.chapterId)
+      throw new ImageReplacementPrepareNotFoundError();
     const replacementId = randomUUID();
     const candidateStorageKey = createImageCandidateStorageKey({
-      replacementId,
-      currentStorageKey: image.storageKey,
+      currentStorageKey: candidateContext.currentStorageKey,
+      logicalFilename: candidateContext.logicalFilename,
+      nextVersion: candidateContext.currentVersion + 1,
       contentType,
     });
     const operation = await this.operations.create({
@@ -73,6 +80,7 @@ export class PrepareImageReplacementService {
       sizeBytes: input.sizeBytes,
       status: "pending_upload",
     });
+    if (!operation) throw new ImageReplacementPrepareConflictError();
     return {
       replacementId: operation.id,
       imageId: operation.imageId,

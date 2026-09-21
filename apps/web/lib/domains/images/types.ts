@@ -9,11 +9,10 @@ export type PreparedImageReplacement = {
 };
 
 export type CanonicalImageReplacementResult = {
+  replacementId: string;
   imageId: string;
-  versionId: string;
-  version: number;
-  filename: string;
-  publicUrl: string;
+  chapterId: string;
+  status: "uploaded" | "completing" | "completed";
 };
 
 export type ImageReplacementPhase =

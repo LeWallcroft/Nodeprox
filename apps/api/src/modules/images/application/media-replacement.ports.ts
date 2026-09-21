@@ -41,6 +41,7 @@ export interface MediaReplacementTransactionPort {
   completeReplacementOperation(input: {
     operationId: string;
     imageId: string;
+    actorId: string;
     resultImageVersionId: string;
     completedAt: Date;
   }): Promise<void>;
@@ -51,6 +52,8 @@ export interface MediaReplacementRepositoryPort {
     chapterId: string;
     currentStorageKey: string;
     currentContentType: string;
+    currentVersion: number;
+    logicalFilename: string;
   } | null>;
   withLockedImage<T>(
     imageId: string,

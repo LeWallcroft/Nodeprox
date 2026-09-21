@@ -14,7 +14,7 @@ export class ChapterMediaActivationService {
   constructor(
     private readonly operations: ChapterReplacementOperationRepository,
     private readonly repository: ChapterMediaReplacementRepository,
-    private readonly permissions: ChapterImageAuthorizationPort,
+    private readonly permissions?: ChapterImageAuthorizationPort,
   ) {}
 
   async execute(input: {
@@ -29,6 +29,7 @@ export class ChapterMediaActivationService {
     );
     if (!operation) throw new ChapterReplacementActivationNotFoundError();
 
+    if (!this.permissions) throw new ChapterReplacementActivationDeniedError();
     const authorization = await this.permissions.check({
       context: input.context,
       chapterId: input.chapterId,
@@ -38,6 +39,26 @@ export class ChapterMediaActivationService {
       throw new ChapterReplacementActivationNotFoundError();
     if (!authorization.allowed)
       throw new ChapterReplacementActivationDeniedError();
+
+    return this.executeAuthorized({
+      replacementId: input.replacementId,
+      chapterId: input.chapterId,
+      actorUserId: input.context.userId,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+  }
+
+  async executeAuthorized(input: {
+    replacementId: string;
+    chapterId: string;
+    actorUserId: string;
+    requestId?: string;
+  }): Promise<ChapterReplacementResult> {
+    const operation = await this.operations.findByIdForChapter(
+      input.replacementId,
+      input.chapterId,
+    );
+    if (!operation) throw new ChapterReplacementActivationNotFoundError();
 
     if (operation.status === "completed") {
       const result = await this.operations.getCompletedResult(operation.id);
@@ -52,7 +73,7 @@ export class ChapterMediaActivationService {
     const activated = await this.repository.activate({
       replacementId: input.replacementId,
       chapterId: input.chapterId,
-      actorUserId: input.context.userId,
+      actorUserId: input.actorUserId,
       ...(input.requestId ? { requestId: input.requestId } : {}),
     });
     if (activated.outcome === "completed") return activated.result;

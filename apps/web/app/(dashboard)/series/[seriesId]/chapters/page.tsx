@@ -1,20 +1,18 @@
 "use client";
 
-import { Clock3, Plus, Upload, UserRoundPlus } from "lucide-react";
+import { Plus, Upload } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AssignChapterCollaboratorDialog } from "../../../../../components/domains/chapters/assign-chapter-collaborator-dialog";
 import { BulkChapterUploadDialog } from "../../../../../components/domains/chapters/bulk-chapter-upload-dialog";
 import { ChapterDetailPanel } from "../../../../../components/domains/chapters/chapter-detail-panel";
-import { ChapterForm } from "../../../../../components/domains/chapters/chapter-form";
 import { ChapterList } from "../../../../../components/domains/chapters/chapter-list";
+import { GlobalChapterCreateDialog } from "../../../../../components/domains/chapters/global-chapter-create-dialog";
 import { QuickChapterImagesDialog } from "../../../../../components/domains/chapters/quick-chapter-images-dialog";
 import { errorMessage } from "../../../../../components/domains/feedback";
 import { PageHeader } from "../../../../../components/layout/page-header";
-import { AppDialog } from "../../../../../components/ui/app-dialog";
 import { Button } from "../../../../../components/ui/button";
 import { Card } from "../../../../../components/ui/card";
-import { ContentImage } from "../../../../../components/ui/content-image";
 import { EmptyState } from "../../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../components/ui/loading-state";
@@ -25,7 +23,6 @@ import {
   useChapter,
   useChapterCapabilities,
   useChapterList,
-  useCreateChapter,
   useDeleteChapter,
   useUpdateChapter,
 } from "../../../../../lib/domains/chapters/hooks";
@@ -38,8 +35,6 @@ import {
   sortChapters,
   toChapterListItem,
 } from "../../../../../lib/domains/chapters/view-model";
-import { usePublicChapter } from "../../../../../lib/domains/publication/hooks";
-import { sortPublicImages } from "../../../../../lib/domains/publication/utils";
 import {
   useSeries,
   useSeriesCapabilities,
@@ -52,7 +47,6 @@ export default function SeriesChaptersPage() {
   const seriesQuery = useSeries(seriesId);
   const seriesCapabilities = useSeriesCapabilities(seriesId);
   const listQuery = useChapterList(seriesId);
-  const create = useCreateChapter(seriesId);
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(
     null,
   );
@@ -69,10 +63,6 @@ export default function SeriesChaptersPage() {
   const selectedCapabilities = useChapterCapabilities(selectedChapterId ?? "");
   const update = useUpdateChapter(selectedChapterId ?? "", seriesId);
   const remove = useDeleteChapter(seriesId);
-  const publicChapter = usePublicChapter(
-    selectedChapterId ?? "",
-    Boolean(selectedChapterId),
-  );
   const canCreate = hasCapability(
     seriesCapabilities.data?.capabilities,
     "chapters.create",
@@ -80,10 +70,6 @@ export default function SeriesChaptersPage() {
   const canUpload = hasCapability(
     seriesCapabilities.data?.capabilities,
     "images.upload",
-  );
-  const canAssign = hasCapability(
-    selectedCapabilities.data?.capabilities,
-    "chapters.helper.grant",
   );
 
   useEffect(() => {
@@ -122,14 +108,6 @@ export default function SeriesChaptersPage() {
       null,
     [listQuery.data, quickChapterId],
   );
-  const previews = sortPublicImages(publicChapter.data?.images ?? []).slice(
-    0,
-    5,
-  );
-  const remainingImages = Math.max(
-    0,
-    (publicChapter.data?.images.length ?? 0) - previews.length,
-  );
 
   async function handleDelete() {
     if (!selectedChapterId) return;
@@ -166,7 +144,7 @@ export default function SeriesChaptersPage() {
                 onClick={() => setUploading(true)}
               >
                 <Upload aria-hidden="true" className="size-4" />
-                Subir capítulo
+                Subir capítulos
               </Button>
             ) : null}
             {canCreate ? (
@@ -178,22 +156,23 @@ export default function SeriesChaptersPage() {
           </div>
         }
       />
-      <AppDialog
+      <GlobalChapterCreateDialog
         open={creating}
-        title="Crear capítulo"
-        busy={create.isPending}
         onOpenChange={setCreating}
-      >
-        <ChapterForm
-          submitLabel="Crear capítulo"
-          onSubmit={async (input) => {
-            const chapter = await create.mutateAsync(input);
-            setCreating(false);
-            setSelectedChapterId(chapter.id);
-          }}
-          onCancel={() => setCreating(false)}
-        />
-      </AppDialog>
+        fixedSeries={
+          seriesQuery.data
+            ? {
+                id: seriesId,
+                title: seriesQuery.data.title,
+                slug: seriesQuery.data.slug,
+              }
+            : { id: seriesId, title: "Serie" }
+        }
+        onCreated={(chapterId) => {
+          void listQuery.refetch();
+          setSelectedChapterId(chapterId);
+        }}
+      />
       {actionError ? (
         <p className="mb-section text-sm text-danger" role="alert">
           {actionError}
@@ -258,6 +237,7 @@ export default function SeriesChaptersPage() {
             <ChapterList
               items={items}
               selectedId={selectedChapterId}
+              seriesId={seriesId}
               minTableHeightClassName="lg:min-h-[700px]"
               onSelect={(chapterId) => {
                 setActionError(null);
@@ -273,98 +253,6 @@ export default function SeriesChaptersPage() {
                 onPrevious={() => setPage((current) => current - 1)}
                 onNext={() => setPage((current) => current + 1)}
               />
-            </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              <Card className="h-52 overflow-y-auto p-4">
-                <h2 className="m-0 text-sm font-semibold">ACCIONES RÁPIDAS</h2>
-                <div className="mt-3 grid gap-2">
-                  {canCreate ? (
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() => setCreating(true)}
-                    >
-                      <Plus aria-hidden="true" className="size-4" /> Crear
-                      capítulo
-                    </Button>
-                  ) : null}
-                  {canUpload ? (
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() => setUploading(true)}
-                    >
-                      <Upload aria-hidden="true" className="size-4" /> Subir
-                      capítulos
-                    </Button>
-                  ) : null}
-                  {canAssign ? (
-                    <Button
-                      variant="secondary"
-                      type="button"
-                      onClick={() => setAssigning(true)}
-                    >
-                      <UserRoundPlus aria-hidden="true" className="size-4" />{" "}
-                      Asignar colaborador
-                    </Button>
-                  ) : null}
-                </div>
-              </Card>
-              <Card className="h-52 overflow-y-auto p-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="m-0 text-sm font-semibold">
-                    IMÁGENES DEL CAPÍTULO
-                  </h2>
-                  {selectedListItem ? (
-                    <button
-                      className="text-sm font-medium text-primary"
-                      type="button"
-                      onClick={() => setQuickChapterId(selectedListItem.id)}
-                    >
-                      Ver todas
-                    </button>
-                  ) : null}
-                </div>
-                {publicChapter.isPending ? (
-                  <p className="text-sm text-muted">Cargando imágenes…</p>
-                ) : null}
-                <div className="mt-3 grid gap-2">
-                  {previews.map((image) => (
-                    <div
-                      className="flex items-center gap-2 text-sm"
-                      key={image.id}
-                    >
-                      <ContentImage
-                        alt={image.filename}
-                        src={image.url}
-                        variant="thumbnail"
-                      />
-                      <span className="truncate">{image.filename}</span>
-                    </div>
-                  ))}
-                </div>
-                {remainingImages > 0 ? (
-                  <button
-                    className="mt-3 text-sm font-medium text-primary"
-                    type="button"
-                    onClick={() =>
-                      selectedListItem && setQuickChapterId(selectedListItem.id)
-                    }
-                  >
-                    +{remainingImages} imágenes más
-                  </button>
-                ) : null}
-              </Card>
-              <Card className="h-52 overflow-y-auto p-4">
-                <h2 className="m-0 text-sm font-semibold">
-                  ACTIVIDAD RECIENTE
-                </h2>
-                <div className="grid place-items-center gap-2 py-8 text-center text-sm text-muted">
-                  <Clock3 aria-hidden="true" className="size-5" />
-                  <span className="font-medium">Sin actividad reciente</span>
-                  <span>No hay actividad para mostrar.</span>
-                </div>
-              </Card>
             </div>
           </main>
           <aside
@@ -385,8 +273,9 @@ export default function SeriesChaptersPage() {
                 chapter={selectedQuery.data ?? null}
                 capabilities={selectedCapabilities.data?.capabilities}
                 seriesTitle={seriesQuery.data?.title ?? "Serie"}
-                showMetricsPlaceholder
+                showSeriesLink={false}
                 onClose={() => setSelectedChapterId(null)}
+                onAssignCollaborator={() => setAssigning(true)}
                 onUpdate={async (input) => {
                   if (selectedChapterId) await update.mutateAsync(input);
                 }}

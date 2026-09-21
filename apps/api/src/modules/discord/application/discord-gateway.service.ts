@@ -232,6 +232,7 @@ export class DiscordGatewayService {
       .select({
         id: users.id,
         discordId: users.discordId,
+        discordUsername: users.discordUsername,
         linkedAt: users.discordLinkedAt,
       })
       .from(users)
@@ -241,6 +242,8 @@ export class DiscordGatewayService {
     if (user.discordId)
       return {
         state: "linked" as const,
+        discordId: user.discordId,
+        discordUsername: user.discordUsername,
         linkedAt: user.linkedAt?.toISOString() ?? null,
       };
     const pending = await this.links.getActiveForUser(userId);
@@ -255,6 +258,7 @@ export class DiscordGatewayService {
   async confirmLink(input: {
     code: string;
     discordId: string;
+    discordUsername: string;
     guildId: string;
     channelId: string;
     interactionId: string;
@@ -315,6 +319,7 @@ export class DiscordGatewayService {
           .update(users)
           .set({
             discordId: input.discordId,
+            discordUsername: input.discordUsername,
             discordLinkedAt: new Date(),
             updatedAt: new Date(),
           })

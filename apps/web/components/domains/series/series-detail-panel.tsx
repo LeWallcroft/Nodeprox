@@ -1,13 +1,6 @@
 "use client";
 
-import {
-  ChartNoAxesColumn,
-  Images,
-  Pencil,
-  Trash2,
-  UserRoundPlus,
-  X,
-} from "lucide-react";
+import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { hasCapability } from "../../../lib/auth/visibility";
@@ -18,11 +11,17 @@ import type {
 } from "../../../lib/domains/series/types";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
-import { Card } from "../../ui/card";
 import { ConfirmationDialog } from "../../ui/confirmation-dialog";
 import { ContentImage } from "../../ui/content-image";
-import { CopyButton } from "../../ui/copy-button";
+import {
+  DetailPanel,
+  DetailPanelActions,
+  DetailPanelContent,
+  DetailPanelHeader,
+} from "../../ui/detail-panel";
 import { EmptyState } from "../../ui/empty-state";
+import { ErrorState } from "../../ui/error-state";
+import { LoadingState } from "../../ui/loading-state";
 import { StatusBadge } from "../../ui/status-badge";
 import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
@@ -41,6 +40,9 @@ export function SeriesDetailPanel({
   onAssignResponsible,
   updatePending,
   deletePending,
+  loading = false,
+  error = null,
+  onRetry,
 }: {
   series: Series | null;
   capabilities: readonly string[] | undefined;
@@ -56,6 +58,9 @@ export function SeriesDetailPanel({
   onAssignResponsible: (responsibleUserId: string) => Promise<void>;
   updatePending: boolean;
   deletePending: boolean;
+  loading?: boolean;
+  error?: Error | null;
+  onRetry?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -64,10 +69,35 @@ export function SeriesDetailPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   if (!series)
     return (
-      <EmptyState
-        title="Selecciona una Series"
-        description="El detalle y las acciones disponibles aparecerán aquí."
-      />
+      <DetailPanel>
+        <DetailPanelHeader>
+          <h2 className="m-0 text-base font-semibold">Detalle de la serie</h2>
+        </DetailPanelHeader>
+        <DetailPanelContent>
+          {loading ? (
+            <LoadingState label="Cargando detalle de la serie" />
+          ) : null}
+          {error ? (
+            <ErrorState
+              title="No se pudo cargar el detalle"
+              description={error.message}
+              action={
+                onRetry ? (
+                  <Button type="button" onClick={onRetry}>
+                    Reintentar
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : null}
+          {!loading && !error ? (
+            <EmptyState
+              title="Selecciona una Series"
+              description="El detalle y las acciones disponibles aparecerán aquí."
+            />
+          ) : null}
+        </DetailPanelContent>
+      </DetailPanel>
     );
 
   const canEdit = hasCapability(capabilities, "series.edit");
@@ -83,97 +113,96 @@ export function SeriesDetailPanel({
     hasCapability(capabilities, "chapters.helper.revoke");
 
   return (
-    <Card className="h-full overflow-y-auto p-4">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="m-0 text-base font-semibold">Detalle de la serie</h2>
-        <button
-          className="inline-flex h-8 w-8 items-center justify-center rounded-control border border-border bg-surface-elevated text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-          type="button"
-          aria-label="Cerrar detalle"
-          onClick={onClose}
-        >
-          <X aria-hidden="true" className="size-4" />
-        </button>
-      </div>
-      <div className="mt-4 flex items-start gap-3">
-        <ContentImage
-          alt={`Portada de ${series.title}`}
-          src={series.coverUrl}
-          variant="details"
-        />
-        <div className="min-w-0">
-          <h3 className="m-0 truncate text-lg font-semibold">{series.title}</h3>
-          <div className="mt-2">
-            <StatusBadge label="Activa" tone="success" />
-          </div>
-          <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Slug
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="break-all text-sm font-medium text-text">
+    <DetailPanel>
+      <DetailPanelHeader>
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="m-0 text-base font-semibold">Detalle de la serie</h2>
+          <button
+            className="inline-flex h-8 w-8 items-center justify-center rounded-control border border-border bg-surface-elevated text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            type="button"
+            aria-label="Cerrar detalle"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" className="size-4" />
+          </button>
+        </div>
+      </DetailPanelHeader>
+      <DetailPanelContent>
+        <div className="flex items-start gap-3">
+          <ContentImage
+            alt={`Portada de ${series.title}`}
+            src={series.coverUrl}
+            variant="details"
+          />
+          <div className="min-w-0">
+            <h3 className="m-0 truncate text-lg font-semibold">
+              {series.title}
+            </h3>
+            <div className="mt-2">
+              <StatusBadge label="Activa" tone="success" />
+            </div>
+            <p className="mb-1 mt-3 text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Slug
+            </p>
+            <p className="mb-0 break-all text-sm font-medium text-text">
               {series.slug}
-            </span>
-            <CopyButton
-              className="min-h-8 px-2 text-xs"
-              label="Copiar slug"
-              value={series.slug}
-            />
+            </p>
           </div>
         </div>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm">
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Estado
-          </dt>
-          <dd className="mt-1 text-muted">Activa</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Responsable
-          </dt>
-          <dd className="mt-1 text-muted">
-            {series.responsibleUser?.email ?? "Sin responsable asignado."}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Canal Discord
-          </dt>
-          <dd className="mt-1 text-muted">
-            {series.discordChannelId
-              ? series.discordChannelNameSnapshot
-                ? `#${series.discordChannelNameSnapshot}`
-                : "Canal vinculado"
-              : "Sin canal vinculado."}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Creada
-          </dt>
-          <dd className="mt-1 text-muted">
-            {new Date(series.createdAt).toLocaleString("es-PE")}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Descripción
-          </dt>
-          <dd className="mt-1 text-muted">
-            {series.description || "Sin descripción."}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
-            Actualizada
-          </dt>
-          <dd className="mt-1 text-muted">
-            {new Date(series.updatedAt).toLocaleString("es-PE")}
-          </dd>
-        </div>
-      </dl>
-      <div className="mt-4 grid gap-2">
+        <dl className="mt-4 grid gap-3 text-sm">
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Estado
+            </dt>
+            <dd className="mt-1 text-muted">Activa</dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Responsable
+            </dt>
+            <dd className="mt-1 text-muted">
+              {series.responsibleUser?.email ?? "Sin responsable asignado."}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Canal Discord
+            </dt>
+            <dd className="mt-1 text-muted">
+              {series.discordChannelId
+                ? series.discordChannelNameSnapshot
+                  ? `#${series.discordChannelNameSnapshot}`
+                  : "Canal vinculado"
+                : "Sin canal vinculado."}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Creada
+            </dt>
+            <dd className="mt-1 text-muted">
+              {new Date(series.createdAt).toLocaleString("es-PE")}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Descripción
+            </dt>
+            <dd className="mt-1 h-24 overflow-y-auto pr-2 text-muted">
+              {series.description || "Sin descripción."}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
+              Actualizada
+            </dt>
+            <dd className="mt-1 text-muted">
+              {new Date(series.updatedAt).toLocaleString("es-PE")}
+            </dd>
+          </div>
+        </dl>
+      </DetailPanelContent>
+      <DetailPanelActions>
         {canViewChapters ? (
           <Link
             className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -184,13 +213,21 @@ export function SeriesDetailPanel({
           </Link>
         ) : null}
         {canEdit ? (
-          <Button type="button" onClick={() => setEditing((value) => !value)}>
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() => setEditing((value) => !value)}
+          >
             <Pencil aria-hidden="true" className="size-4" />
             {editing ? "Cerrar edición" : "Editar serie"}
           </Button>
         ) : null}
         {canManageAssignment ? (
-          <Button type="button" onClick={() => setAssigning(true)}>
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() => setAssigning(true)}
+          >
             <UserRoundPlus aria-hidden="true" className="size-4" />
             {series.responsibleUser
               ? "Cambiar responsable"
@@ -198,7 +235,11 @@ export function SeriesDetailPanel({
           </Button>
         ) : null}
         {canManageHelpers ? (
-          <Button type="button" onClick={() => setManagingHelpers(true)}>
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() => setManagingHelpers(true)}
+          >
             <UserRoundPlus aria-hidden="true" className="size-4" /> Gestionar
             colaboradores
           </Button>
@@ -213,13 +254,7 @@ export function SeriesDetailPanel({
             Eliminar serie
           </Button>
         ) : null}
-      </div>
-      <section className="mt-4 rounded-control border border-border bg-surface-elevated p-3 text-muted">
-        <ChartNoAxesColumn aria-hidden="true" className="size-5" />
-        <h3 className="mb-1 mt-2 text-sm font-semibold text-text">Métricas</h3>
-        <p className="mb-1 text-sm font-medium">Muy pronto</p>
-        <p className="mb-0 text-xs">Disponible en una próxima versión.</p>
-      </section>
+      </DetailPanelActions>
       <AppDialog
         busy={updatePending}
         description="El slug público es estable y no se puede modificar desde esta acción."
@@ -285,6 +320,6 @@ export function SeriesDetailPanel({
             );
         }}
       />
-    </Card>
+    </DetailPanel>
   );
 }

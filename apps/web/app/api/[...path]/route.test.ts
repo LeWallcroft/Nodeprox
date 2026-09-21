@@ -47,6 +47,31 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("proxies the paginated audit read model and CSV export route", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    const list = await GET(
+      new Request(
+        "http://localhost:3000/api/admin/audit?limit=10&search=chapter",
+      ),
+      context(["admin", "audit"]),
+    );
+    const exportResponse = await GET(
+      new Request(
+        "http://localhost:3000/api/admin/audit/export?result=success",
+      ),
+      context(["admin", "audit", "export"]),
+    );
+    expect([list.status, exportResponse.status]).toEqual([200, 200]);
+    expect(backend.mock.calls.map(([url]) => url)).toEqual([
+      "http://localhost:3001/admin/audit?limit=10&search=chapter",
+      "http://localhost:3001/admin/audit/export?result=success",
+    ]);
+    vi.unstubAllGlobals();
+  });
+
   it("forwards cookies and preserves Set-Cookie and Problem Details", async () => {
     const backendResponse = new Response(
       JSON.stringify({
@@ -567,6 +592,12 @@ describe("same-origin API proxy", () => {
       }),
       context(["series", seriesId, "responsible"]),
     );
+    const released = await DELETE(
+      new Request(`http://localhost:3000/api/series/${seriesId}/uploader`, {
+        method: "DELETE",
+      }),
+      context(["series", seriesId, "uploader"]),
+    );
     const blocked = await GET(
       new Request(`http://localhost:3000/api/series/${seriesId}/uploader/raw`),
       context(["series", seriesId, "uploader", "raw"]),
@@ -575,8 +606,13 @@ describe("same-origin API proxy", () => {
     expect(candidates.status).toBe(204);
     expect(assigned.status).toBe(204);
     expect(reassigned.status).toBe(204);
+    expect(released.status).toBe(204);
     expect(blocked.status).toBe(404);
-    expect(backend).toHaveBeenCalledTimes(3);
+    expect(backend).toHaveBeenCalledTimes(4);
+    expect(backend).toHaveBeenCalledWith(
+      `http://localhost:3001/series/${seriesId}/uploader`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
     vi.unstubAllGlobals();
   });
 
@@ -620,6 +656,16 @@ describe("same-origin API proxy", () => {
         await GET(
           new Request("http://localhost:3000/api/admin/users"),
           context(["admin", "users"]),
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await GET(
+          new Request(
+            "http://localhost:3000/api/admin/users/management?limit=10",
+          ),
+          context(["admin", "users", "management"]),
         )
       ).status,
     ).toBe(200);
@@ -679,7 +725,7 @@ describe("same-origin API proxy", () => {
         )
       ).status,
     ).toBe(404);
-    expect(backend).toHaveBeenCalledTimes(5);
+    expect(backend).toHaveBeenCalledTimes(6);
     vi.unstubAllGlobals();
   });
 
@@ -803,6 +849,89 @@ describe("same-origin API proxy", () => {
       context(path),
     );
     expect(response.status).toBe(200);
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies the public Web grant administration routes with cookies", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ items: [] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", backend);
+    const grantId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+
+    const lookup = await GET(
+      new Request("http://localhost:3000/api/admin/users/lookup?search=ana", {
+        headers: { cookie: "nodeprox_session=active" },
+      }),
+      context(["admin", "users", "lookup"]),
+    );
+    const issue = await POST(
+      new Request("http://localhost:3000/api/admin/series-creation-grants", {
+        method: "POST",
+        headers: { cookie: "nodeprox_session=active" },
+      }),
+      context(["admin", "series-creation-grants"]),
+    );
+    const invalidate = await POST(
+      new Request(
+        `http://localhost:3000/api/admin/series-creation-grants/${grantId}/invalidate`,
+        { method: "POST", headers: { cookie: "nodeprox_session=active" } },
+      ),
+      context(["admin", "series-creation-grants", grantId, "invalidate"]),
+    );
+    const history = await GET(
+      new Request(
+        `http://localhost:3000/api/admin/series-creation-grants/${grantId}/history`,
+        { headers: { cookie: "nodeprox_session=active" } },
+      ),
+      context(["admin", "series-creation-grants", grantId, "history"]),
+    );
+
+    expect([
+      lookup.status,
+      issue.status,
+      invalidate.status,
+      history.status,
+    ]).toEqual([200, 200, 200, 200]);
+    expect(backend.mock.calls.map(([, options]) => options.method)).toEqual([
+      "GET",
+      "POST",
+      "POST",
+      "GET",
+    ]);
+    expect(new Headers(backend.mock.calls[0]?.[1].headers).get("cookie")).toBe(
+      "nodeprox_session=active",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  it("proxies the atomic user Series responsibility replacement only for PUT", async () => {
+    const backend = vi
+      .fn()
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", backend);
+    const userId = "c56aef0e-da3d-42fc-8548-8eadcda8bdce";
+    const allowed = await PUT(
+      new Request(
+        `http://localhost:3000/api/admin/users/${userId}/series-responsibilities`,
+        { method: "PUT", headers: { cookie: "nodeprox_session=active" } },
+      ),
+      context(["admin", "users", userId, "series-responsibilities"]),
+    );
+    const denied = await POST(
+      new Request(
+        `http://localhost:3000/api/admin/users/${userId}/series-responsibilities`,
+        { method: "POST" },
+      ),
+      context(["admin", "users", userId, "series-responsibilities"]),
+    );
+    expect([allowed.status, denied.status]).toEqual([200, 404]);
+    expect(backend).toHaveBeenCalledWith(
+      `http://localhost:3001/admin/users/${userId}/series-responsibilities`,
+      expect.objectContaining({ method: "PUT" }),
+    );
     vi.unstubAllGlobals();
   });
 

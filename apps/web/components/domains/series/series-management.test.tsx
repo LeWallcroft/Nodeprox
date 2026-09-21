@@ -17,6 +17,8 @@ const series = {
   coverUrl: "https://i.imgur.com/raven.jpg",
   discordChannelId: "channel-1",
   discordChannelNameSnapshot: "serie-raven",
+  chapterCount: 4,
+  imageCount: 72,
   responsibleUser: {
     id: "uploader-1",
     email: "uploader@example.com",
@@ -48,13 +50,15 @@ describe("Series management presentation", () => {
     expect(page).toContain("<AppDialog");
     expect(page).toContain('title="Nueva serie"');
     expect(page).toContain("<SeriesForm");
-    expect(page).toContain("h-52 overflow-y-auto");
-    expect(page).toContain("Sin actividad reciente");
+    expect(page).not.toContain("ACCIONES RÁPIDAS");
+    expect(page).not.toContain("Sin actividad reciente");
     expect(page).not.toContain("proyección actual");
-    expect(page).toContain("<List aria-hidden");
+    expect(page).toContain("minmax(0,1fr)_minmax(380px,420px)");
+    expect(page).toContain("xl:items-stretch");
+    expect(page).toContain("xl:col-span-2");
   });
 
-  it("reserves a metrics placeholder without inventing values", () => {
+  it("shows the persisted binding in a bounded detail panel without fake metrics", () => {
     const markup = renderToStaticMarkup(
       <SeriesDetailPanel
         series={series}
@@ -72,9 +76,9 @@ describe("Series management presentation", () => {
       />,
     );
 
-    expect(markup).toContain("Métricas");
-    expect(markup).toContain("Muy pronto");
-    expect(markup).toContain("Disponible en una próxima versión.");
+    expect(markup).not.toContain("Métricas");
+    expect(markup).toContain("h-24 overflow-y-auto");
+    expect(markup).toContain("shrink-0");
     expect(markup).not.toContain("12,450");
     expect(markup).toContain("Canal Discord");
     expect(markup).toContain("#serie-raven");
@@ -89,7 +93,7 @@ describe("Series management presentation", () => {
     expect(page).toContain("didInitializeSelection");
     expect(page).toContain("listQuery.data.find((series) => series.id)?.id");
     expect(page).toContain("setSelectedSeriesId(initialSeriesId)");
-    expect(page).toContain("selectedSeriesId}/chapters");
+    expect(page).toContain("<SeriesDetailPanel");
   });
 
   it("keeps slug backend-owned in the Series form", () => {
@@ -104,6 +108,7 @@ describe("Series management presentation", () => {
     const gestor = renderToStaticMarkup(
       <SeriesForm
         requiresDiscordChannel
+        initial={{ discordChannelId: "channel-1" }}
         selectableChannels={[{ id: "channel-1", name: "series-manga" }]}
         onSubmit={async () => undefined}
       />,
@@ -122,6 +127,7 @@ describe("Series management presentation", () => {
       <SeriesList
         items={[{ ...series }]}
         selectedId="series-1"
+        minTableHeightClassName="lg:min-h-[640px]"
         onSelect={() => undefined}
       />,
     );
@@ -131,9 +137,11 @@ describe("Series management presentation", () => {
     expect(markup).toContain("Estado");
     expect(markup).toContain("Capítulos");
     expect(markup).toContain("Imágenes");
+    expect(markup).toContain(">4</td>");
+    expect(markup).toContain(">72</td>");
     expect(markup).toContain("Última actualización");
     expect(markup).toContain("Responsable");
-    expect(markup).toContain("Acciones");
+    expect(markup).not.toContain("Acciones");
     expect(markup).toContain("Activa");
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('role="button"');
@@ -141,12 +149,19 @@ describe("Series management presentation", () => {
     expect(markup).toContain("line-clamp-2");
     expect(markup).toContain("max-w-[18rem] truncate");
     expect(markup).toContain("min-w-[14rem]");
+    expect(markup).toContain('data-table-filler="true"');
     expect(
       readFileSync(
         "apps/web/components/domains/series/series-list.tsx",
         "utf8",
       ),
     ).toContain("hover:bg-surface-elevated");
+    expect(
+      readFileSync(
+        "apps/web/components/domains/series/series-list.tsx",
+        "utf8",
+      ),
+    ).not.toContain("Dato no disponible en la proyección actual");
   });
 
   it("uses contextual capabilities for detail actions and Chapters navigation", () => {
@@ -176,7 +191,8 @@ describe("Series management presentation", () => {
     expect(markup).toContain("Editar serie");
     expect(markup).toContain("Eliminar serie");
     expect(markup).toContain("uploader@example.com");
-    expect(markup).toContain("Copiar slug");
+    expect(markup).not.toContain("Copiar slug");
+    expect(markup).toContain("raven");
     expect(markup).toContain("Cambiar responsable");
     expect(markup).toContain('href="/series/series-1/chapters"');
   });

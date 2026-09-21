@@ -1,6 +1,7 @@
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, desc, eq, ilike, lt, or } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
+  series,
   seriesCreationGrants,
   users,
 } from "../../../../../../database/schema/index.js";
@@ -9,7 +10,7 @@ import type { AuthorizationContext } from "../../authorization/domain/authorizat
 import { PERMISSIONS } from "../../authorization/domain/permissions.js";
 import type { GrantStatus } from "./discord-gateway.service.js";
 
-type Cursor = { issuedAt: string; id: string };
+type Cursor = { issuedAt: string; id: string; query: string };
 
 export class DiscordGrantAdministrationForbiddenError extends Error {}
 export class DiscordGrantAdministrationValidationError extends Error {}
@@ -25,6 +26,7 @@ export class ListSeriesCreationGrantsForAdministrationService {
     input: {
       status?: GrantStatus | undefined;
       targetUserId?: string | undefined;
+      search?: string | undefined;
       cursor?: string | undefined;
       limit: number;
     },
@@ -34,11 +36,26 @@ export class ListSeriesCreationGrantsForAdministrationService {
       PERMISSIONS.DISCORD_SERIES_GRANT_READ,
     );
     if (!decision.allowed) throw new DiscordGrantAdministrationForbiddenError();
+    const querySignature = JSON.stringify({
+      status: input.status ?? null,
+      targetUserId: input.targetUserId ?? null,
+      search: input.search ?? null,
+    });
     const cursor = input.cursor ? decodeCursor(input.cursor) : undefined;
+    if (cursor && cursor.query !== querySignature)
+      throw new DiscordGrantAdministrationValidationError();
     const where = [
       ...(input.status ? [eq(seriesCreationGrants.status, input.status)] : []),
       ...(input.targetUserId
         ? [eq(seriesCreationGrants.targetUserId, input.targetUserId)]
+        : []),
+      ...(input.search
+        ? [
+            or(
+              ilike(seriesCreationGrants.displayCode, `%${input.search}%`),
+              ilike(seriesCreationGrants.reference, `%${input.search}%`),
+            ),
+          ]
         : []),
       ...(cursor
         ? [
@@ -59,11 +76,16 @@ export class ListSeriesCreationGrantsForAdministrationService {
         reference: seriesCreationGrants.reference,
         status: seriesCreationGrants.status,
         issuedAt: seriesCreationGrants.issuedAt,
+        consumedAt: seriesCreationGrants.consumedAt,
+        createdSeriesId: series.id,
+        createdSeriesTitle: series.title,
+        createdSeriesSlug: series.slug,
         targetUserId: users.id,
         targetDisplayName: users.email,
       })
       .from(seriesCreationGrants)
       .innerJoin(users, eq(users.id, seriesCreationGrants.targetUserId))
+      .leftJoin(series, eq(series.id, seriesCreationGrants.consumedBySeriesId))
       .where(where.length ? and(...where) : undefined)
       .orderBy(
         desc(seriesCreationGrants.issuedAt),
@@ -79,6 +101,14 @@ export class ListSeriesCreationGrantsForAdministrationService {
         reference: row.reference,
         status: row.status,
         issuedAt: row.issuedAt.toISOString(),
+        consumedAt: row.consumedAt?.toISOString() ?? null,
+        createdSeries: row.createdSeriesId
+          ? {
+              id: row.createdSeriesId,
+              title: row.createdSeriesTitle ?? "",
+              slug: row.createdSeriesSlug ?? "",
+            }
+          : null,
         targetUser: {
           id: row.targetUserId,
           displayName: row.targetDisplayName,
@@ -86,7 +116,11 @@ export class ListSeriesCreationGrantsForAdministrationService {
       })),
       nextCursor:
         rows.length > input.limit && last
-          ? encodeCursor({ issuedAt: last.issuedAt.toISOString(), id: last.id })
+          ? encodeCursor({
+              issuedAt: last.issuedAt.toISOString(),
+              id: last.id,
+              query: querySignature,
+            })
           : null,
     };
   }
@@ -102,10 +136,11 @@ function decodeCursor(value: string): Cursor {
     if (
       typeof parsed?.issuedAt !== "string" ||
       Number.isNaN(new Date(parsed.issuedAt).getTime()) ||
-      typeof parsed?.id !== "string"
+      typeof parsed?.id !== "string" ||
+      typeof parsed?.query !== "string"
     )
       throw new Error("invalid cursor");
-    return { issuedAt: parsed.issuedAt, id: parsed.id };
+    return { issuedAt: parsed.issuedAt, id: parsed.id, query: parsed.query };
   } catch {
     throw new DiscordGrantAdministrationValidationError();
   }

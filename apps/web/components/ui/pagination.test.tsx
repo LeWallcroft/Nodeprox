@@ -26,7 +26,8 @@ describe("shared table pagination", () => {
     );
 
     expect(markup).toContain('data-paginated-table-viewport="fixed"');
-    expect(markup).toContain('class="w-full min-w-[640px] border-collapse"');
+    expect(markup).toContain('aria-label="Resultados"');
+    expect(markup).toContain("overflow-x-auto");
     expect(markup).toContain('data-row="result"');
     expect(markup).not.toContain("h-full");
   });

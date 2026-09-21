@@ -1,6 +1,7 @@
 export type ConfirmDiscordLinkInput = {
   code: string;
   discordId: string;
+  discordUsername: string;
   guildId: string;
   channelId: string;
   interactionId: string;

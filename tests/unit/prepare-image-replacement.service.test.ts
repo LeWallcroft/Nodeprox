@@ -57,6 +57,17 @@ function subject(options?: {
       markCompleted: vi.fn(),
       markFailed: vi.fn(),
     },
+    {
+      findCandidateContext: vi.fn(async () => ({
+        chapterId: options?.chapterId ?? image.chapterId,
+        currentStorageKey: image.storageKey,
+        currentContentType: image.contentType,
+        currentVersion: 1,
+        logicalFilename: "00.jpg",
+      })),
+      withLockedImage: vi.fn(),
+      enqueueOrphanCleanup: vi.fn(),
+    },
     options?.max ?? 100,
   );
   return { service, create };
@@ -82,10 +93,8 @@ describe("PrepareImageReplacementService", () => {
       sizeBytes: 10,
     });
     expect(first.replacementId).not.toBe(second.replacementId);
-    expect(first.candidateStorageKey).not.toBe(second.candidateStorageKey);
-    expect(first.candidateStorageKey).toContain(first.replacementId);
-    expect(first.candidateStorageKey).toMatch(/^Media\/series\/1\//);
-    expect(first.candidateStorageKey).not.toMatch(/_v\d+(?:\.|$)/);
+    expect(first.candidateStorageKey).toBe("Media/series/1/00_v2.jpg");
+    expect(second.candidateStorageKey).toBe("Media/series/1/00_v2.png");
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0]?.[0]).toMatchObject({
       status: "pending_upload",

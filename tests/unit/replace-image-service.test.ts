@@ -47,6 +47,8 @@ function repository(
       chapterId: tx.image.chapterId,
       currentStorageKey: tx.image.current.storageKey,
       currentContentType: tx.image.current.contentType,
+      currentVersion: tx.image.current.version,
+      logicalFilename: tx.image.logicalFilename,
     })),
     withLockedImage: vi.fn(async (_id, work) => work(tx)),
     enqueueOrphanCleanup: vi.fn(async () => undefined),
@@ -107,8 +109,7 @@ describe("ReplaceImageService", () => {
       const result = await service(repo, objectStorage).execute(input());
 
       expect(result).toMatchObject({ imageId, version: to });
-      expect(result.filename).toMatch(/^[0-9a-f-]{36}-[0-9a-f-]{36}\.jpg$/);
-      expect(result.filename).not.toMatch(/_v\d+(?:\.|$)/);
+      expect(result.filename).toBe(`00_v${to}.jpg`);
       expect(result.publicUrl).toBe(
         `https://media.nodeprox.org/raven/1-5/${result.filename}`,
       );
@@ -168,9 +169,9 @@ describe("ReplaceImageService", () => {
       imageId,
       versionId: "version-2",
       version: 2,
-      filename: "opaque.jpg",
-      storageKey: "Media/raven/1-5/opaque.jpg",
-      publicUrl: "https://media.nodeprox.org/raven/1-5/opaque.jpg",
+      filename: "00_v2.jpg",
+      storageKey: "Media/raven/1-5/00_v2.jpg",
+      publicUrl: "https://media.nodeprox.org/raven/1-5/00_v2.jpg",
     };
     const activator = {
       execute: vi.fn(async () => {
@@ -187,7 +188,7 @@ describe("ReplaceImageService", () => {
     expect(activator.execute).toHaveBeenCalledOnce();
     const putKey = vi.mocked(objectStorage.put).mock.calls[0]?.[0].key;
     expect(putKey).toMatch(/^Media\/raven\/1-5\//);
-    expect(putKey).not.toMatch(/_v2(?:\.|$)/);
+    expect(putKey).toBe("Media/raven/1-5/00_v2.jpg");
     expect(activator.execute).toHaveBeenCalledWith(
       expect.objectContaining({
         candidateStorageKey: putKey,
@@ -238,7 +239,7 @@ describe("ReplaceImageService", () => {
     ).rejects.toThrow("db-cutover-failed");
     const orphanKey = vi.mocked(objectStorage.delete).mock.calls[0]?.[0];
     expect(orphanKey).toMatch(/^Media\/raven\/1-5\//);
-    expect(orphanKey).not.toMatch(/_v2(?:\.|$)/);
+    expect(orphanKey).toBe("Media/raven/1-5/00_v2.jpg");
     expect(objectStorage.delete).not.toHaveBeenCalledWith(
       "Media/raven/1-5/00.jpg",
     );
@@ -259,6 +260,6 @@ describe("ReplaceImageService", () => {
     const cleanup = vi.mocked(repo.enqueueOrphanCleanup).mock.calls[0]?.[0];
     expect(cleanup).toMatchObject({ imageId });
     expect(cleanup?.storageKey).toMatch(/^Media\/raven\/1-5\//);
-    expect(cleanup?.storageKey).not.toMatch(/_v2(?:\.|$)/);
+    expect(cleanup?.storageKey).toBe("Media/raven/1-5/00_v2.jpg");
   });
 });

@@ -16,7 +16,7 @@ export function AppShell({
 }) {
   return (
     <UploadQueueProvider>
-      <div className="flex h-dvh overflow-hidden bg-background">
+      <div className="dashboard-theme flex h-dvh overflow-hidden bg-background">
         <Sidebar capabilities={capabilities} />
         <div className="flex h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           <Topbar user={user} />

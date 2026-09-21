@@ -13,23 +13,23 @@ const source = readFileSync(
 describe("Discord link-code section", () => {
   it("renders the generation action and Discord instructions", () => {
     expect(source).toContain("Vincular Discord");
-    expect(source).toContain("Código de vinculación");
+    expect(source).toContain("Copia el código");
     expect(source).toContain("/vincular codigo:");
     expect(source).toContain("expiresAt");
     expect(source).toContain("CopyButton");
   });
 
   it("prevents duplicate generation while loading", () => {
-    expect(source).toContain("disabled={generate.isPending}");
-    expect(source).toContain("Generando código…");
+    expect(source).toContain("loading={generate.isPending && !dialogOpen}");
+    expect(source).toContain("loading={loading}");
   });
 
-  it("does not add manual Discord identity or persistent code storage", () => {
-    expect(source).not.toMatch(/discordId|discord_id/);
+  it("renders read-only linked identity details without persistent code storage", () => {
+    expect(source).toContain("linkedStatus.discordId");
+    expect(source).toContain("linkedStatus.discordUsername");
     expect(source).not.toContain("localStorage");
     expect(source).not.toContain("sessionStorage");
     expect(source).not.toContain("window.location");
     expect(source).not.toContain("Desvincular");
-    expect(source).not.toContain("localStorage");
   });
 });

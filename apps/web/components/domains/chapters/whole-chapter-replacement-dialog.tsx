@@ -55,8 +55,8 @@ export function WholeChapterReplacementDialog({
     <AppDialog
       open={open}
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
-      title="Cambiar capítulo entero"
-      description={`Capítulo ${chapterNumber} · ${seriesTitle}`}
+      title="Cambiar capítulo"
+      description={`Reemplaza las imágenes de Capítulo ${chapterNumber} · ${seriesTitle}`}
       size="lg"
       footer={
         <div className="flex justify-end gap-2">
@@ -85,7 +85,7 @@ export function WholeChapterReplacementDialog({
       }
     >
       <div className="grid gap-4">
-        <div className="rounded-control border border-warning/50 bg-warning-soft p-3 text-sm text-text">
+        <section className="rounded-control border border-[var(--border-subtle)] bg-warning-soft p-4 text-sm text-text">
           <p className="m-0 font-medium">
             El nuevo ZIP sustituirá todas las imágenes actuales del capítulo.
           </p>
@@ -97,15 +97,24 @@ export function WholeChapterReplacementDialog({
             Si contiene menos imágenes, las imágenes sobrantes actuales dejarán
             de formar parte del capítulo publicado.
           </p>
-        </div>
+        </section>
 
         {workflow.phase !== "completed" ? (
-          <ZipDropzone
-            mode="single"
-            disabled={active}
-            selectedFiles={file ? [file] : []}
-            onFilesSelected={selectFile}
-          />
+          <section className="grid gap-2 rounded-control border border-border bg-surface p-3">
+            <div>
+              <h3 className="m-0 text-sm font-semibold">Nuevo ZIP</h3>
+              <p className="mb-0 mt-1 text-xs text-muted">
+                Arrastra o selecciona el archivo que reemplazará las imágenes
+                actuales.
+              </p>
+            </div>
+            <ZipDropzone
+              mode="single"
+              disabled={active}
+              selectedFiles={file ? [file] : []}
+              onFilesSelected={selectFile}
+            />
+          </section>
         ) : null}
 
         {active ? (

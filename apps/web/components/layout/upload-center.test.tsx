@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isActiveItem, isReadyBatch } from "./upload-center";
+import {
+  errorLabel,
+  isActiveItem,
+  isReadyBatch,
+  isRetryableImportFailure,
+  requiresChapterReplacement,
+} from "./upload-center";
 
 describe("Upload Center presentation", () => {
   it("only treats a fully ready persisted batch as dismissible", () => {
@@ -40,6 +46,14 @@ describe("Upload Center presentation", () => {
     expect(isActiveItem("failed")).toBe(false);
   });
 
+  it("explains persisted Chapter conflicts and does not offer a misleading retry", () => {
+    expect(errorLabel("chapter-media-exists")).toContain("Cambiar capítulo");
+    expect(requiresChapterReplacement("chapter-media-exists")).toBe(true);
+    expect(isRetryableImportFailure("chapter-media-exists")).toBe(false);
+    expect(isRetryableImportFailure("chapter-ready")).toBe(false);
+    expect(isRetryableImportFailure("upload-initiation-failed")).toBe(true);
+  });
+
   it("uses local dismissal and queue-only refresh without deletion", () => {
     const center = readFileSync(
       "apps/web/components/layout/upload-center.tsx",
@@ -52,7 +66,12 @@ describe("Upload Center presentation", () => {
 
     expect(center).toContain("dismissedCompletedBatchIds");
     expect(center).toContain("Limpiar completadas");
-    expect(center).toContain("No hay cargas activas");
+    expect(center).toContain("No hay cargas en progreso");
+    expect(center).toContain("Seguimiento de cargas en segundo plano.");
+    expect(center).toContain('role="tablist"');
+    expect(center).toContain("h-[min(44rem,calc(100dvh-7rem))]");
+    expect(center).not.toContain("border-primary/35");
+    expect(center).not.toContain("border-dashed");
     expect(center).not.toContain("DELETE");
     expect(provider).toContain("refresh(): Promise<void>");
     expect(provider).toContain(

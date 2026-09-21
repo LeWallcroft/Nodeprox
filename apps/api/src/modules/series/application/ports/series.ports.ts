@@ -7,6 +7,16 @@ import type {
   SeriesResponsibleUser,
 } from "../../domain/series.types.js";
 
+/**
+ * Read-model projection for collection views. These aggregates deliberately do
+ * not belong to the Series domain entity: they are computed by persistence for
+ * the collection query.
+ */
+export type SeriesListProjection = SeriesRecord & {
+  chapterCount: number;
+  imageCount: number;
+};
+
 export interface SeriesRepositoryPort {
   createWithCreationPolicy(input: {
     title: string;
@@ -33,8 +43,8 @@ export interface SeriesRepositoryPort {
   >;
   isDiscordChannelBound?(discordChannelId: string): Promise<boolean>;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
-  listAll(): Promise<SeriesRecord[]>;
-  listWithHelperAccess(userId: string): Promise<SeriesRecord[]>;
+  listAll(): Promise<SeriesListProjection[]>;
+  listWithHelperAccess(userId: string): Promise<SeriesListProjection[]>;
   hasHelperAccess(seriesId: string, userId: string): Promise<boolean>;
   findById(id: string): Promise<SeriesRecord | null>;
   update(
@@ -98,6 +108,19 @@ export interface SeriesMutationBoundaryPort {
     seriesId: string;
     responsibleUserId: string;
   }): Promise<{ outcome: "assigned" } | SeriesMutationFailure>;
+  replaceUserAssignmentsIfAuthorized(input: {
+    actor: AuthorizationContext;
+    responsibleUserId: string;
+    seriesIds: readonly string[];
+  }): Promise<
+    | {
+        outcome: "replaced";
+        assigned: number;
+        released: number;
+        unchanged: number;
+      }
+    | SeriesMutationFailure
+  >;
 }
 
 export interface ChapterCoreRepositoryPort {
@@ -107,12 +130,12 @@ export interface ChapterCoreRepositoryPort {
     title?: string | null | undefined;
     createdBy: string;
   }): Promise<ChapterCoreRecord>;
-  listBySeries(seriesId: string): Promise<ChapterCoreRecord[]>;
+  listBySeries(seriesId: string): Promise<ChapterListProjection[]>;
   listBySeriesVisibleForActor(input: {
     seriesId: string;
     userId: string;
     role: Role;
-  }): Promise<ChapterCoreRecord[]>;
+  }): Promise<ChapterListProjection[]>;
   listVisibleForActor(input: { userId: string; role: Role }): Promise<
     Array<
       ChapterCoreRecord & {
@@ -122,6 +145,12 @@ export interface ChapterCoreRepositoryPort {
           slug: string;
           coverUrl: string | null;
         };
+        imageCount: number;
+        responsibleUser: {
+          id: string;
+          email: string;
+          role: Role;
+        } | null;
       }
     >
   >;
@@ -136,3 +165,8 @@ export interface ChapterCoreRepositoryPort {
   delete(id: string): Promise<void>;
   isAssigned?(seriesId: string, responsibleUserId: string): Promise<boolean>;
 }
+
+/** Read-model metadata for a chapter already visible to the caller. */
+export type ChapterListProjection = ChapterCoreRecord & {
+  imageCount: number;
+};

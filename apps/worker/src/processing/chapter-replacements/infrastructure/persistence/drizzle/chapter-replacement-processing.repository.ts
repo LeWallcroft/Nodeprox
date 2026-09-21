@@ -1,9 +1,12 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterReplacementItems,
   chapterReplacementOperations,
   chapters,
+  domainEventOutbox,
+  images,
+  imageVersions,
   series,
   storageCleanupOutbox,
 } from "../../../../../../../../database/schema/index.js";
@@ -48,6 +51,29 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .limit(1)
         .for("update");
       if (!operation) return { outcome: "not-found" as const };
+      const initialVersion = aliasedTable(imageVersions, "initial_image_version");
+      const activeImages = await tx
+        .select({
+          sortOrder: images.sortOrder,
+          logicalFilename: initialVersion.physicalFilename,
+          currentVersion: imageVersions.version,
+        })
+        .from(images)
+        .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
+        .innerJoin(
+          initialVersion,
+          and(
+            eq(initialVersion.imageId, images.id),
+            eq(initialVersion.version, 1),
+          ),
+        )
+        .where(
+          and(
+            eq(images.chapterId, operation.chapterId),
+            isNull(images.retiredAt),
+          ),
+        )
+        .orderBy(asc(images.sortOrder));
       if (
         operation.status === "ready" ||
         operation.status === "completing" ||
@@ -80,6 +106,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           seriesSlug: operation.seriesSlug,
           chapterPublicKey: operation.chapterPublicKey,
           status: "processing" as const,
+          activeImages,
         },
       };
     });
@@ -168,6 +195,8 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .select({
           id: chapterReplacementOperations.id,
           status: chapterReplacementOperations.status,
+          requestedByUserId: chapterReplacementOperations.requestedByUserId,
+          chapterId: chapterReplacementOperations.chapterId,
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
         })
         .from(chapterReplacementOperations)
@@ -198,6 +227,16 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         )
         .returning({ id: chapterReplacementOperations.id });
       if (!ready) return false;
+      await tx.insert(domainEventOutbox).values({
+        eventType: "chapter.replacement.ready",
+        aggregateType: "chapter_replacement",
+        aggregateId: replacementId,
+        actorUserId: operation.requestedByUserId,
+        payload: {
+          targetUserId: operation.requestedByUserId,
+          chapterId: operation.chapterId,
+        },
+      });
       await tx
         .insert(storageCleanupOutbox)
         .values({
@@ -216,6 +255,8 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .select({
           id: chapterReplacementOperations.id,
           status: chapterReplacementOperations.status,
+          requestedByUserId: chapterReplacementOperations.requestedByUserId,
+          chapterId: chapterReplacementOperations.chapterId,
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
         })
         .from(chapterReplacementOperations)
@@ -244,6 +285,18 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         )
         .returning({ id: chapterReplacementOperations.id });
       if (!failed) return false;
+      await tx.insert(domainEventOutbox).values({
+        eventType: "upload.failed",
+        aggregateType: "chapter_replacement",
+        aggregateId: replacementId,
+        actorUserId: operation.requestedByUserId,
+        payload: {
+          targetUserId: operation.requestedByUserId,
+          chapterId: operation.chapterId,
+          operationKind: "chapter_replacement",
+          errorCode,
+        },
+      });
       await tx
         .insert(storageCleanupOutbox)
         .values([

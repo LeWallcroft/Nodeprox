@@ -61,7 +61,7 @@ export interface UploadAuditPort {
     action: string;
     resourceType: string;
     resourceId?: string;
-    result?: "success" | "rejected" | "failed";
+    result?: "success" | "rejected" | "failed" | null;
     reasonCode?: string;
     requestId?: string;
     metadata?: Record<string, unknown>;

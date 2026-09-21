@@ -70,7 +70,7 @@ export async function createReadyReplacement(
   db: NodeProxDatabase,
   chapter: Awaited<ReturnType<typeof createReplacementChapter>>,
   imageCount: number,
-  options: { sortOrders?: readonly number[] } = {},
+  options: { sortOrders?: readonly number[]; retainedVersion?: number } = {},
 ) {
   const replacementId = randomUUID();
   await db.insert(chapterReplacementOperations).values({
@@ -88,14 +88,23 @@ export async function createReadyReplacement(
   if (imageCount > 0)
     await db.insert(chapterReplacementItems).values(
       itemIds.map((id, index) => {
-        const physicalFilename = `${replacementId}-${id}.jpg`;
+        const retainedImageId = chapter.imageIds[index];
+        const logicalFilename = retainedImageId
+          ? `old-${retainedImageId}.jpg`
+          : `page-${index + 1}.jpg`;
+        const physicalFilename = retainedImageId
+          ? logicalFilename.replace(
+              /\.jpg$/,
+              `_v${options.retainedVersion ?? 2}.jpg`,
+            )
+          : logicalFilename;
         return {
           id,
           operationId: replacementId,
           sortOrder: options.sortOrders?.[index] ?? index + 1,
           candidateStorageKey: `Media/${chapter.seriesSlug}/${chapter.chapterPublicKey}/${physicalFilename}`,
           physicalFilename,
-          originalFilename: `page-${index + 1}.jpg`,
+          originalFilename: logicalFilename,
           contentType: "image/jpeg",
           sizeBytes: 200 + index,
           checksum: `candidate-checksum-${id}`,

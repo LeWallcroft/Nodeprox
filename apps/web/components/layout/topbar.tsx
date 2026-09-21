@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { Menu } from "lucide-react";
 import type { AuthenticatedUserView } from "../../lib/api/types";
 import { NotificationBell } from "../domains/notifications/notification-bell";
 import { UserMenu } from "./user-menu";
@@ -27,7 +28,7 @@ export function Topbar({
           onClick={openMobileNavigation}
           aria-label="Abrir navegación"
         >
-          ☰
+          <Menu aria-hidden="true" className="size-4" />
         </button>
         <span className="text-[11px] font-medium uppercase tracking-[0.1em] text-muted">
           {context}

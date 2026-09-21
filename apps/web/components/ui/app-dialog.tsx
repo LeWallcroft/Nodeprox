@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef } from "react";
 
 const focusable = [
   "button:not([disabled])",
@@ -33,8 +33,10 @@ export function AppDialog({
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
+  const onOpenChangeRef = useRef(onOpenChange);
   const titleId = useId();
   const descriptionId = useId();
+  onOpenChangeRef.current = onOpenChange;
 
   useEffect(() => {
     if (!open) return;
@@ -48,7 +50,7 @@ export function AppDialog({
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape" && !busy) {
         event.preventDefault();
-        onOpenChange(false);
+        onOpenChangeRef.current(false);
         return;
       }
       if (event.key !== "Tab") return;
@@ -75,7 +77,7 @@ export function AppDialog({
       window.removeEventListener("keydown", onKeyDown);
       previousFocus.current?.focus();
     };
-  }, [busy, onOpenChange, open]);
+  }, [busy, open]);
 
   if (!open) return null;
   const width = {
@@ -97,11 +99,11 @@ export function AppDialog({
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className={`relative z-10 flex max-h-[calc(100dvh-2rem)] w-full ${width} flex-col overflow-hidden rounded-panel border border-border bg-surface-elevated shadow-panel sm:max-h-[calc(100dvh-3rem)]`}
+        className={`relative z-10 flex max-h-[calc(100dvh-2rem)] w-full ${width} flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel sm:max-h-[calc(100dvh-3rem)]`}
         ref={panelRef}
         role="dialog"
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-border px-5 py-4">
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
           <div>
             <h2 id={titleId} className="m-0 text-xl font-semibold">
               {title}
@@ -114,7 +116,7 @@ export function AppDialog({
           </div>
           <button
             aria-label="Cerrar diálogo"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-control border border-border bg-surface text-secondary hover:bg-surface-hover hover:text-text"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface text-secondary hover:bg-surface-hover hover:text-text"
             disabled={busy}
             type="button"
             onClick={() => onOpenChange(false)}
@@ -122,9 +124,11 @@ export function AppDialog({
             <X aria-hidden="true" className="size-4" />
           </button>
         </header>
-        <div className="min-h-0 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4">
+          {children}
+        </div>
         {footer ? (
-          <footer className="shrink-0 border-t border-border px-5 py-4">
+          <footer className="shrink-0 border-t border-[var(--border-subtle)] px-5 py-4">
             {footer}
           </footer>
         ) : null}

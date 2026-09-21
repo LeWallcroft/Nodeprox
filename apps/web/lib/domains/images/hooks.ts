@@ -19,12 +19,11 @@ type ActiveImageReplacementPhase = Exclude<
  * Table, selected-image panel, vertical viewer, and quick-images dialog all
  * consume this single Chapter-scoped public projection.
  */
-export function refreshChapterImageProjections(
+export function refreshImageReplacementQueue(
   queryClient: Pick<QueryClient, "invalidateQueries">,
-  chapterId: string,
 ) {
   return queryClient.invalidateQueries({
-    queryKey: queryKeys.publication.chapter(chapterId),
+    queryKey: queryKeys.uploads.operations,
   });
 }
 
@@ -53,11 +52,10 @@ export function useReplaceChapterImage() {
       setFailurePhase(activePhase.current);
       setPhase("error");
     },
-    onSuccess: (_result, input) => {
-      // A refetch failure does not undo a completed server-side replacement.
-      void refreshChapterImageProjections(queryClient, input.chapterId).catch(
-        () => undefined,
-      );
+    onSuccess: () => {
+      // The API accepted durable background work; publication is refreshed
+      // when the global operation projection reaches a terminal state.
+      void refreshImageReplacementQueue(queryClient).catch(() => undefined);
       setPhase("success");
     },
   });

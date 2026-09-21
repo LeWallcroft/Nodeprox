@@ -22,22 +22,35 @@ export function DataTable({
   children,
   label = "Datos",
   minHeightClassName,
+  fillRemainingSpace = false,
+  tableClassName,
 }: {
   children: ReactNode;
   label?: string;
   minHeightClassName?: string;
+  fillRemainingSpace?: boolean;
+  tableClassName?: string;
 }) {
   return (
     <div
-      className={`overflow-x-auto rounded-panel border border-border bg-surface shadow-card ${minHeightClassName ?? ""}`}
+      className={`flex flex-col overflow-hidden rounded-panel border border-border bg-surface shadow-card ${minHeightClassName ?? ""}`}
       data-paginated-table-viewport={minHeightClassName ? "fixed" : undefined}
     >
-      <table
-        className="w-full min-w-[640px] border-collapse"
-        aria-label={label}
-      >
-        {children}
-      </table>
+      <div className="flex min-h-0 flex-1 flex-col overflow-x-auto [scrollbar-gutter:stable]">
+        <table
+          className={`w-full min-w-[640px] shrink-0 border-collapse ${tableClassName ?? ""}`}
+          aria-label={label}
+        >
+          {children}
+        </table>
+        {fillRemainingSpace ? (
+          <div
+            aria-hidden="true"
+            className="table-filler min-h-0 min-w-[640px] flex-1 bg-surface"
+            data-table-filler="true"
+          />
+        ) : null}
+      </div>
     </div>
   );
 }

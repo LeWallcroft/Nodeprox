@@ -4,6 +4,7 @@ import {
   index,
   inet,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   text,
@@ -42,12 +43,23 @@ export const auditLogs = pgTable(
     requestId: text("request_id"),
     metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
     ipAddress: inet("ip_address"),
+    requestMethod: text("request_method"),
+    requestPath: text("request_path"),
+    durationMs: numeric("duration_ms", { mode: "number" }),
+    clientBrowser: text("client_browser"),
+    clientOperatingSystem: text("client_operating_system"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (table) => [
     index("audit_log_actor_created_at_idx").on(table.actorId, table.createdAt),
+    index("audit_log_created_at_id_idx").on(table.createdAt, table.id),
+    index("audit_log_result_created_at_idx").on(table.result, table.createdAt),
+    index("audit_log_request_id_created_at_idx").on(
+      table.requestId,
+      table.createdAt,
+    ),
     index("audit_log_resource_idx").on(table.resourceType, table.resourceId),
     index("audit_log_request_id_idx").on(table.requestId),
   ],

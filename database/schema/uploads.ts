@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   check,
   index,
+  integer,
   pgEnum,
   pgTable,
   text,
@@ -8,9 +10,7 @@ import {
   uniqueIndex,
   uuid,
   varchar,
-  integer,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { users } from "./authentication.js";
 import { chapters } from "./chapters.js";
 

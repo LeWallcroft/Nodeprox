@@ -29,18 +29,39 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (value === "auth/session" || value === "auth/capabilities")
     return method === "GET";
   if (value === "me/discord/link-code") return method === "POST";
+  if (value === "me/discord-link") return method === "GET";
+  if (value === "me/profile") return method === "GET" || method === "PATCH";
+  if (value === "me/preferences") return method === "GET" || method === "PATCH";
+  if (value === "me/password/change") return method === "POST";
+  if (value === "me/sessions") return method === "GET";
+  if (value === "me/sessions/revoke-others") return method === "POST";
+  if (/^me\/sessions\/[^/]+$/.test(value)) return method === "DELETE";
+  if (
+    value === "auth/password-reset/request" ||
+    value === "auth/password-reset/complete"
+  )
+    return method === "POST";
   if (value === "me/discord/series-channels") return method === "GET";
   if (value === "me/series-creation-grants") return method === "GET";
+  if (value === "me/upload-operations") return method === "GET";
   if (value === "me/notifications") return method === "GET";
   if (value === "me/notifications/unread-count") return method === "GET";
   if (/^me\/notifications\/[^/]+\/read$/.test(value)) return method === "PATCH";
   if (value === "me/notifications/read-all") return method === "POST";
-  if (value === "admin/users") return method === "GET";
-  if (value === "admin/audit") return method === "GET";
+  if (
+    value === "admin/users" ||
+    value === "admin/users/lookup" ||
+    value === "admin/users/management"
+  )
+    return method === "GET";
+  if (value === "admin/audit" || value === "admin/audit/export")
+    return method === "GET";
   if (value === "admin/settings") return method === "GET" || method === "PATCH";
   if (value === "admin/discord/authorized-roles")
     return method === "GET" || method === "PUT";
   if (/^admin\/users\/[^/]+$/.test(value)) return method === "PATCH";
+  if (/^admin\/users\/[^/]+\/series-responsibilities$/.test(value))
+    return method === "PUT";
   if (value === "series") return method === "GET" || method === "POST";
   if (/^series\/[^/]+$/.test(value))
     return ["GET", "PATCH", "DELETE"].includes(method);
@@ -48,8 +69,14 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (/^series\/[^/]+\/responsible-candidates$/.test(value))
     return method === "GET";
   if (/^series\/[^/]+\/responsible$/.test(value)) return method === "PUT";
-  if (/^series\/[^/]+\/uploader$/.test(value)) return method === "PUT";
-  if (value === "admin/series-creation-grants") return method === "GET";
+  if (/^series\/[^/]+\/uploader$/.test(value))
+    return ["PUT", "DELETE"].includes(method);
+  if (value === "admin/series-creation-grants")
+    return method === "GET" || method === "POST";
+  if (/^admin\/series-creation-grants\/[^/]+\/invalidate$/.test(value))
+    return method === "POST";
+  if (/^admin\/series-creation-grants\/[^/]+\/history$/.test(value))
+    return method === "GET";
   if (/^series\/[^/]+\/chapters$/.test(value))
     return ["GET", "POST"].includes(method);
   if (/^series\/[^/]+\/import-batches$/.test(value)) return method === "POST";
@@ -77,6 +104,14 @@ function isAllowedRoute(path: string[], method: string): boolean {
   if (/^chapters\/[^/]+\/uploads\/[^/]+\/(complete|abort)$/.test(value))
     return method === "POST";
   if (/^chapters\/[^/]+\/images$/.test(value)) return method === "GET";
+  if (/^chapters\/[^/]+\/images\/[^/]+\/replacement-session$/.test(value))
+    return method === "POST";
+  if (
+    /^chapters\/[^/]+\/images\/[^/]+\/replacements\/[^/]+\/complete$/.test(
+      value,
+    )
+  )
+    return method === "POST";
   if (/^images\/[^/]+$/.test(value)) return method === "GET";
   if (/^images\/[^/]+\/content$/.test(value)) return method === "GET";
   if (/^public\/chapters\/[^/]+$/.test(value)) return method === "GET";

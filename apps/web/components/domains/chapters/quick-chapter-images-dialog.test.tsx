@@ -15,7 +15,7 @@ describe("Quick Chapter Images dialog", () => {
     expect(modal).toContain("/images");
     expect(modal).toContain("Copiar todos los links");
     expect(modal).toContain("Todos los links copiados");
-    expect(modal).toContain("flex flex-nowrap items-center justify-end");
+    expect(modal).toContain("flex flex-wrap items-center justify-end gap-2");
     expect(modal).toContain("publicImageUrlsText(images)");
     expect(modal).toContain('label="Copiar URL"');
     expect(modal).not.toContain("Miniatura");

@@ -1,9 +1,10 @@
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterReplacementOperations,
   chapterReplacementProcessingOutbox,
   chapters,
+  imageReplacementOperations,
 } from "../../../../../../../../database/schema/index.js";
 import type {
   ChapterReplacementProcessingOutboxPort,
@@ -33,6 +34,21 @@ export class DrizzleChapterReplacementProcessingRepository
           .limit(1)
           .for("update");
         if (!chapter) return null;
+        const [activeImageReplacement] = await tx
+          .select({ id: imageReplacementOperations.id })
+          .from(imageReplacementOperations)
+          .where(
+            and(
+              eq(imageReplacementOperations.chapterId, input.chapterId),
+              inArray(imageReplacementOperations.status, [
+                "pending_upload",
+                "uploaded",
+                "completing",
+              ]),
+            ),
+          )
+          .limit(1);
+        if (activeImageReplacement) return null;
         const [operation] = await tx
           .insert(chapterReplacementOperations)
           .values(input)

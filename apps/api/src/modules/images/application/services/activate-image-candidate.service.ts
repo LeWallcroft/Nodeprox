@@ -72,6 +72,7 @@ export class ActivateImageCandidateService {
           await transaction.completeReplacementOperation({
             operationId: input.operationId,
             imageId: transaction.image.id,
+            actorId: input.context.userId,
             resultImageVersionId: cutover.versionId,
             completedAt: input.durableCompletion.completedAt,
           });

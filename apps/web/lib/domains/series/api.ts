@@ -4,6 +4,7 @@ import type {
   Series,
   SeriesCapabilitiesProjection,
   SeriesInput,
+  SeriesListProjection,
   SeriesResponsibleCandidate,
 } from "./types";
 
@@ -14,7 +15,7 @@ export function getSelectableSeriesChannels() {
 }
 
 export function listSeries() {
-  return apiRequestBrowser<Series[]>("/series");
+  return apiRequestBrowser<SeriesListProjection[]>("/series");
 }
 
 export function getSeries(seriesId: string) {

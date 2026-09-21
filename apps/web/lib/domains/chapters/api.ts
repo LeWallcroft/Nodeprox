@@ -6,10 +6,13 @@ import type {
   ChapterInput,
   GlobalChapter,
   HelperCandidate,
+  SeriesChapterListItem,
 } from "./types";
 
 export function listChapters(seriesId: string) {
-  return apiRequestBrowser<Chapter[]>(`/series/${seriesId}/chapters`);
+  return apiRequestBrowser<SeriesChapterListItem[]>(
+    `/series/${seriesId}/chapters`,
+  );
 }
 
 export function listGlobalChapters() {

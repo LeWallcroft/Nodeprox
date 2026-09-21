@@ -16,6 +16,7 @@ describe("NodeProxApiClient", () => {
     await client.confirmLink({
       code: "code",
       discordId: "discord-user",
+      discordUsername: "discord-user",
       actorDiscordId: "discord-user",
       guildId: "guild",
       channelId: "channel",
@@ -47,6 +48,7 @@ describe("NodeProxApiClient", () => {
       client.confirmLink({
         code: "code",
         discordId: "user",
+        discordUsername: "user",
         actorDiscordId: "user",
         guildId: "guild",
         channelId: "channel",

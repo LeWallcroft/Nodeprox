@@ -1,6 +1,11 @@
 "use client";
 
-import { type Query, useQueries, useQueryClient } from "@tanstack/react-query";
+import {
+  type Query,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   createContext,
   type ReactNode,
@@ -36,6 +41,10 @@ import type {
 import { queryKeys } from "../../lib/domains/query-keys";
 import { useProductSettings } from "../../lib/domains/settings/hooks";
 import { putDirectUpload } from "../../lib/domains/uploads/api";
+import {
+  type BackgroundUploadOperation,
+  listBackgroundUploadOperations,
+} from "../../lib/domains/uploads/background-operations";
 
 const STORAGE_KEY = "nodeprox:upload-queue:v1";
 const TRACKED_BATCH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -68,6 +77,7 @@ type QueueCandidate = Pick<
 
 type UploadQueueContextValue = {
   batches: readonly UploadCenterBatch[];
+  operations: readonly BackgroundUploadOperation[];
   activeTransfers: number;
   queuedTransfers: number;
   progressFor(batchId: string, itemId: string): number | undefined;
@@ -109,6 +119,9 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   const previousProjections = useRef<
     Readonly<Record<string, ImportBatchProjection>>
   >({});
+  const previousOperationStatuses = useRef<Readonly<Record<string, string>>>(
+    {},
+  );
 
   const concurrency = useMemo(() => {
     const value = settings.data?.sections
@@ -118,6 +131,25 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       typeof value === "number" ? value : MAX_DIRECT_UPLOAD_CONCURRENCY,
     );
   }, [settings.data]);
+
+  const operationsQuery = useQuery({
+    queryKey: queryKeys.uploads.operations,
+    queryFn: listBackgroundUploadOperations,
+    refetchInterval: (query) =>
+      query.state.data?.items.some((item) =>
+        [
+          "pending",
+          "pending_upload",
+          "uploading",
+          "uploaded",
+          "processing",
+          "completing",
+        ].includes(item.status),
+      )
+        ? 2000
+        : 15000,
+  });
+  const refreshOperations = operationsQuery.refetch;
 
   const batchQueries = useQueries({
     queries: tracked.map((batch) => ({
@@ -159,8 +191,11 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(async () => {
-    await Promise.all(tracked.map((batch) => refreshBatch(batch.batchId)));
-  }, [refreshBatch, tracked]);
+    await Promise.all([
+      ...tracked.map((batch) => refreshBatch(batch.batchId)),
+      refreshOperations(),
+    ]);
+  }, [refreshBatch, refreshOperations, tracked]);
 
   const executeTransfer = useCallback(
     async (job: TransferJob) => {
@@ -243,6 +278,25 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
     }
     previousProjections.current = projections;
   }, [projections, queryClient, tracked]);
+
+  useEffect(() => {
+    const operations = operationsQuery.data?.items ?? [];
+    for (const operation of operations) {
+      const previous = previousOperationStatuses.current[operation.id];
+      if (
+        previous &&
+        previous !== operation.status &&
+        ["ready", "completed", "failed"].includes(operation.status)
+      )
+        void invalidateChapterLifecycle(queryClient, {
+          seriesId: operation.seriesId,
+          chapterId: operation.chapterId,
+        });
+    }
+    previousOperationStatuses.current = Object.fromEntries(
+      operations.map((operation) => [operation.id, operation.status]),
+    );
+  }, [operationsQuery.data, queryClient]);
 
   const track = useCallback((batch: TrackedBatch) => {
     setTracked((current) => {
@@ -363,6 +417,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   const value = useMemo<UploadQueueContextValue>(
     () => ({
       batches,
+      operations: operationsQuery.data?.items ?? [],
       activeTransfers,
       queuedTransfers,
       progressFor: (batchId, itemId) => progress[progressKey(batchId, itemId)],
@@ -376,6 +431,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       abortTransfer,
       activeTransfers,
       batches,
+      operationsQuery.data?.items,
       progress,
       queuedTransfers,
       refreshBatch,

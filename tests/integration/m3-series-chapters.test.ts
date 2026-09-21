@@ -13,12 +13,22 @@ import {
   seriesAssignments,
   users,
 } from "../../database/schema/index.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
-const app = buildApp(
-  { logger: false },
-  { database: database.db, secureCookie: false },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+    },
+  ),
 );
 const password = "m3-test-password";
 const ownerId = randomUUID();
@@ -279,7 +289,7 @@ describe("M3 Series and Chapters Core", () => {
     expect(storedChapter).toEqual({ number: 7, publicKey: "6" });
   });
 
-  it("persists external cover URLs and manages the principal uploader without changing ownership", async () => {
+  it("persists external cover URLs and manages the responsible user without changing ownership", async () => {
     const ownerCookie = await login(emails.owner);
     const otherCookie = await login(emails.other);
     const created = await app.inject({
@@ -298,7 +308,7 @@ describe("M3 Series and Chapters Core", () => {
 
     const candidates = await app.inject({
       method: "GET",
-      url: `/series/${seriesId}/uploader-candidates`,
+      url: `/series/${seriesId}/responsible-candidates`,
       headers: { cookie: ownerCookie },
     });
     expect(candidates.statusCode).toBe(200);
@@ -312,23 +322,23 @@ describe("M3 Series and Chapters Core", () => {
 
     const unauthorized = await app.inject({
       method: "GET",
-      url: `/series/${seriesId}/uploader-candidates`,
+      url: `/series/${seriesId}/responsible-candidates`,
       headers: { cookie: otherCookie },
     });
     expect(unauthorized.statusCode).toBe(403);
 
     const assign = await app.inject({
       method: "PUT",
-      url: `/series/${seriesId}/uploader`,
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: ownerCookie },
-      payload: { uploaderId: helperId },
+      payload: { responsibleUserId: helperId },
     });
     expect(assign.statusCode).toBe(200);
     const reassign = await app.inject({
       method: "PUT",
-      url: `/series/${seriesId}/uploader`,
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: ownerCookie },
-      payload: { uploaderId: uploaderTwoId },
+      payload: { responsibleUserId: uploaderTwoId },
     });
     expect(reassign.statusCode).toBe(200);
     const assignedRead = await app.inject({
@@ -336,18 +346,19 @@ describe("M3 Series and Chapters Core", () => {
       url: `/series/${seriesId}`,
       headers: { cookie: ownerCookie },
     });
-    expect(assignedRead.json().principalUploader).toEqual({
+    expect(assignedRead.json().responsibleUser).toEqual({
       id: uploaderTwoId,
       email: emails.uploaderTwo,
-      discordUsername: null,
+      role: "uploader",
     });
 
-    const clear = await app.inject({
-      method: "DELETE",
-      url: `/series/${seriesId}/uploader`,
+    const returnToOwner = await app.inject({
+      method: "PUT",
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: ownerCookie },
+      payload: { responsibleUserId: ownerId },
     });
-    expect(clear.statusCode).toBe(204);
+    expect(returnToOwner.statusCode).toBe(200);
     const updated = await app.inject({
       method: "PATCH",
       url: `/series/${seriesId}`,

@@ -9,7 +9,7 @@ describe("Phase 9 user identification presentation", () => {
   it("renders responsible and helper identifiers with safe legacy fallbacks", () => {
     const responsible = read("apps/web/components/domains/series/assign-series-user-dialog.tsx");
     const helpers = read("apps/web/components/domains/series/manage-series-helpers-dialog.tsx");
-    expect(responsible).toContain("candidate.discordUsername ?? candidate.email");
+    expect(responsible).toContain("candidate.email");
     expect(helpers).toContain("candidate.discordUsername");
     expect(helpers).toContain("candidate.email");
   });

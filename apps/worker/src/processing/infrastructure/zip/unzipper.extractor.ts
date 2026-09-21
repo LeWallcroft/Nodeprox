@@ -3,17 +3,17 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Transform, type Readable } from "node:stream";
+import { type Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import unzipper from "unzipper";
+import type { ZipExtractorPort } from "../../application/ports.js";
 import {
   contentTypeForMagic,
   dimensionsForHeader,
   mediaWarnings,
-  validateImageName,
   type ValidatedImage,
+  validateImageName,
 } from "../../domain/image-policy.js";
-import type { ZipExtractorPort } from "../../application/ports.js";
 export class UnzipperExtractor implements ZipExtractorPort {
   private tempDir: string | undefined;
   constructor(

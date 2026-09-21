@@ -6,6 +6,7 @@ import {
   auditLogs,
   chapterImportItems,
   chapters,
+  domainEventOutbox,
   images,
   imageVersions,
   series,
@@ -63,6 +64,7 @@ export class DrizzleProcessingRepository
   async replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,
+    requestedByUserId: string,
     records: ImageRecordInput[],
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -112,6 +114,17 @@ export class DrizzleProcessingRepository
         .update(chapterImportItems)
         .set({ status: "ready", errorCode: null, updatedAt: new Date() })
         .where(eq(chapterImportItems.uploadId, uploadId));
+      await tx.insert(domainEventOutbox).values({
+        eventType: "upload.completed",
+        aggregateType: "chapter_upload",
+        aggregateId: uploadId,
+        actorUserId: requestedByUserId,
+        payload: {
+          targetUserId: requestedByUserId,
+          chapterId,
+          operationKind: "chapter_import",
+        },
+      });
     });
   }
   async deleteImages(chapterId: string): Promise<void> {
@@ -121,6 +134,7 @@ export class DrizzleProcessingRepository
     chapterId: string,
     uploadId: string,
     terminal: boolean,
+    requestedByUserId: string,
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx
@@ -140,6 +154,19 @@ export class DrizzleProcessingRepository
           updatedAt: new Date(),
         })
         .where(eq(chapterImportItems.uploadId, uploadId));
+      if (terminal)
+        await tx.insert(domainEventOutbox).values({
+          eventType: "upload.failed",
+          aggregateType: "chapter_upload",
+          aggregateId: uploadId,
+          actorUserId: requestedByUserId,
+          payload: {
+            targetUserId: requestedByUserId,
+            chapterId,
+            operationKind: "chapter_import",
+            errorCode: "processing-failed",
+          },
+        });
     });
   }
   async append(input: {

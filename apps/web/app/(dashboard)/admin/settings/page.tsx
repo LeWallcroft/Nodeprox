@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { DiscordAuthorizationConfiguration } from "../../../../components/domains/discord/discord-authorization-configuration";
+import { MaintenancePanel } from "../../../../components/domains/settings/maintenance-panel";
 import { errorMessage } from "../../../../components/domains/feedback";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { Button } from "../../../../components/ui/button";
@@ -144,6 +145,12 @@ export default function SettingsPage() {
           ) : null}
         </div>
       ) : null}
+      <PageSection
+        title="Mantenimiento"
+        description="Prepara y consulta el estado operativo antes de un despliegue productivo."
+      >
+        <MaintenancePanel />
+      </PageSection>
       <PageSection title="Integraciones">
         <DiscordAuthorizationConfiguration />
       </PageSection>

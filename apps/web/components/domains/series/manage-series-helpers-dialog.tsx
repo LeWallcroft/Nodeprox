@@ -12,6 +12,7 @@ import {
 } from "../../../lib/domains/chapters/hooks";
 import type { Series } from "../../../lib/domains/series/types";
 import { AppDialog } from "../../ui/app-dialog";
+import { SearchableCombobox } from "../../ui/searchable-combobox";
 import { Button } from "../../ui/button";
 
 export function ManageSeriesHelpersDialog({
@@ -38,6 +39,19 @@ export function ManageSeriesHelpersDialog({
 
   return (
     <AppDialog
+      busy={grant.isPending || revoke.isPending}
+      footer={
+        <div className="flex justify-end">
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={grant.isPending || revoke.isPending}
+            onClick={onClose}
+          >
+            Cerrar
+          </Button>
+        </div>
+      }
       open={open}
       onOpenChange={(value) => {
         if (!value) {
@@ -50,47 +64,47 @@ export function ManageSeriesHelpersDialog({
       description={`Serie: ${series.title}`}
     >
       <div className="grid gap-4">
-        <label className="grid gap-1.5 text-sm font-medium text-secondary">
-          Capítulo
-          <select
-            value={chapterId}
-            onChange={(event) => {
-              setChapterId(event.target.value);
-              setUserId("");
-            }}
-          >
-            <option value="">Selecciona un capítulo</option>
-            {(chapters.data ?? []).map((chapter) => (
-              <option key={chapter.id} value={chapter.id}>
-                Capítulo {chapter.chapterNumber}
-                {chapter.title ? ` — ${chapter.title}` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SearchableCombobox
+          id="helper-chapter"
+          label="Capítulo"
+          value={chapterId}
+          options={(chapters.data ?? []).map((chapter) => ({
+            id: chapter.id,
+            label: `Capítulo ${chapter.chapterNumber}${chapter.title ? ` — ${chapter.title}` : ""}`,
+          }))}
+          loading={chapters.isPending}
+          error={
+            chapters.isError
+              ? "No se pudieron cargar los capítulos."
+              : undefined
+          }
+          onRetry={() => void chapters.refetch()}
+          onChange={(id) => {
+            setChapterId(id);
+            setUserId("");
+          }}
+        />
         {chapterId ? (
           <>
-            <label className="grid gap-1.5 text-sm font-medium text-secondary">
-              Colaborador
-              <select
-                value={userId}
-                onChange={(event) => setUserId(event.target.value)}
-                disabled={candidates.isPending}
-              >
-                <option value="">
-                  {candidates.isPending
-                    ? "Cargando candidatos…"
-                    : "Selecciona un colaborador"}
-                </option>
-                {(candidates.data ?? []).map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.discordUsername
-                      ? `${candidate.discordUsername} · ${candidate.email}`
-                      : candidate.email}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SearchableCombobox
+              id="helper-user"
+              label="Colaborador"
+              value={userId}
+              options={(candidates.data ?? []).map((candidate) => ({
+                id: candidate.id,
+                label: candidate.discordUsername
+                  ? `${candidate.discordUsername} · ${candidate.email}`
+                  : candidate.email,
+              }))}
+              loading={candidates.isPending}
+              onChange={setUserId}
+              error={
+                candidates.isError
+                  ? "No se pudieron cargar los candidatos."
+                  : undefined
+              }
+              onRetry={() => void candidates.refetch()}
+            />
             <Button
               type="button"
               disabled={!userId || grant.isPending}

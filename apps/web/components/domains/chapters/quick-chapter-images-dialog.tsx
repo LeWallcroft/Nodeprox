@@ -2,6 +2,7 @@
 
 import { Images } from "lucide-react";
 import Link from "next/link";
+import { ApiError } from "../../../lib/api/types";
 import { usePublicChapter } from "../../../lib/domains/publication/hooks";
 import {
   publicImageUrlsText,
@@ -31,6 +32,11 @@ export function QuickChapterImagesDialog({
 }) {
   const query = usePublicChapter(chapterId, open);
   const images = sortPublicImages(query.data?.images ?? []);
+  const hasNoPublishedImages =
+    (query.isSuccess && images.length === 0) ||
+    (query.isError &&
+      query.error instanceof ApiError &&
+      query.error.status === 404);
   return (
     <AppDialog
       description={`Capítulo ${chapterNumber} · ${seriesTitle}`}
@@ -56,32 +62,56 @@ export function QuickChapterImagesDialog({
       }
     >
       {query.isPending ? <LoadingState label="Cargando imágenes" /> : null}
-      {query.isError ? (
+      {query.isError && !hasNoPublishedImages ? (
         <ErrorState
           title="No se pudieron cargar las imágenes"
           description="La proyección pública no está disponible."
         />
       ) : null}
-      {query.isSuccess && !images.length ? (
-        <p className="m-0 text-sm text-muted">No hay imágenes publicadas.</p>
+      {hasNoPublishedImages ? (
+        <section className="mb-4 rounded-control border border-border bg-surface p-4 text-center">
+          <Images
+            aria-hidden="true"
+            className="mx-auto mb-2 size-6 text-muted"
+          />
+          <p className="m-0 font-medium text-text">
+            Aún no hay imágenes disponibles
+          </p>
+          <p className="mb-0 mt-1 text-sm text-muted">
+            Este capítulo todavía no tiene imágenes para consultar o copiar.
+          </p>
+        </section>
       ) : null}
-      <div className="mb-3 flex flex-nowrap items-center justify-end gap-2">
-        <Link
-          aria-label="Gestionar capítulo"
-          className="inline-flex min-h-control shrink-0 items-center justify-center gap-2 rounded-control border border-primary bg-primary-soft px-3.5 font-medium text-primary transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-          href={`/series/${seriesId}/chapters/${chapterId}/images`}
-          onClick={onClose}
-        >
-          <Images aria-hidden="true" className="size-4" /> Gestionar
-        </Link>
-        <CopyButton
-          className="shrink-0"
-          value={images.length ? publicImageUrlsText(images) : null}
-          label="Copiar todos los links"
-          successLabel="Todos los links copiados"
-          failureMessage="No se pudieron copiar los links."
-        />
-      </div>
+      {!hasNoPublishedImages ? (
+        <section className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-surface p-3">
+          <div>
+            <p className="m-0 text-sm font-medium text-text">
+              Enlaces de imágenes
+            </p>
+            <p className="mb-0 mt-1 text-xs text-muted">
+              Copia un enlace individual o todos los enlaces publicados del
+              capítulo.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Link
+              aria-label="Gestionar capítulo"
+              className="inline-flex min-h-control shrink-0 items-center justify-center gap-2 rounded-control border border-primary bg-primary-soft px-3.5 font-medium text-primary transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+              href={`/series/${seriesId}/chapters/${chapterId}/images`}
+              onClick={onClose}
+            >
+              <Images aria-hidden="true" className="size-4" /> Gestionar
+            </Link>
+            <CopyButton
+              className="shrink-0"
+              value={images.length ? publicImageUrlsText(images) : null}
+              label="Copiar todos los links"
+              successLabel="Todos los links copiados"
+              failureMessage="No se pudieron copiar los links."
+            />
+          </div>
+        </section>
+      ) : null}
       {images.length ? (
         <div className="max-h-[55vh] overflow-auto rounded-control border border-border">
           <table className="w-full min-w-[620px] text-sm">

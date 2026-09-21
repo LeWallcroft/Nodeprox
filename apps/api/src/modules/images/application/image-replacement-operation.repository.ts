@@ -41,7 +41,7 @@ export type ImageReplacementOperationRepository = {
       | "resultImageVersionId"
       | "lastErrorCode"
     >,
-  ): Promise<ImageReplacementOperation>;
+  ): Promise<ImageReplacementOperation | null>;
   findById(id: string): Promise<ImageReplacementOperation | null>;
   markUploaded(
     id: string,

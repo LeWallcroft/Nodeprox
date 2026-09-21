@@ -1,5 +1,5 @@
-import type { ProcessChapterInput } from "@nodeprox/types";
 import type { StoragePort } from "@nodeprox/storage/port";
+import type { ProcessChapterInput } from "@nodeprox/types";
 import { buildPermanentImageStorageKey } from "../domain/image-policy.js";
 import type {
   ProcessingAuditPort,
@@ -63,6 +63,7 @@ export class ChapterProcessingService {
       await this.repository.replaceImagesAndMarkReady(
         input.chapterId,
         input.uploadId,
+        upload.createdBy,
         records,
       );
       published = true;
@@ -97,7 +98,12 @@ export class ChapterProcessingService {
           .delete(input.sourceStorageKey)
           .catch(() => undefined);
       await this.repository
-        .markFailed(input.chapterId, input.uploadId, removeSourceOnFailure)
+        .markFailed(
+          input.chapterId,
+          input.uploadId,
+          removeSourceOnFailure,
+          upload.createdBy,
+        )
         .catch(() => undefined);
       await this.audit
         .append({

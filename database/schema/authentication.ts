@@ -26,6 +26,9 @@ export const users = pgTable(
     discordUsername: varchar("discord_username", { length: 64 }),
     discordId: varchar("discord_id", { length: 32 }),
     discordLinkedAt: timestamp("discord_linked_at", { withTimezone: true }),
+    displayName: varchar("display_name", { length: 120 }),
+    avatarUrl: text("avatar_url"),
+    preferences: jsonb("preferences").$type<Record<string, unknown>>(),
     passwordHash: text("password_hash").notNull(),
     status: varchar("status", { length: 16 }).notNull(),
     role: userRoleEnum("role").notNull().default("uploader"),
@@ -43,6 +46,27 @@ export const users = pgTable(
       "users_status_check",
       sql`${table.status} in ('pending', 'active', 'rejected', 'suspended', 'disabled')`,
     ),
+  ],
+);
+
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("password_reset_tokens_token_hash_unique").on(table.tokenHash),
+    index("password_reset_tokens_user_id_idx").on(table.userId),
+    index("password_reset_tokens_expires_at_idx").on(table.expiresAt),
   ],
 );
 

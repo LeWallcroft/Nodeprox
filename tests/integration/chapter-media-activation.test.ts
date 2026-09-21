@@ -196,11 +196,9 @@ describe("CHR2 atomic whole-Chapter activation", () => {
       database.db,
     ).listByChapterId(target.chapter.chapterId);
     expect(active.map((image) => image.id)).toEqual(target.chapter.imageIds);
-    expect(
-      active.every((image) =>
-        image.filename.includes(target.replacement.replacementId),
-      ),
-    ).toBe(true);
+    expect(active.map((image) => image.filename)).toEqual(
+      target.chapter.imageIds.map((id) => `old-${id}_v2.jpg`),
+    );
   });
 
   it("CHR2-ACT-11 computes result counts server-side", async () => {

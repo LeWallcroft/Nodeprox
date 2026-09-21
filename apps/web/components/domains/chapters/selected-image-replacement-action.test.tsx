@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ImageReplacementFileValidationError } from "../../../lib/domains/images/api";
+import { ApiError } from "../../../lib/api/types";
 import {
   imageReplacementErrorMessage,
   replacementActionLabel,
@@ -75,6 +76,12 @@ describe("SelectedImageReplacementAction", () => {
     expect(imageReplacementErrorMessage(new Error(), "completing")).toBe(
       "No se pudo aplicar el reemplazo de la imagen.",
     );
+    expect(
+      imageReplacementErrorMessage(
+        new ApiError(409, "conflict", "image-replacement-conflict"),
+        "preparing",
+      ),
+    ).toContain("cambio de imagen o de capítulo en curso");
   });
 
   it("submits the selected logical image and never generates storage or version authority", async () => {

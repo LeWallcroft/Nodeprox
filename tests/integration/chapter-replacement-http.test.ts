@@ -162,7 +162,7 @@ async function makeReady(input: {
   publicKey: string;
 }) {
   const itemId = randomUUID();
-  const physicalFilename = `${input.replacementId}-${itemId}.jpg`;
+  const physicalFilename = `${itemId}.jpg`;
   await database.db.insert(chapterReplacementItems).values({
     id: itemId,
     operationId: input.replacementId,

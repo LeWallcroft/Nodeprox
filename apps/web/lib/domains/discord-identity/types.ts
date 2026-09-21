@@ -7,4 +7,9 @@ export type DiscordLinkCodeResponse = {
 export type DiscordLinkStatus =
   | { state: "unlinked" }
   | { state: "pending"; expiresAt: string }
-  | { state: "linked"; linkedAt: string | null };
+  | {
+      state: "linked";
+      discordId: string;
+      discordUsername: string | null;
+      linkedAt: string | null;
+    };

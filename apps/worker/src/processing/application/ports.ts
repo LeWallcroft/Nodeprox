@@ -20,12 +20,14 @@ export interface ProcessingRepositoryPort {
   replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,
+    requestedByUserId: string,
     images: ImageRecordInput[],
   ): Promise<void>;
   markFailed(
     chapterId: string,
     uploadId: string,
     terminal: boolean,
+    requestedByUserId: string,
   ): Promise<void>;
   deleteImages(chapterId: string): Promise<void>;
 }

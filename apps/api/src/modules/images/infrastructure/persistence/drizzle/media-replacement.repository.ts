@@ -1,9 +1,10 @@
 import { sanitizeAuditMetadata } from "@nodeprox/types";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapters,
+  domainEventOutbox,
   imageReplacementOperations,
   images,
   imageVersions,
@@ -22,13 +23,24 @@ export class DrizzleMediaReplacementRepository
   constructor(private readonly db: NodeProxDatabase) {}
 
   async findCandidateContext(imageId: string) {
+    const initialVersion = aliasedTable(imageVersions, "initial_image_version");
     const [row] = await this.db
       .select({
         chapterId: images.chapterId,
         currentStorageKey: images.storageKey,
         currentContentType: images.contentType,
+        currentVersion: imageVersions.version,
+        logicalFilename: initialVersion.physicalFilename,
       })
       .from(images)
+      .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
+      .innerJoin(
+        initialVersion,
+        and(
+          eq(initialVersion.imageId, images.id),
+          eq(initialVersion.version, 1),
+        ),
+      )
       .where(and(eq(images.id, imageId), isNull(images.retiredAt)))
       .limit(1);
     return row ?? null;
@@ -176,7 +188,22 @@ export class DrizzleMediaReplacementRepository
               ),
             )
             .returning({ id: imageReplacementOperations.id });
-          if (completed) return;
+          if (completed) {
+            await tx.insert(domainEventOutbox).values({
+              eventType: "upload.completed",
+              aggregateType: "image_replacement",
+              aggregateId: input.operationId,
+              actorUserId: input.actorId,
+              payload: {
+                targetUserId: input.actorId,
+                imageId: input.imageId,
+                chapterId: row.chapterId,
+                operationKind: "image_replacement",
+              },
+              occurredAt: input.completedAt,
+            });
+            return;
+          }
 
           const [current] = await tx
             .select({

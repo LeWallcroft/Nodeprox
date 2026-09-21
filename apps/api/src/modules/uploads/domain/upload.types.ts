@@ -2,6 +2,7 @@ import type {
   UploadTransferGrant,
   VerifiedUploadedObject,
 } from "@nodeprox/storage/port";
+
 export type { VerifiedUploadedObject as StoredObject };
 
 export type UploadRecord = {

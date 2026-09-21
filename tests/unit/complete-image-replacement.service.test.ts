@@ -3,14 +3,11 @@ import type {
   ImageReplacementOperation,
   ImageReplacementOperationRepository,
 } from "../../apps/api/src/modules/images/application/image-replacement-operation.repository.js";
-import type { ImageVersionResultRepository } from "../../apps/api/src/modules/images/application/image-version-result.repository.js";
 import {
   CompleteImageReplacementService,
   ImageReplacementCompletionDeniedError,
   ImageReplacementCompletionFailedError,
-  ImageReplacementCompletionInProgressError,
   ImageReplacementCompletionInvalidError,
-  ImageReplacementCompletionInvariantError,
   ImageReplacementCompletionNotFoundError,
 } from "../../apps/api/src/modules/images/application/services/complete-image-replacement.service.js";
 import {
@@ -19,7 +16,7 @@ import {
 } from "../../packages/storage/dist/port.js";
 
 const context = { userId: "user-1" } as never;
-const completedAt = new Date("2026-09-03T23:30:00.000Z");
+const queuedAt = new Date("2026-09-03T23:30:00.000Z");
 const operation: ImageReplacementOperation = {
   id: "operation-1",
   imageId: "image-1",
@@ -36,14 +33,6 @@ const operation: ImageReplacementOperation = {
   updatedAt: new Date("2026-09-03T23:00:00.000Z"),
   completedAt: null,
 };
-const activated = {
-  imageId: operation.imageId,
-  versionId: "version-2",
-  version: 2,
-  filename: "opaque.jpg",
-  storageKey: operation.candidateStorageKey,
-  publicUrl: "https://media.example/series/1/opaque.jpg",
-};
 
 function subject(input?: {
   operation?: ImageReplacementOperation | null;
@@ -57,22 +46,13 @@ function subject(input?: {
 }) {
   const initial = input?.operation === undefined ? operation : input.operation;
   const uploaded = initial ? { ...initial, status: "uploaded" as const } : null;
-  const completing = initial
-    ? { ...initial, status: "completing" as const }
-    : null;
   const operations: ImageReplacementOperationRepository = {
     create: vi.fn(),
     findById: vi.fn(async () => initial),
     markUploaded: vi.fn(async () => uploaded),
-    tryBeginCompletion: vi.fn(async () => ({
-      acquired: true,
-      operation: completing,
-    })),
+    tryBeginCompletion: vi.fn(),
     markCompleted: vi.fn(),
     markFailed: vi.fn(),
-  };
-  const versions: ImageVersionResultRepository = {
-    findVersionResultById: vi.fn(async () => activated),
   };
   const transfer: UploadTransferPort = {
     initiate: vi.fn(),
@@ -87,7 +67,6 @@ function subject(input?: {
     ),
     abort: vi.fn(),
   };
-  const activator = { execute: vi.fn(async () => activated) };
   const authorization = {
     check: vi.fn(async () => ({
       allowed: input?.allowed ?? true,
@@ -96,20 +75,11 @@ function subject(input?: {
   };
   const service = new CompleteImageReplacementService(
     operations,
-    versions,
     transfer,
-    activator,
     authorization,
-    () => completedAt,
+    () => queuedAt,
   );
-  return {
-    service,
-    operations,
-    versions,
-    transfer,
-    activator,
-    authorization,
-  };
+  return { service, operations, transfer, authorization };
 }
 
 function execute(service: CompleteImageReplacementService) {
@@ -123,10 +93,15 @@ function execute(service: CompleteImageReplacementService) {
 }
 
 describe("CompleteImageReplacementService", () => {
-  it("verifies, claims, and invokes atomic durable activation", async () => {
+  it("verifies the candidate and queues durable background completion", async () => {
     const target = subject();
 
-    await expect(execute(target.service)).resolves.toEqual(activated);
+    await expect(execute(target.service)).resolves.toEqual({
+      replacementId: operation.id,
+      imageId: operation.imageId,
+      chapterId: operation.chapterId,
+      status: "uploaded",
+    });
     expect(target.authorization.check).toHaveBeenCalledWith({
       context,
       chapterId: operation.chapterId,
@@ -137,67 +112,36 @@ describe("CompleteImageReplacementService", () => {
     });
     expect(target.operations.markUploaded).toHaveBeenCalledWith(
       operation.id,
-      completedAt,
+      queuedAt,
     );
-    expect(target.operations.tryBeginCompletion).toHaveBeenCalledWith(
-      operation.id,
-      completedAt,
-    );
-    expect(target.activator.execute).toHaveBeenCalledOnce();
-    expect(target.activator.execute).toHaveBeenCalledWith({
-      context,
-      imageId: operation.imageId,
-      candidateStorageKey: operation.candidateStorageKey,
-      contentType: operation.contentType,
-      sizeBytes: operation.sizeBytes,
-      checksum: "candidate-etag",
-      operationId: operation.id,
-      requestId: "request-1",
-      durableCompletion: { completedAt },
-    });
+    expect(target.operations.tryBeginCompletion).not.toHaveBeenCalled();
     expect(target.operations.markCompleted).not.toHaveBeenCalled();
   });
 
-  it("returns an immutable historical result for an already-completed operation", async () => {
-    const historical = { ...activated, versionId: "version-2", version: 2 };
-    const target = subject({
-      operation: {
-        ...operation,
-        status: "completed",
-        resultImageVersionId: historical.versionId,
-        completedAt,
-      },
-    });
-    vi.mocked(target.versions.findVersionResultById).mockResolvedValue(
-      historical,
-    );
+  it.each(["uploaded", "completing", "completed"] as const)(
+    "returns a stable queued projection for %s operations",
+    async (status) => {
+      const target = subject({ operation: { ...operation, status } });
 
-    await expect(execute(target.service)).resolves.toEqual(historical);
-    expect(target.versions.findVersionResultById).toHaveBeenCalledWith(
-      historical.versionId,
+      await expect(execute(target.service)).resolves.toEqual({
+        replacementId: operation.id,
+        imageId: operation.imageId,
+        chapterId: operation.chapterId,
+        status,
+      });
+      expect(target.transfer.verify).not.toHaveBeenCalled();
+      expect(target.operations.markUploaded).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a failed operation without re-enqueueing it", async () => {
+    const target = subject({ operation: { ...operation, status: "failed" } });
+
+    await expect(execute(target.service)).rejects.toBeInstanceOf(
+      ImageReplacementCompletionFailedError,
     );
     expect(target.transfer.verify).not.toHaveBeenCalled();
-    expect(target.operations.tryBeginCompletion).not.toHaveBeenCalled();
-    expect(target.activator.execute).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [
-      { ...operation, status: "completed" as const },
-      ImageReplacementCompletionInvariantError,
-    ],
-    [
-      { ...operation, status: "completing" as const },
-      ImageReplacementCompletionInProgressError,
-    ],
-    [
-      { ...operation, status: "failed" as const },
-      ImageReplacementCompletionFailedError,
-    ],
-  ])("rejects invalid or unavailable operation state", async (state, error) => {
-    await expect(
-      execute(subject({ operation: state }).service),
-    ).rejects.toBeInstanceOf(error);
+    expect(target.operations.markUploaded).not.toHaveBeenCalled();
   });
 
   it("rejects missing, mismatched, and unauthorized operations", async () => {
@@ -221,15 +165,15 @@ describe("CompleteImageReplacementService", () => {
     expect(denied.transfer.verify).not.toHaveBeenCalled();
   });
 
-  it("does not activate when candidate verification fails or mismatches", async () => {
+  it("does not enqueue when candidate verification fails or mismatches", async () => {
     const missing = subject();
     vi.mocked(missing.transfer.verify).mockRejectedValue(
       new UploadTransferObjectNotFoundError(),
     );
     await expect(execute(missing.service)).rejects.toBeInstanceOf(
-      UploadTransferObjectNotFoundError,
+      ImageReplacementCompletionNotFoundError,
     );
-    expect(missing.activator.execute).not.toHaveBeenCalled();
+    expect(missing.operations.markUploaded).not.toHaveBeenCalled();
 
     for (const verified of [
       { ...operation, key: "Media/series/1/other.jpg", etag: "etag" },
@@ -255,56 +199,7 @@ describe("CompleteImageReplacementService", () => {
       await expect(execute(mismatch.service)).rejects.toBeInstanceOf(
         ImageReplacementCompletionInvalidError,
       );
-      expect(mismatch.activator.execute).not.toHaveBeenCalled();
+      expect(mismatch.operations.markUploaded).not.toHaveBeenCalled();
     }
-  });
-
-  it("lets only one concurrent caller acquire activation ownership", async () => {
-    const target = subject();
-    let claims = 0;
-    vi.mocked(target.operations.tryBeginCompletion).mockImplementation(
-      async () => {
-        claims += 1;
-        return {
-          acquired: claims === 1,
-          operation: { ...operation, status: "completing" },
-        };
-      },
-    );
-
-    const results = await Promise.allSettled([
-      execute(target.service),
-      execute(target.service),
-    ]);
-
-    expect(target.activator.execute).toHaveBeenCalledOnce();
-    expect(
-      results.filter((result) => result.status === "fulfilled"),
-    ).toHaveLength(1);
-    const rejected = results.find((result) => result.status === "rejected");
-    expect(rejected).toMatchObject({
-      status: "rejected",
-      reason: expect.any(ImageReplacementCompletionInProgressError),
-    });
-  });
-
-  it("rehydrates a completed loser instead of activating again", async () => {
-    const completed = {
-      ...operation,
-      status: "completed" as const,
-      resultImageVersionId: activated.versionId,
-      completedAt,
-    };
-    const target = subject();
-    vi.mocked(target.operations.tryBeginCompletion).mockResolvedValue({
-      acquired: false,
-      operation: completed,
-    });
-
-    await expect(execute(target.service)).resolves.toEqual(activated);
-    expect(target.versions.findVersionResultById).toHaveBeenCalledWith(
-      activated.versionId,
-    );
-    expect(target.activator.execute).not.toHaveBeenCalled();
   });
 });
