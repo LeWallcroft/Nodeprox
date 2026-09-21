@@ -55,6 +55,7 @@ services:
       NODE_ENV: production
       API_HOST: 0.0.0.0
       API_PORT: 3001
+      DISCORD_BOT_INTERNAL_URL: http://discord-bot:3002
     depends_on:
       postgres:
         condition: service_healthy
@@ -85,6 +86,26 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    networks:
+      - internal
+      - egress
+    logging: *default-logging
+
+  discord-bot:
+    build:
+      context: .
+      dockerfile: apps/discord-bot/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${NODEPROX_ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      NODEPROX_INTERNAL_API_URL: http://api:3001
+      DISCORD_BOT_INTERNAL_HOST: 0.0.0.0
+      DISCORD_BOT_INTERNAL_PORT: 3002
+    depends_on:
+      api:
         condition: service_healthy
     networks:
       - internal
