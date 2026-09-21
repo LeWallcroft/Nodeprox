@@ -208,6 +208,7 @@ describe("BOT-M1A internal Discord gateway", () => {
       payload: {
         code: first.json().code,
         discordId: "discord-link-user",
+        discordUsername: "Discord Link User",
         actorDiscordId: "discord-link-user",
         guildId: "guild-1",
         channelId: "channel-1",
@@ -218,6 +219,7 @@ describe("BOT-M1A internal Discord gateway", () => {
     const confirmation = {
       code: second.json().code as string,
       discordId: "discord-link-user",
+      discordUsername: "Discord Link User",
       actorDiscordId: "discord-link-user",
       guildId: "guild-1",
       channelId: "channel-1",
@@ -263,6 +265,8 @@ describe("BOT-M1A internal Discord gateway", () => {
     });
     expect(status.json()).toEqual({
       state: "linked",
+      discordId: "discord-link-user",
+      discordUsername: "Discord Link User",
       linkedAt: expect.any(String),
     });
     const audits = await database.db
@@ -302,6 +306,7 @@ describe("BOT-M1A internal Discord gateway", () => {
       payload: {
         code: challenge.json().code,
         discordId: "discord-link-user",
+        discordUsername: "Discord Link User",
         actorDiscordId: "discord-link-user",
         guildId: "guild-1",
         channelId: "channel-1",

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
+  chapterReplacementOperations,
   chapters,
+  domainEventOutbox,
   imageReplacementOperations,
   images,
   imageVersions,
@@ -188,6 +190,17 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  const replacementIds = await database.db
+    .select({ id: imageReplacementOperations.id })
+    .from(imageReplacementOperations)
+    .where(eq(imageReplacementOperations.imageId, imageId));
+  if (replacementIds.length > 0)
+    await database.db.delete(domainEventOutbox).where(
+      inArray(
+        domainEventOutbox.aggregateId,
+        replacementIds.map(({ id }) => id),
+      ),
+    );
   await database.db
     .delete(mediaEffectOutbox)
     .where(eq(mediaEffectOutbox.imageId, imageId));
@@ -202,6 +215,9 @@ afterAll(async () => {
   await database.db
     .delete(imageReplacementOperations)
     .where(eq(imageReplacementOperations.imageId, imageId));
+  await database.db
+    .delete(chapterReplacementOperations)
+    .where(eq(chapterReplacementOperations.chapterId, chapterId));
   await database.db.delete(images).where(eq(images.id, imageId));
   await database.db.delete(chapters).where(eq(chapters.id, chapterId));
   await database.db.delete(series).where(eq(series.id, seriesId));
@@ -210,31 +226,61 @@ afterAll(async () => {
   await database.sql.end();
 });
 
+afterEach(async () => {
+  const replacementIds = await database.db
+    .select({ id: imageReplacementOperations.id })
+    .from(imageReplacementOperations)
+    .where(eq(imageReplacementOperations.imageId, imageId));
+  if (replacementIds.length > 0)
+    await database.db.delete(domainEventOutbox).where(
+      inArray(
+        domainEventOutbox.aggregateId,
+        replacementIds.map(({ id }) => id),
+      ),
+    );
+  await database.db
+    .delete(imageReplacementOperations)
+    .where(eq(imageReplacementOperations.imageId, imageId));
+  await database.db
+    .delete(chapterReplacementOperations)
+    .where(eq(chapterReplacementOperations.chapterId, chapterId));
+  transfer.initiated.splice(0);
+  transfer.verified.splice(0);
+  transfer.objects.clear();
+});
+
 describe("image replacement completion HTTP contract", () => {
-  it("completes an uploaded replacement and returns a canonical safe result", async () => {
+  it("accepts an uploaded replacement for durable background completion", async () => {
     const prepared = await uploadedReplacement(await login(ownerEmail));
     const response = await complete(
       await login(ownerEmail),
       prepared.replacementId,
     );
 
-    expect(response.statusCode).toBe(200);
+    expect(response.statusCode).toBe(202);
     expect(response.json()).toEqual({
+      replacementId: prepared.replacementId,
       imageId,
-      versionId: expect.any(String),
-      version: 2,
-      filename: expect.any(String),
-      publicUrl: expect.stringContaining(
-        `https://media.nodeprox.org/replacement-completion-${seriesId}/1/`,
-      ),
+      chapterId,
+      status: "uploaded",
     });
     expect(response.json()).not.toHaveProperty("storageKey");
     expect(response.json()).not.toHaveProperty("candidateStorageKey");
-    expect(response.json().publicUrl).not.toContain("uploads.example.test");
     expect(transfer.verified).toEqual([transfer.initiated.at(-1)?.key]);
+    expect(
+      await database.db
+        .select()
+        .from(domainEventOutbox)
+        .where(eq(domainEventOutbox.aggregateId, prepared.replacementId)),
+    ).toEqual([
+      expect.objectContaining({
+        eventType: "image.replacement.ready",
+        aggregateType: "image_replacement",
+      }),
+    ]);
   });
 
-  it("returns the same immutable result without a second activation", async () => {
+  it("returns the same queued result without a duplicate durable event", async () => {
     const cookie = await login(ownerEmail);
     const prepared = await uploadedReplacement(cookie);
     const first = await complete(cookie, prepared.replacementId);
@@ -243,26 +289,15 @@ describe("image replacement completion HTTP contract", () => {
       .select({ id: imageVersions.id })
       .from(imageVersions)
       .where(eq(imageVersions.imageId, imageId));
-    const effectsBeforeRetry = await database.db
+    const eventsBeforeRetry = await database.db
       .select()
-      .from(mediaEffectOutbox)
-      .where(
-        eq(mediaEffectOutbox.replacementOperationId, prepared.replacementId),
-      );
-    const auditsBeforeRetry = await database.db
-      .select()
-      .from(auditLogs)
-      .where(
-        and(
-          eq(auditLogs.resourceType, "image"),
-          eq(auditLogs.resourceId, imageId),
-        ),
-      );
+      .from(domainEventOutbox)
+      .where(eq(domainEventOutbox.aggregateId, prepared.replacementId));
 
     const second = await complete(cookie, prepared.replacementId);
 
-    expect(first.statusCode).toBe(200);
-    expect(second.statusCode).toBe(200);
+    expect(first.statusCode).toBe(202);
+    expect(second.statusCode).toBe(202);
     expect(second.json()).toEqual(first.json());
     expect(transfer.verified).toHaveLength(verifiedBeforeRetry);
     const versionsAfterRetry = await database.db
@@ -273,22 +308,9 @@ describe("image replacement completion HTTP contract", () => {
     expect(
       await database.db
         .select()
-        .from(mediaEffectOutbox)
-        .where(
-          eq(mediaEffectOutbox.replacementOperationId, prepared.replacementId),
-        ),
-    ).toHaveLength(effectsBeforeRetry.length);
-    expect(
-      await database.db
-        .select()
-        .from(auditLogs)
-        .where(
-          and(
-            eq(auditLogs.resourceType, "image"),
-            eq(auditLogs.resourceId, imageId),
-          ),
-        ),
-    ).toHaveLength(auditsBeforeRetry.length);
+        .from(domainEventOutbox)
+        .where(eq(domainEventOutbox.aggregateId, prepared.replacementId)),
+    ).toHaveLength(eventsBeforeRetry.length);
   });
 
   it("requires authentication and replacement authorization", async () => {
@@ -300,6 +322,58 @@ describe("image replacement completion HTTP contract", () => {
       (await complete(await login(otherEmail), prepared.replacementId))
         .statusCode,
     ).toBe(403);
+  });
+
+  it("does not allow a full Chapter replacement while an image replacement is active", async () => {
+    const cookie = await login(ownerEmail);
+    await prepare(cookie);
+
+    const response = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/replacement-session`,
+      headers: { cookie },
+      payload: {
+        filename: "chapter.zip",
+        contentType: "application/zip",
+        sizeBytes: 10,
+      },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      code: "chapter-replacement-conflict",
+    });
+  });
+
+  it("does not allow an image replacement while a full Chapter replacement is active", async () => {
+    const cookie = await login(ownerEmail);
+    const chapterReplacement = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/replacement-session`,
+      headers: { cookie },
+      payload: {
+        filename: "chapter.zip",
+        contentType: "application/zip",
+        sizeBytes: 10,
+      },
+    });
+    expect(chapterReplacement.statusCode).toBe(201);
+
+    const imageReplacement = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/images/${imageId}/replacement-session`,
+      headers: { cookie },
+      payload: {
+        filename: "replacement.jpg",
+        contentType: "image/jpeg",
+        sizeBytes: 10,
+      },
+    });
+
+    expect(imageReplacement.statusCode).toBe(409);
+    expect(imageReplacement.json()).toMatchObject({
+      code: "image-replacement-conflict",
+    });
   });
 
   it("rejects malformed input, wrong scope, client storage fields, and missing candidates safely", async () => {
@@ -341,12 +415,12 @@ describe("image replacement completion HTTP contract", () => {
     const missing = await complete(cookie, prepared.replacementId);
     expect(missing.statusCode).toBe(404);
     expect(missing.json()).toMatchObject({
-      code: "image-replacement-candidate-not-found",
+      code: "image-replacement-not-found",
     });
     expect(missing.body).not.toContain("Media/");
   });
 
-  it("maps another completion owner to a deterministic conflict", async () => {
+  it("returns the stable accepted projection while background completion owns the operation", async () => {
     const cookie = await login(ownerEmail);
     const prepared = await prepare(cookie);
     await database.db
@@ -355,9 +429,10 @@ describe("image replacement completion HTTP contract", () => {
       .where(eq(imageReplacementOperations.id, prepared.replacementId));
 
     const response = await complete(cookie, prepared.replacementId);
-    expect(response.statusCode).toBe(409);
+    expect(response.statusCode).toBe(202);
     expect(response.json()).toMatchObject({
-      code: "image-replacement-conflict",
+      replacementId: prepared.replacementId,
+      status: "completing",
     });
   });
 });

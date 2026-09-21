@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { StoragePort } from "@nodeprox/storage/port";
 import type { ProcessChapterReplacementInput } from "@nodeprox/types";
@@ -126,15 +126,23 @@ function planItem(
     replacementId: string;
     seriesSlug: string;
     chapterPublicKey: string;
+    activeImages: readonly {
+      sortOrder: number;
+      logicalFilename: string;
+      currentVersion: number;
+    }[];
   },
   image: ValidatedImage,
 ): PlannedChapterReplacementItem {
-  const itemId = randomUUID();
+  const retained = (context.activeImages ?? []).find(
+    (active) => active.sortOrder === image.sortOrder,
+  );
   const candidate = createChapterCandidateIdentity({
     seriesSlug: context.seriesSlug,
     chapterPublicKey: context.chapterPublicKey,
     replacementId: context.replacementId,
-    itemId,
+    logicalFilename: retained?.logicalFilename ?? image.filename,
+    version: retained ? retained.currentVersion + 1 : 1,
     extension: image.extension,
   });
   return {

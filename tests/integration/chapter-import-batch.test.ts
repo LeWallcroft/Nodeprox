@@ -33,6 +33,10 @@ import type {
   StoragePort,
   UploadTransferPort,
 } from "../../packages/storage/src/port.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 class FakeTransfer implements UploadTransferPort {
   readonly keys: string[] = [];
@@ -94,14 +98,17 @@ const processedImage: ValidatedImage = {
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
 const transfer = new FakeTransfer();
-const app = buildApp(
-  { logger: false },
-  {
-    database: database.db,
-    secureCookie: false,
-    storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
-    uploadTransfer: transfer,
-  },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+      uploadTransfer: transfer,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+    },
+  ),
 );
 const ownerId = randomUUID();
 const unrelatedId = randomUUID();
@@ -159,6 +166,27 @@ describe("ChapterImportBatch admission control", () => {
     });
     expect(response.statusCode, response.body).toBe(201);
     expect(response.json().items).toHaveLength(15);
+
+    const uploadCenter = await app.inject({
+      method: "GET",
+      url: "/me/upload-operations?limit=20",
+      headers: { cookie },
+    });
+    expect(uploadCenter.statusCode, uploadCenter.body).toBe(200);
+    expect(uploadCenter.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "chapter_import",
+          seriesId,
+          filename: "0.zip",
+          status: "uploading",
+        }),
+      ]),
+    );
+    expect(
+      (await app.inject({ method: "GET", url: "/me/upload-operations" }))
+        .statusCode,
+    ).toBe(401);
   });
 
   it("rejects a sixteenth item and an item over the server hard limit", async () => {
@@ -633,10 +661,10 @@ describe("ChapterImportBatch metadata orchestration", () => {
     expect(persistedSeries?.createdBy).toBe(ownerId);
     expect(
       await database.db
-        .select({ id: seriesAssignments.id })
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, seriesId)),
-    ).toHaveLength(0);
+    ).toEqual([{ responsibleUserId: ownerId }]);
   });
 
   it("reresolves a conflict item to reused on retry", async () => {

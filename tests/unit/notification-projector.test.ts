@@ -90,6 +90,38 @@ describe("NotificationProjector", () => {
     expect(repository.rows).toHaveLength(1);
   });
 
+  it.each([
+    ["upload.completed", "Carga completada", "finalizó correctamente"],
+    ["upload.failed", "La carga requiere atención", "no pudo completarse"],
+  ])(
+    "projects %s as a safe chapter notification",
+    async (eventType, title, message) => {
+      const repository = new MemoryNotifications();
+      const source = event({
+        eventType,
+        aggregateType: "image_replacement_operation",
+        payload: {
+          targetUserId: randomUUID(),
+          operationKind: "image_replacement",
+          internalStorageKey: "must-not-be-projected",
+        },
+      });
+
+      await new NotificationProjector(repository).handle(source);
+
+      expect(repository.rows[0]).toMatchObject({
+        userId: source.payload.targetUserId,
+        type: eventType,
+        title,
+        actionKey: "chapters",
+      });
+      expect(repository.rows[0]?.message).toContain(message);
+      expect(repository.rows[0]?.message).not.toContain(
+        "must-not-be-projected",
+      );
+    },
+  );
+
   it("fails malformed supported events so the dispatcher can retry", async () => {
     const repository = new MemoryNotifications();
     await expect(

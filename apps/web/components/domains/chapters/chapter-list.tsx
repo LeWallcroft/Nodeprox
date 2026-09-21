@@ -1,4 +1,5 @@
-import { Images } from "lucide-react";
+import { FolderCog, Link2 } from "lucide-react";
+import Link from "next/link";
 import type { ChapterListItem } from "../../../lib/domains/chapters/view-model";
 import { ContentImage } from "../../ui/content-image";
 import {
@@ -22,12 +23,14 @@ export function ChapterList({
   selectedId,
   onSelect,
   onQuickImages,
+  seriesId,
   minTableHeightClassName,
 }: {
   items: readonly ChapterListItem[];
   selectedId: string | null;
   onSelect: (chapterId: string) => void;
   onQuickImages: (chapter: ChapterListItem) => void;
+  seriesId: string;
   minTableHeightClassName?: string;
 }) {
   return (
@@ -43,14 +46,13 @@ export function ChapterList({
           <th className="p-3">Estado</th>
           <th className="p-3">Imágenes</th>
           <th className="p-3">Última actualización</th>
-          <th className="p-3">Responsable</th>
           <th className="p-3 text-right">Acciones</th>
         </tr>
       </thead>
       <tbody>
         {items.length === 0 ? (
           <DataTableEmptyRow
-            colSpan={6}
+            colSpan={5}
             title="No se encontraron resultados."
             description="No hay capítulos que coincidan con los filtros actuales."
           />
@@ -94,24 +96,34 @@ export function ChapterList({
                     tone={toneForStatus(chapter.status)}
                   />
                 </td>
-                <td className="p-3 text-muted">—</td>
+                <td className="p-3 text-muted">{chapter.imageCount}</td>
                 <td className="whitespace-nowrap p-3 text-muted">
                   {new Date(chapter.updatedAt).toLocaleDateString("es-PE")}
                 </td>
-                <td className="p-3 text-muted">—</td>
                 <td className="p-3 text-right">
-                  <button
-                    className="grid h-9 w-9 place-items-center rounded-control border border-border bg-surface-elevated text-secondary hover:bg-surface-hover hover:text-text"
-                    type="button"
-                    aria-label="Vista rápida de imágenes"
-                    title="Vista rápida de imágenes"
-                    onClick={(event) => {
-                      stopTableRowSelection(event);
-                      onQuickImages(chapter);
-                    }}
-                  >
-                    <Images aria-hidden="true" className="size-4" />
-                  </button>
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      className="grid h-9 w-9 place-items-center rounded-control border border-border bg-surface-elevated text-secondary hover:bg-surface-hover hover:text-text"
+                      type="button"
+                      aria-label="Enlaces de imágenes"
+                      title="Enlaces de imágenes"
+                      onClick={(event) => {
+                        stopTableRowSelection(event);
+                        onQuickImages(chapter);
+                      }}
+                    >
+                      <Link2 aria-hidden="true" className="size-4" />
+                    </button>
+                    <Link
+                      className="grid h-9 w-9 place-items-center rounded-control border border-border bg-surface-elevated text-secondary hover:bg-surface-hover hover:text-text"
+                      href={`/series/${seriesId}/chapters/${chapter.id}/images`}
+                      aria-label="Gestionar capítulo"
+                      title="Gestionar capítulo"
+                      onClick={stopTableRowSelection}
+                    >
+                      <FolderCog aria-hidden="true" className="size-4" />
+                    </Link>
+                  </div>
                 </td>
               </tr>
             );

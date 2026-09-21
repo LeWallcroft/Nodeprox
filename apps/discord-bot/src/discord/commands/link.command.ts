@@ -63,6 +63,7 @@ export class LinkCommand {
       await this.link.execute({
         code,
         discordId: interaction.user.id,
+        discordUsername: interaction.user.username,
         guildId: interaction.guildId,
         channelId: interaction.channelId,
         interactionId: interaction.id,

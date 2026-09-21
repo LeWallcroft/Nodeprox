@@ -8,6 +8,8 @@ import type {
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ErrorState } from "../../ui/error-state";
+import { FieldShell } from "../../ui/field-shell";
+import { Input } from "../../ui/input";
 import { LoadingState } from "../../ui/loading-state";
 
 export function AssignSeriesUserDialog({
@@ -57,7 +59,7 @@ export function AssignSeriesUserDialog({
       footer={
         <div className="flex justify-end gap-2 max-[480px]:flex-col-reverse">
           <Button
-            className="border-border bg-surface text-text hover:bg-hover"
+            variant="secondary"
             disabled={isSubmitting}
             type="button"
             onClick={onClose}
@@ -97,18 +99,14 @@ export function AssignSeriesUserDialog({
       ) : null}
       {!isLoading && !error ? (
         <>
-          <label
-            className="mt-4 grid gap-1.5 text-sm font-medium text-muted"
-            htmlFor="responsible-search"
-          >
-            Buscar responsable
-            <input
+          <FieldShell id="responsible-search" label="Buscar responsable">
+            <Input
               id="responsible-search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="correo@ejemplo.com"
             />
-          </label>
+          </FieldShell>
           <div className="mt-3 max-h-52 overflow-y-auto rounded-control border border-border">
             {visible.length ? (
               visible.map((candidate) => (

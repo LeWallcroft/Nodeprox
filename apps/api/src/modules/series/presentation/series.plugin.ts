@@ -26,6 +26,7 @@ import {
 } from "../infrastructure/persistence/drizzle/series.repository.js";
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
+const userIdSchema = z.object({ userId: z.uuid() }).strict();
 const chapterIdSchema = z.object({ chapterId: z.uuid() }).strict();
 const externalCoverUrlSchema = z
   .string()
@@ -70,6 +71,18 @@ const chapterPatchSchema = chapterCreateSchema.partial().strict();
 const responsibleAssignmentSchema = z
   .object({ responsibleUserId: z.uuid() })
   .strict();
+const bulkResponsibleAssignmentSchema = z
+  .object({ seriesIds: z.array(z.uuid()).max(100) })
+  .strict()
+  .superRefine(({ seriesIds }, context) => {
+    if (new Set(seriesIds).size !== seriesIds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "seriesIds must not contain duplicates",
+        path: ["seriesIds"],
+      });
+    }
+  });
 const legacyAssignmentSchema = z.object({ uploaderId: z.uuid() }).strict();
 
 const error = (
@@ -353,6 +366,32 @@ export function registerSeriesPlugin(
   );
 
   app.put(
+    "/admin/users/:userId/series-responsibilities",
+    { preHandler: session },
+    async (request) => {
+      const { userId } = parse(userIdSchema, request.params);
+      const { seriesIds } = parse(
+        bulkResponsibleAssignmentSchema,
+        request.body,
+      );
+      const result = await seriesService.replaceUserAssignments(
+        context(),
+        userId,
+        seriesIds,
+      );
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      if ("invalidTarget" in result) throw invalid;
+      if ("conflict" in result) throw conflict;
+      return {
+        assigned: result.assigned,
+        released: result.released,
+        unchanged: result.unchanged,
+      };
+    },
+  );
+
+  app.put(
     "/series/:seriesId/uploader",
     { preHandler: session },
     async (request) => {
@@ -368,6 +407,20 @@ export function registerSeriesPlugin(
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return { assigned: true };
+    },
+  );
+
+  app.delete(
+    "/series/:seriesId/uploader",
+    { preHandler: session },
+    async (request, reply) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const result = await seriesService.releaseUploader(context(), seriesId);
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      if ("invalidTarget" in result) throw invalid;
+      if ("conflict" in result) throw conflict;
+      return reply.code(204).send();
     },
   );
 

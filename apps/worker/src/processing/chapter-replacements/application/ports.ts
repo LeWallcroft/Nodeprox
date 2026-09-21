@@ -6,6 +6,11 @@ export type ChapterReplacementProcessingContext = {
   seriesSlug: string;
   chapterPublicKey: string;
   status: "processing";
+  activeImages: readonly {
+    sortOrder: number;
+    logicalFilename: string;
+    currentVersion: number;
+  }[];
 };
 
 export type ChapterReplacementManifestItem = {

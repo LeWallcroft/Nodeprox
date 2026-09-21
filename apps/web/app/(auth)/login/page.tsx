@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useLogin } from "../../../lib/domains/auth/hooks";
-import { errorMessage } from "../../../components/domains/feedback";
-import { ApiError } from "../../../lib/api/types";
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
+import { type FormEvent, useState } from "react";
+import { errorMessage } from "../../../components/domains/feedback";
+import { Button } from "../../../components/ui/button";
+import { ApiError } from "../../../lib/api/types";
+import { useLogin } from "../../../lib/domains/auth/hooks";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -31,7 +32,7 @@ export default function LoginPage() {
   return (
     <main className="grid min-h-screen place-items-center p-page-mobile">
       <section
-        className="w-full max-w-[420px] rounded-2xl border border-border bg-surface p-8 shadow-panel"
+        className="w-full max-w-[420px] rounded-panel border border-[var(--border-subtle)] bg-surface-elevated p-7 shadow-panel sm:p-8"
         aria-labelledby="login-title"
       >
         <Image
@@ -44,7 +45,7 @@ export default function LoginPage() {
         <h1 id="login-title" className="mb-2 mt-0 text-2xl font-semibold">
           Iniciar sesión
         </h1>
-        <p className="text-muted">Accede al panel de NodeProx.</p>
+        <p className="text-secondary">Accede al panel de NodeProx.</p>
         <form className="mt-6 grid gap-3.5" onSubmit={handleSubmit}>
           <label
             className="grid gap-1.5 text-[13px] font-bold text-muted"
@@ -61,6 +62,12 @@ export default function LoginPage() {
               onChange={(event) => setEmail(event.target.value)}
             />
           </label>
+          <Link
+            className="-mt-1 text-right text-[13px] font-semibold text-primary"
+            href="/forgot-password"
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
           <label
             className="grid gap-1.5 text-[13px] font-bold text-muted"
             htmlFor="password"
@@ -81,13 +88,13 @@ export default function LoginPage() {
               {error}
             </p>
           ) : null}
-          <button
-            className="inline-flex min-h-control items-center justify-center rounded-lg border border-transparent bg-primary px-3.5 font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60"
+          <Button
+            className="mt-1 w-full"
             type="submit"
-            disabled={login.isPending}
+            loading={login.isPending}
           >
             {login.isPending ? "Ingresando..." : "Iniciar sesión"}
-          </button>
+          </Button>
         </form>
         <p className="mt-5 text-center text-[13px] text-muted">
           ¿No tienes cuenta?{" "}

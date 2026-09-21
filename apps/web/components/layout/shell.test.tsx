@@ -28,7 +28,7 @@ describe("App Shell", () => {
     expect(markup).toContain("Navegación principal");
     expect(markup).toContain('data-topbar="true"');
     expect(markup).toContain("Contenido protegido");
-    expect(markup).toContain("Cargas");
+    expect(markup).toContain('aria-label="Abrir centro de cargas"');
     expect(markup).toContain("h-dvh");
     expect(markup).toContain(
       "min-h-0 flex-1 overflow-x-hidden overflow-y-auto",

@@ -49,18 +49,17 @@ describe("Chapter management presentation", () => {
 
     expect(page).toContain("xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]");
     expect(page).toContain("Buscar capítulos...");
-    expect(page).toContain('aria-label="Serie"');
-    expect(page).toContain('aria-label="Estado"');
+    expect(page).toContain('id="global-chapter-series-filter"');
+    expect(page).toContain('id="global-chapter-status-filter"');
     expect(page).toContain("didInitializeSelection");
     expect(page).toContain("setSelectedChapterId(initialChapterId)");
-    expect(page).toContain("Crear capítulo");
+    expect(page).toContain("Nuevo capítulo");
     expect(page).toContain("setUploading(true)");
-    expect(page).toContain("Asignar colaborador");
+    expect(page).toContain("onAssignCollaborator={() => setAssigning(true)}");
     expect(page).toContain("<AssignChapterCollaboratorDialog");
-    expect(page).toContain("h-52 overflow-y-auto");
-    expect(page).toContain("remainingImages > 0");
-    expect(page).toContain("Ver todas");
-    expect(page).toContain("Sin actividad reciente");
+    expect(page).toContain("GlobalChapterCreateDialog");
+    expect(page).toContain("GlobalChapterBulkUploadDialog");
+    expect(page).not.toContain("h-52 overflow-y-auto");
     expect(page).not.toContain("proyección actual");
     expect(page).not.toContain('role === "admin"');
     expect(page).not.toContain('role === "gestor"');
@@ -80,10 +79,11 @@ describe("Chapter management presentation", () => {
   it("renders a selectable Chapter list with contract fields", () => {
     const markup = renderWithQueryClient(
       <ChapterList
-        items={[{ ...chapter }]}
+        items={[{ ...chapter, imageCount: 0 }]}
         selectedId="chapter-25"
         onSelect={() => undefined}
         onQuickImages={() => undefined}
+        seriesId="series-1"
       />,
     );
     expect(markup).toContain("25");
@@ -91,8 +91,8 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('role="button"');
     expect(markup).toContain("cursor-pointer");
-    expect(markup).toContain('aria-label="Vista rápida de imágenes"');
-    expect(markup).toContain('title="Vista rápida de imágenes"');
+    expect(markup).toContain('aria-label="Enlaces de imágenes"');
+    expect(markup).toContain('aria-label="Gestionar capítulo"');
     expect(
       readFileSync(
         "apps/web/components/domains/chapters/chapter-list.tsx",
@@ -107,14 +107,33 @@ describe("Chapter management presentation", () => {
       "utf8",
     );
 
-    expect(page).toContain("min-w-[14rem]");
+    expect(page).toContain('tableClassName="min-w-0 table-fixed"');
     expect(page).toContain("line-clamp-2");
+    expect(page).toContain("grid-rows-[2rem_1rem]");
     expect(page).toContain("max-w-[18rem] truncate");
     expect(page).toContain("stopTableRowSelection");
     expect(page).toContain("getSelectableTableRowProps");
+    expect(page).not.toContain("MoreHorizontal");
   });
 
-  it("uses contextual capabilities for Chapter actions and direct upload", () => {
+  it("keeps image links focused on copies and handles an empty public projection", () => {
+    const dialog = readFileSync(
+      "apps/web/components/domains/chapters/quick-chapter-images-dialog.tsx",
+      "utf8",
+    );
+    const createDialog = readFileSync(
+      "apps/web/components/domains/chapters/global-chapter-create-dialog.tsx",
+      "utf8",
+    );
+
+    expect(dialog).toContain("Aún no hay imágenes disponibles");
+    expect(dialog).not.toContain("Ver detalle");
+    expect(createDialog).toContain('inputMode="decimal"');
+    expect(createDialog).toContain('type="text"');
+    expect(createDialog).not.toContain("normalizeChapterNumber");
+  });
+
+  it("uses replacement instead of a second ZIP upload when a Chapter already has images", () => {
     const markup = renderWithQueryClient(
       <ChapterDetailPanel
         chapter={chapter}
@@ -126,10 +145,26 @@ describe("Chapter management presentation", () => {
     );
     expect(markup).toContain("Editar capítulo");
     expect(markup).toContain("Eliminar capítulo");
-    expect(markup).toContain("Subir ZIP");
+    expect(markup).toContain("Cambiar capítulo");
+    expect(markup).toContain("Este capítulo ya contiene imágenes");
+    expect(markup).not.toContain("Subir ZIP");
     expect(markup).toContain("Gestionar capítulo");
     expect(markup).not.toContain("Publicación e imágenes");
     expect(markup).toContain("bg-destructive-surface");
+  });
+
+  it("keeps direct ZIP upload available before a Chapter has images", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "draft" }}
+        capabilities={["images.upload"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+    expect(markup).toContain("Subir ZIP");
+    expect(markup).not.toContain("Cambiar capítulo");
   });
 
   it("hides contextual actions when the capability projection omits them", () => {
@@ -196,6 +231,13 @@ describe("Chapter management presentation", () => {
     expect(importErrorLabel("chapter-ready")).toBe(
       "El capítulo ya está listo.",
     );
+    const bulkDialog = readFileSync(
+      "apps/web/components/domains/chapters/bulk-chapter-upload-dialog.tsx",
+      "utf8",
+    );
+    expect(bulkDialog).toContain('useChapterList(open ? seriesId : "")');
+    expect(bulkDialog).toContain("Usa Cambiar capítulo");
+    expect(bulkDialog).toContain("preflightConflictLabel");
   });
 
   it("renders the shared loading, empty and error states", () => {

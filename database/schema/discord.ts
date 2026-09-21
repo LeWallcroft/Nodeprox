@@ -14,6 +14,10 @@ export const seriesCreationGrantStatusEnum = pgEnum(
   "series_creation_grant_status",
   ["available", "reserved", "consumed", "invalidated"],
 );
+export const seriesCreationGrantIssueSourceEnum = pgEnum(
+  "series_creation_grant_issue_source",
+  ["discord", "web"],
+);
 
 export const seriesCreationGrants = pgTable(
   "series_creation_grants",
@@ -24,12 +28,18 @@ export const seriesCreationGrants = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     reference: text("reference"),
+    issuedVia: seriesCreationGrantIssueSourceEnum("issued_via")
+      .notNull()
+      .default("discord"),
+    issuedByUserId: uuid("issued_by_user_id").references(() => users.id, {
+      onDelete: "restrict",
+    }),
     status: seriesCreationGrantStatusEnum("status")
       .notNull()
       .default("available"),
-    issuedByDiscordId: text("issued_by_discord_id").notNull(),
-    issuedFromChannelId: text("issued_from_channel_id").notNull(),
-    issuedInteractionId: text("issued_interaction_id").notNull(),
+    issuedByDiscordId: text("issued_by_discord_id"),
+    issuedFromChannelId: text("issued_from_channel_id"),
+    issuedInteractionId: text("issued_interaction_id"),
     issuedAt: timestamp("issued_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -42,6 +52,10 @@ export const seriesCreationGrants = pgTable(
     ),
     invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
     invalidatedByDiscordId: text("invalidated_by_discord_id"),
+    invalidatedByUserId: uuid("invalidated_by_user_id").references(
+      () => users.id,
+      { onDelete: "restrict" },
+    ),
     invalidatedInteractionId: text("invalidated_interaction_id"),
   },
   (table) => [

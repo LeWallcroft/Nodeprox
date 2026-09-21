@@ -1,6 +1,6 @@
 "use client";
 
-import { Clock3, List, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../../../components/domains/feedback";
@@ -20,7 +20,6 @@ import { SearchInput } from "../../../components/ui/search-input";
 import { hasCapability } from "../../../lib/auth/visibility";
 import { useCapabilities } from "../../../lib/domains/auth/hooks";
 import { useAvailableSeriesCreationGrants } from "../../../lib/domains/authorizations/hooks";
-import { useChapterList } from "../../../lib/domains/chapters/hooks";
 import { requiresSeriesCreationGrant } from "../../../lib/domains/series/creation-policy";
 import {
   useAssignSeriesResponsible,
@@ -54,7 +53,6 @@ export default function SeriesPage() {
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const selectedQuery = useSeries(selectedSeriesId ?? "");
-  const contextualChaptersQuery = useChapterList(selectedSeriesId ?? "");
   const selectedCapabilities = useSeriesCapabilities(selectedSeriesId ?? "");
   const update = useUpdateSeries(selectedSeriesId ?? "");
   const canManageAssignment = hasCapability(
@@ -80,10 +78,6 @@ export default function SeriesPage() {
   const createBlockedByGrant =
     requiresGrant &&
     (!availableGrants.isSuccess || availableGrants.data.length === 0);
-  const canViewChapters = hasCapability(
-    selectedCapabilities.data?.capabilities,
-    "series.read",
-  );
 
   const items = useMemo(() => {
     const filtered = filterSeries(listQuery.data ?? [], query).filter(
@@ -175,7 +169,13 @@ export default function SeriesPage() {
           ) : undefined
         }
       />
-      <AppDialog open={creating} title="Nueva serie" onOpenChange={setCreating}>
+      <AppDialog
+        busy={create.isPending}
+        description="Completa los datos de tu nueva serie."
+        open={creating}
+        title="Nueva serie"
+        onOpenChange={setCreating}
+      >
         <SeriesForm
           availableGrants={availableGrants.data ?? []}
           onSubmit={handleCreate}
@@ -212,179 +212,90 @@ export default function SeriesPage() {
         />
       ) : null}
       {listQuery.isSuccess && listQuery.data.length > 0 ? (
-        <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] xl:items-stretch">
-          <main className="flex min-w-0 flex-col">
-            <Card className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap">
-              <div className="w-full max-w-xs shrink">
-                <SearchInput
-                  placeholder="Buscar series..."
-                  value={query}
-                  onChange={(value) => {
-                    setQuery(value);
-                    setPage(1);
-                  }}
-                />
-              </div>
-              <select
-                aria-label="Estado"
-                className="h-control-lg w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                value="active"
-                onChange={() => undefined}
-              >
-                <option value="active">Estado: Activa</option>
-              </select>
-              <select
-                aria-label="Responsable"
-                className="h-control-lg w-48 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                value={responsible}
-                onChange={(event) => {
-                  setResponsible(event.target.value);
+        <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] xl:items-stretch">
+          <Card className="flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap xl:col-span-2">
+            <div className="w-full max-w-xs shrink">
+              <SearchInput
+                placeholder="Buscar series..."
+                value={query}
+                onChange={(value) => {
+                  setQuery(value);
                   setPage(1);
                 }}
-              >
-                <option value="">Responsable: Todos</option>
-                {responsibleOptions.map((email) => (
-                  <option key={email} value={email}>
-                    {email}
-                  </option>
-                ))}
-              </select>
-            </Card>
-            <SeriesList
-              items={pageItems}
-              selectedId={selectedSeriesId}
-              minTableHeightClassName="lg:min-h-[700px]"
-              onSelect={selectSeries}
-            />
-            <div className="mt-3">
-              <Pagination
-                page={currentPage}
-                totalPages={totalPages}
-                totalItems={items.length}
-                onPrevious={() => setPage((current) => current - 1)}
-                onNext={() => setPage((current) => current + 1)}
               />
             </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-3">
-              <Card className="h-52 overflow-y-auto p-4">
-                <h2 className="m-0 text-sm font-semibold">ACCIONES RÁPIDAS</h2>
-                <div className="mt-3 grid gap-2 text-sm">
-                  {canCreate ? (
-                    <Button
-                      disabled={createBlockedByGrant}
-                      type="button"
-                      variant="secondary"
-                      onClick={() => setCreating(true)}
-                    >
-                      <Plus aria-hidden="true" className="size-4" /> Nueva serie
-                    </Button>
-                  ) : null}
-                  {createBlockedByGrant ? (
-                    <Link
-                      className="text-primary underline"
-                      href="/autorizaciones"
-                    >
-                      Ver autorizaciones disponibles
-                    </Link>
-                  ) : null}
-                  {selectedSeriesId && canViewChapters ? (
-                    <Link
-                      className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-border bg-surface px-3.5 font-medium text-text hover:bg-surface-hover"
-                      href={`/series/${selectedSeriesId}/chapters`}
-                    >
-                      <List aria-hidden="true" className="size-4" />
-                      Gestionar capítulos
-                    </Link>
-                  ) : (
-                    <span className="text-muted">
-                      Selecciona una serie para ver acciones.
-                    </span>
-                  )}
-                </div>
-              </Card>
-              <Card className="h-52 overflow-y-auto p-4">
-                <h2 className="m-0 text-sm font-semibold">
-                  CHAPTERS RECIENTES
-                </h2>
-                {!selectedSeriesId ? (
-                  <p className="mb-0 mt-3 text-sm text-muted">
-                    Selecciona una serie.
-                  </p>
-                ) : null}
-                {selectedSeriesId && contextualChaptersQuery.isPending ? (
-                  <p className="mb-0 mt-3 text-sm text-muted">
-                    Cargando Chapters…
-                  </p>
-                ) : null}
-                {selectedSeriesId &&
-                !contextualChaptersQuery.isPending &&
-                !contextualChaptersQuery.data?.length ? (
-                  <p className="mb-0 mt-3 text-sm text-muted">
-                    No hay Chapters todavía.
-                  </p>
-                ) : null}
-                {contextualChaptersQuery.data?.slice(0, 5).map((chapter) => (
-                  <p className="mb-0 mt-2 text-sm text-muted" key={chapter.id}>
-                    Capítulo {chapter.chapterNumber} · {chapter.status}
-                  </p>
-                ))}
-              </Card>
-              <Card className="h-52 overflow-y-auto p-4">
-                <h2 className="m-0 text-sm font-semibold">
-                  ACTIVIDAD RECIENTE
-                </h2>
-                <div className="grid place-items-center gap-2 py-8 text-center text-sm text-muted">
-                  <Clock3 aria-hidden="true" className="size-5" />
-                  <span className="font-medium">Sin actividad reciente</span>
-                  <span>No hay actividad para mostrar.</span>
-                </div>
-              </Card>
-            </div>
-          </main>
+            <select
+              aria-label="Estado"
+              className="h-control-lg w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
+              value="active"
+              onChange={() => undefined}
+            >
+              <option value="active">Estado: Activa</option>
+            </select>
+            <select
+              aria-label="Responsable"
+              className="h-control-lg w-48 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
+              value={responsible}
+              onChange={(event) => {
+                setResponsible(event.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">Responsable: Todos</option>
+              {responsibleOptions.map((email) => (
+                <option key={email} value={email}>
+                  {email}
+                </option>
+              ))}
+            </select>
+          </Card>
+          <SeriesList
+            items={pageItems}
+            selectedId={selectedSeriesId}
+            minTableHeightClassName="lg:min-h-[640px]"
+            onSelect={selectSeries}
+          />
           <SeriesContextPanel open={Boolean(selectedSeriesId)}>
-            {selectedSeriesId && selectedQuery.isPending ? (
-              <LoadingState label="Cargando detalle de la serie" />
-            ) : null}
-            {selectedSeriesId && selectedQuery.isError ? (
-              <ErrorState
-                title="No se pudo cargar el detalle"
-                description={errorMessage(selectedQuery.error)}
-                action={
-                  <Button
-                    type="button"
-                    onClick={() => void selectedQuery.refetch()}
-                  >
-                    Reintentar
-                  </Button>
-                }
-              />
-            ) : null}
-            {!selectedSeriesId || selectedQuery.isSuccess ? (
-              <SeriesDetailPanel
-                series={selectedQuery.data ?? null}
-                capabilities={selectedCapabilities.data?.capabilities}
-                onClose={() => setSelectedSeriesId(null)}
-                onUpdate={async (input) => {
-                  if (!selectedSeriesId) return;
-                  await update.mutateAsync(input);
-                }}
-                onDelete={handleDelete}
-                candidates={responsibleCandidates.data}
-                candidatesLoading={responsibleCandidates.isPending}
-                candidatesError={
-                  responsibleCandidates.error instanceof Error
-                    ? responsibleCandidates.error
-                    : null
-                }
-                assignmentPending={assignResponsible.isPending}
-                updatePending={update.isPending}
-                deletePending={remove.isPending}
-                onAssignResponsible={async (responsibleUserId) =>
-                  assignResponsible.mutateAsync(responsibleUserId)
-                }
-              />
-            ) : null}
+            <SeriesDetailPanel
+              series={selectedQuery.data ?? null}
+              capabilities={selectedCapabilities.data?.capabilities}
+              onClose={() => setSelectedSeriesId(null)}
+              onUpdate={async (input) => {
+                if (!selectedSeriesId) return;
+                await update.mutateAsync(input);
+              }}
+              onDelete={handleDelete}
+              candidates={responsibleCandidates.data}
+              candidatesLoading={responsibleCandidates.isPending}
+              candidatesError={
+                responsibleCandidates.error instanceof Error
+                  ? responsibleCandidates.error
+                  : null
+              }
+              assignmentPending={assignResponsible.isPending}
+              updatePending={update.isPending}
+              deletePending={remove.isPending}
+              loading={Boolean(selectedSeriesId) && selectedQuery.isPending}
+              error={
+                selectedQuery.error instanceof Error
+                  ? selectedQuery.error
+                  : null
+              }
+              onRetry={() => void selectedQuery.refetch()}
+              onAssignResponsible={async (responsibleUserId) =>
+                assignResponsible.mutateAsync(responsibleUserId)
+              }
+            />
           </SeriesContextPanel>
+          <div className="order-3 xl:col-start-1 xl:order-none">
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              totalItems={items.length}
+              onPrevious={() => setPage((current) => current - 1)}
+              onNext={() => setPage((current) => current + 1)}
+            />
+          </div>
         </section>
       ) : null}
     </>

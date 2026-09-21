@@ -12,6 +12,12 @@ export interface Series {
   updatedAt: string;
 }
 
+/** Collection-only projection returned by GET /series. */
+export interface SeriesListProjection extends Series {
+  chapterCount: number;
+  imageCount: number;
+}
+
 export interface SeriesResponsibleUser {
   id: string;
   email: string;

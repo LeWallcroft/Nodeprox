@@ -21,11 +21,10 @@ const preparedReplacement = {
 };
 
 const completedReplacement = {
+  replacementId: "replacement-1",
   imageId: "image-1",
-  versionId: "version-2",
-  version: 2,
-  filename: "opaque-image.jpg",
-  publicUrl: "https://media.nodeprox.org/series/chapter/opaque-image.jpg",
+  chapterId: "chapter-1",
+  status: "uploaded",
 };
 
 function imageFile(type = "image/jpeg", name = "replacement.jpg") {
@@ -99,7 +98,7 @@ describe("image replacement web client", () => {
     expect(JSON.parse(String(options.body))).not.toHaveProperty("userId");
   });
 
-  it("completes with only the replacement id in its path", async () => {
+  it("queues durable completion with only the replacement id in its path", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(jsonResponse(completedReplacement));
@@ -121,7 +120,7 @@ describe("image replacement web client", () => {
     expect(options).not.toHaveProperty("body");
   });
 
-  it("orchestrates prepare, direct PUT, and complete in order", async () => {
+  it("orchestrates prepare, direct PUT, and durable queue acceptance in order", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse(preparedReplacement, 201))

@@ -1,12 +1,14 @@
-import {
-  UploadTransferObjectNotFoundError,
-  UploadTransferProviderError,
-  type UploadTransferPort,
-  type VerifiedUploadedObject,
-} from "../../packages/storage/dist/port.js";
-import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  inject,
+  it,
+} from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
@@ -18,6 +20,16 @@ import {
   uploads,
   users,
 } from "../../database/schema/index.js";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+  UploadTransferProviderError,
+  type VerifiedUploadedObject,
+} from "../../packages/storage/dist/port.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 class FakeTransfer implements UploadTransferPort {
   readonly initiated: string[] = [];
@@ -25,6 +37,7 @@ class FakeTransfer implements UploadTransferPort {
   verifyFailure: Error | null = null;
   private verificationStarted: (() => void) | null = null;
   private verificationRelease: Promise<void> | null = null;
+  private releaseVerificationGate: (() => void) | null = null;
 
   async initiate(input: { key: string }) {
     this.initiated.push(input.key);
@@ -64,28 +77,36 @@ class FakeTransfer implements UploadTransferPort {
     this.verificationRelease = new Promise<void>((resolve) => {
       release = resolve;
     });
+    this.releaseVerificationGate = release;
     return {
       started: startedPromise,
-      release: () => {
-        this.verificationStarted = null;
-        this.verificationRelease = null;
-        release();
-      },
+      release: () => this.releaseBlockedVerification(),
     };
+  }
+
+  releaseBlockedVerification() {
+    const release = this.releaseVerificationGate;
+    this.releaseVerificationGate = null;
+    this.verificationStarted = null;
+    this.verificationRelease = null;
+    release?.();
   }
 }
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
 const transfer = new FakeTransfer();
-const app = buildApp(
-  { logger: false },
-  {
-    database: database.db,
-    secureCookie: false,
-    storage: { provider: "filesystem", uploadMaxSizeBytes: 8 },
-    uploadTransfer: transfer,
-  },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      storage: { provider: "filesystem", uploadMaxSizeBytes: 8 },
+      uploadTransfer: transfer,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+    },
+  ),
 );
 const password = "m4-upload-password";
 const userId = randomUUID();
@@ -160,21 +181,25 @@ async function seriesIdForChapter(chapterId: string): Promise<string> {
   return chapter.seriesId;
 }
 
-async function assignUploader(
+async function assignResponsible(
   ownerCookie: string,
   chapterId: string,
-  uploaderId: string,
+  responsibleUserId: string,
 ) {
   const response = await app.inject({
     method: "PUT",
-    url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
+    url: `/series/${await seriesIdForChapter(chapterId)}/responsible`,
     headers: { cookie: ownerCookie },
-    payload: { uploaderId },
+    payload: { responsibleUserId },
   });
   expect(response.statusCode).toBe(200);
+  return response;
 }
 
-async function revokeUploader(ownerCookie: string, chapterId: string) {
+async function returnResponsibilityToOwner(
+  ownerCookie: string,
+  chapterId: string,
+) {
   return app.inject({
     method: "DELETE",
     url: `/series/${await seriesIdForChapter(chapterId)}/uploader`,
@@ -186,7 +211,7 @@ async function prepareAssignedUpload(chapterNumber: number) {
   const ownerCookie = await login();
   const uploaderCookie = await login(otherEmail);
   const chapterId = await createChapter(ownerCookie, chapterNumber);
-  await assignUploader(ownerCookie, chapterId, otherId);
+  await assignResponsible(ownerCookie, chapterId, otherId);
   const initiated = await initiate(uploaderCookie, chapterId);
   expect(initiated.statusCode).toBe(201);
   const uploadId = initiated.json().uploadId as string;
@@ -233,6 +258,10 @@ beforeAll(async () => {
       role: "uploader",
     },
   ]);
+});
+
+afterEach(() => {
+  transfer.releaseBlockedVerification();
 });
 
 afterAll(async () => {
@@ -337,6 +366,24 @@ describe("direct chapter upload transfer", () => {
       .from(chapters)
       .where(eq(chapters.id, chapterId));
     expect(uploadingChapter?.status).toBe("uploading");
+    const [initiatedAudit] = await database.db
+      .select({
+        action: auditLogs.action,
+        result: auditLogs.result,
+        metadata: auditLogs.metadata,
+      })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.resourceId, chapterId),
+          eq(auditLogs.action, "chapter.upload.initiated"),
+        ),
+      );
+    expect(initiatedAudit).toMatchObject({
+      action: "chapter.upload.initiated",
+      result: null,
+      metadata: { result: "pending" },
+    });
 
     const completeUrl = `/chapters/${chapterId}/uploads/${uploadId}/complete`;
     const missing = await app.inject({
@@ -346,6 +393,40 @@ describe("direct chapter upload transfer", () => {
     });
     expect(missing.statusCode).toBe(409);
     expect(missing.json().code).toBe("upload-object-missing");
+    const [uploadAfterMissing] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    const [chapterAfterMissing] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, chapterId));
+    expect(uploadAfterMissing?.status).toBe("pending");
+    expect(chapterAfterMissing?.status).not.toBe("uploaded");
+    expect(
+      await database.db
+        .select({ id: auditLogs.id })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.resourceId, chapterId),
+            eq(auditLogs.action, "chapter.upload.completed"),
+            eq(auditLogs.result, "success"),
+          ),
+        ),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select({ result: auditLogs.result })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.resourceId, chapterId),
+            eq(auditLogs.action, "chapter.upload.completed"),
+            eq(auditLogs.result, "failed"),
+          ),
+        ),
+    ).toMatchObject([{ result: "failed" }]);
 
     transfer.objects.set(pendingRow?.storageKey ?? "", {
       key: pendingRow?.storageKey ?? "",
@@ -375,6 +456,38 @@ describe("direct chapter upload transfer", () => {
       status: "uploaded",
       sizeBytes: 4,
     });
+    const completedAudits = await database.db
+      .select({ id: auditLogs.id })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.resourceId, chapterId),
+          eq(auditLogs.action, "chapter.upload.completed"),
+          eq(auditLogs.result, "success"),
+        ),
+      );
+    expect(completedAudits).toHaveLength(1);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: completeUrl,
+          headers: { cookie },
+        })
+      ).statusCode,
+    ).toBe(409);
+    expect(
+      await database.db
+        .select({ id: auditLogs.id })
+        .from(auditLogs)
+        .where(
+          and(
+            eq(auditLogs.resourceId, chapterId),
+            eq(auditLogs.action, "chapter.upload.completed"),
+            eq(auditLogs.result, "success"),
+          ),
+        ),
+    ).toHaveLength(1);
     const [intent] = await database.db
       .select()
       .from(processingOutbox)
@@ -456,10 +569,12 @@ describe("direct chapter upload transfer", () => {
       headers: { cookie: prepared.uploaderCookie },
     });
     await gate.started;
-    expect(
-      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
-        .statusCode,
-    ).toBe(204);
+    const revocation = await returnResponsibilityToOwner(
+      prepared.ownerCookie,
+      prepared.chapterId,
+    );
+    expect(revocation.statusCode).toBe(204);
+    expect(revocation.body).toBe("");
     gate.release();
 
     const denied = await completion;
@@ -494,7 +609,7 @@ describe("direct chapter upload transfer", () => {
       headers: { cookie: prepared.uploaderCookie },
     });
     await gate.started;
-    await assignUploader(
+    await assignResponsible(
       prepared.ownerCookie,
       prepared.chapterId,
       replacementId,
@@ -590,8 +705,12 @@ describe("direct chapter upload transfer", () => {
       return row?.waiting === true;
     });
     expect(
-      (await revokeUploader(prepared.ownerCookie, prepared.chapterId))
-        .statusCode,
+      (
+        await returnResponsibilityToOwner(
+          prepared.ownerCookie,
+          prepared.chapterId,
+        )
+      ).statusCode,
     ).toBe(204);
     releaseLock();
     await blocker;
@@ -641,7 +760,7 @@ describe("direct chapter upload transfer", () => {
     });
 
     let revocationSettled = false;
-    const revocation = revokeUploader(
+    const revocation = returnResponsibilityToOwner(
       prepared.ownerCookie,
       prepared.chapterId,
     ).finally(() => {

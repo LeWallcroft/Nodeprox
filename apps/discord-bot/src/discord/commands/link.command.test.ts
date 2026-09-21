@@ -9,7 +9,7 @@ function interaction() {
     id: "interaction-1",
     guildId: "guild-1",
     channelId: "channel-1",
-    user: { id: "discord-user-1" },
+    user: { id: "discord-user-1", username: "discord-user" },
     options: { getString: vi.fn().mockReturnValue("NPX-LINK-code") },
     reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue(undefined),
@@ -37,6 +37,7 @@ describe("/vincular", () => {
     expect(api.confirmLink).toHaveBeenCalledWith({
       code: "NPX-LINK-code",
       discordId: "discord-user-1",
+      discordUsername: "discord-user",
       actorDiscordId: "discord-user-1",
       guildId: "guild-1",
       channelId: "channel-1",

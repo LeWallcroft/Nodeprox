@@ -1,22 +1,27 @@
-import { eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inject } from "vitest";
-import {
-  UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
-} from "../../packages/storage/src/port.js";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
+  chapterPermissions,
   chapters,
   series,
   seriesAssignments,
+  sessions,
   users,
 } from "../../database/schema/index.js";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+} from "../../packages/storage/src/port.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -40,14 +45,17 @@ class AssignmentTransfer implements UploadTransferPort {
 }
 
 const transfer = new AssignmentTransfer();
-const app = buildApp(
-  { logger: false },
-  {
-    database: database.db,
-    secureCookie: false,
-    storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
-    uploadTransfer: transfer,
-  },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+      uploadTransfer: transfer,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+    },
+  ),
 );
 const password = "a1-correct-password";
 const hasher = new Argon2PasswordHasher();
@@ -136,7 +144,10 @@ afterAll(async () => {
   await database.db
     .delete(seriesAssignments)
     .where(
-      inArray(seriesAssignments.uploaderId, [uploaderId, secondUploaderId]),
+      inArray(seriesAssignments.responsibleUserId, [
+        uploaderId,
+        secondUploaderId,
+      ]),
     );
   await database.db
     .delete(auditLogs)
@@ -189,6 +200,178 @@ afterAll(async () => {
 });
 
 describe("A1 identity, assignment and chapter numbering", () => {
+  it("projects the paginated administrative user read model", async () => {
+    const adminCookie = await login(emails.admin);
+    const response = await app.inject({
+      method: "GET",
+      url: "/admin/users/management?limit=2&role=uploader",
+      headers: { cookie: adminCookie },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body).toMatchObject({ total: expect.any(Number) });
+    expect(body.items).toHaveLength(2);
+    expect(body.items[0]).toMatchObject({
+      assignedSeriesCount: expect.any(Number),
+    });
+    expect(body.items[0]).toHaveProperty("lastAccessAt");
+  });
+
+  it("replaces a user's Series responsibilities atomically", async () => {
+    const assignedSeriesId = randomUUID();
+    const releasedSeriesId = randomUUID();
+    await database.db.insert(series).values([
+      {
+        id: assignedSeriesId,
+        title: "Bulk assignment target",
+        slug: `bulk-assignment-target-${assignedSeriesId}`,
+        createdBy: ownerId,
+      },
+      {
+        id: releasedSeriesId,
+        title: "Bulk assignment release",
+        slug: `bulk-assignment-release-${releasedSeriesId}`,
+        createdBy: ownerId,
+      },
+    ]);
+    await database.db.insert(seriesAssignments).values({
+      seriesId: releasedSeriesId,
+      responsibleUserId: uploaderId,
+      assignedBy: adminId,
+    });
+    const adminCookie = await login(emails.admin);
+
+    const replaced = await app.inject({
+      method: "PUT",
+      url: `/admin/users/${uploaderId}/series-responsibilities`,
+      headers: { cookie: adminCookie },
+      payload: { seriesIds: [assignedSeriesId] },
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.json()).toEqual({
+      assigned: 1,
+      released: 1,
+      unchanged: 0,
+    });
+    expect(
+      await database.db
+        .select({ seriesId: seriesAssignments.seriesId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.responsibleUserId, uploaderId)),
+    ).toEqual([{ seriesId: assignedSeriesId }]);
+
+    const rejected = await app.inject({
+      method: "PUT",
+      url: `/admin/users/${uploaderId}/series-responsibilities`,
+      headers: { cookie: adminCookie },
+      payload: { seriesIds: [assignedSeriesId, randomUUID()] },
+    });
+    expect(rejected.statusCode).toBe(404);
+    expect(
+      await database.db
+        .select({ seriesId: seriesAssignments.seriesId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.responsibleUserId, uploaderId)),
+    ).toEqual([{ seriesId: assignedSeriesId }]);
+  });
+
+  it("separates a deactivated user from sessions, Series and chapter collaborations", async () => {
+    const userId = randomUUID();
+    const seriesId = randomUUID();
+    const chapterId = randomUUID();
+    const email = `deactivate-${userId}@example.com`;
+    const passwordHash = await hasher.hash(password);
+    await database.db.insert(users).values({
+      id: userId,
+      email,
+      passwordHash,
+      status: "active",
+      role: "uploader",
+    });
+    await database.db.insert(series).values({
+      id: seriesId,
+      title: "Deactivation fixture",
+      slug: `deactivation-${userId}`,
+      createdBy: ownerId,
+    });
+    await database.db.insert(seriesAssignments).values({
+      seriesId,
+      responsibleUserId: userId,
+      assignedBy: adminId,
+    });
+    await database.db.insert(chapters).values({
+      id: chapterId,
+      seriesId,
+      chapterNumber: 1,
+      publicKey: `deactivation-${userId}`,
+      createdBy: ownerId,
+    });
+    await database.db.insert(chapterPermissions).values({
+      chapterId,
+      helperUserId: userId,
+      permission: "chapters.read",
+      grantedBy: adminId,
+    });
+
+    const userCookie = await login(email);
+    const adminCookie = await login(emails.admin);
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/admin/users/${userId}`,
+      headers: { cookie: adminCookie },
+      payload: { status: "suspended" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ status: "suspended" });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/auth/session",
+          headers: { cookie: userCookie },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(
+      await database.db
+        .select({ id: seriesAssignments.id })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.responsibleUserId, userId)),
+    ).toEqual([]);
+    expect(
+      (
+        await database.db
+          .select({ revokedAt: chapterPermissions.revokedAt })
+          .from(chapterPermissions)
+          .where(eq(chapterPermissions.helperUserId, userId))
+      )[0]?.revokedAt,
+    ).toBeTruthy();
+    expect(
+      (
+        await database.db
+          .select({ revokedAt: sessions.revokedAt })
+          .from(sessions)
+          .where(eq(sessions.userId, userId))
+      )[0]?.revokedAt,
+    ).toBeTruthy();
+    expect(
+      await database.db
+        .select({ id: auditLogs.id })
+        .from(auditLogs)
+        .where(eq(auditLogs.action, "user.deactivated")),
+    ).toEqual(expect.arrayContaining([expect.any(Object)]));
+
+    await database.db
+      .delete(chapterPermissions)
+      .where(eq(chapterPermissions.helperUserId, userId));
+    await database.db.delete(chapters).where(eq(chapters.id, chapterId));
+    await database.db.delete(series).where(eq(series.id, seriesId));
+    await database.db.delete(sessions).where(eq(sessions.userId, userId));
+    await database.db.delete(auditLogs).where(eq(auditLogs.resourceId, userId));
+    await database.db.delete(users).where(eq(users.id, userId));
+  });
+
   it("registers pending users and blocks operational login until admin approval", async () => {
     const email = `pending-${randomUUID()}@example.com`;
     const registration = await app.inject({
@@ -366,7 +549,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
           payload: { title: "Denied", slug: `a1-denied-${randomUUID()}` },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(404);
     expect(
       (
         await app.inject({
@@ -387,9 +570,9 @@ describe("A1 identity, assignment and chapter numbering", () => {
     ).toBe(403);
     const adminAssignment = await app.inject({
       method: "PUT",
-      url: `/series/${otherSeriesId}/uploader`,
+      url: `/series/${otherSeriesId}/responsible`,
       headers: { cookie: adminCookie },
-      payload: { uploaderId: secondUploaderId },
+      payload: { responsibleUserId: secondUploaderId },
     });
     expect(adminAssignment.statusCode).toBe(200);
     expect(
@@ -403,18 +586,18 @@ describe("A1 identity, assignment and chapter numbering", () => {
     ).toBe(200);
     const invalidAssignment = await app.inject({
       method: "PUT",
-      url: `/series/${seriesId}/uploader`,
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: adminCookie },
-      payload: { uploaderId: adminId },
+      payload: { responsibleUserId: adminId },
     });
-    expect(invalidAssignment.statusCode).toBe(422);
+    expect(invalidAssignment.statusCode).toBe(200);
     expect(
       (
         await app.inject({
           method: "PUT",
-          url: `/series/${seriesId}/uploader`,
+          url: `/series/${seriesId}/responsible`,
           headers: { cookie: ownerCookie },
-          payload: { uploaderId },
+          payload: { responsibleUserId: uploaderId },
         })
       ).statusCode,
     ).toBe(200);
@@ -422,9 +605,9 @@ describe("A1 identity, assignment and chapter numbering", () => {
       (
         await app.inject({
           method: "PUT",
-          url: `/series/${otherSeriesId}/uploader`,
+          url: `/series/${otherSeriesId}/responsible`,
           headers: { cookie: ownerCookie },
-          payload: { uploaderId },
+          payload: { responsibleUserId: uploaderId },
         })
       ).statusCode,
     ).toBe(403);
@@ -432,9 +615,9 @@ describe("A1 identity, assignment and chapter numbering", () => {
       (
         await app.inject({
           method: "PUT",
-          url: `/series/${seriesId}/uploader`,
+          url: `/series/${seriesId}/responsible`,
           headers: { cookie: uploaderCookie },
-          payload: { uploaderId },
+          payload: { responsibleUserId: uploaderId },
         })
       ).statusCode,
     ).toBe(403);
@@ -542,9 +725,9 @@ describe("A1 identity, assignment and chapter numbering", () => {
 
     const reassigned = await app.inject({
       method: "PUT",
-      url: `/series/${seriesId}/uploader`,
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: adminCookie },
-      payload: { uploaderId: secondUploaderId },
+      payload: { responsibleUserId: secondUploaderId },
     });
     expect(reassigned.statusCode).toBe(200);
     expect(
@@ -664,12 +847,13 @@ describe("A1 identity, assignment and chapter numbering", () => {
       ).statusCode,
     ).toBe(204);
 
-    const revoked = await app.inject({
-      method: "DELETE",
-      url: `/series/${seriesId}/uploader`,
+    const returnedToOwner = await app.inject({
+      method: "PUT",
+      url: `/series/${seriesId}/responsible`,
       headers: { cookie: adminCookie },
+      payload: { responsibleUserId: ownerId },
     });
-    expect(revoked.statusCode).toBe(204);
+    expect(returnedToOwner.statusCode).toBe(200);
 
     const deniedAfterRevocation = await app.inject({
       method: "GET",
@@ -700,7 +884,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
     ).toBe(204);
   });
 
-  it("keeps Gestor uploader assignment operational without transferring ownership", async () => {
+  it("keeps Gestor responsible assignment operational without transferring ownership", async () => {
     const ownerCookie = await login(emails.owner);
     const foreignOwnerCookie = await login(emails.secondOwner);
     const adminCookie = await login(emails.admin);
@@ -730,17 +914,17 @@ describe("A1 identity, assignment and chapter numbering", () => {
 
     const assignOwned = await app.inject({
       method: "PUT",
-      url: `/series/${ownSeriesId}/uploader`,
+      url: `/series/${ownSeriesId}/responsible`,
       headers: { cookie: ownerCookie },
-      payload: { uploaderId },
+      payload: { responsibleUserId: uploaderId },
     });
     expect(assignOwned.statusCode).toBe(200);
     await expect(
       database.db
-        .select({ uploaderId: seriesAssignments.uploaderId })
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, ownSeriesId)),
-    ).resolves.toEqual([{ uploaderId }]);
+    ).resolves.toEqual([{ responsibleUserId: uploaderId }]);
     await expect(
       database.db
         .select({ createdBy: series.createdBy })
@@ -748,18 +932,19 @@ describe("A1 identity, assignment and chapter numbering", () => {
         .where(eq(series.id, ownSeriesId)),
     ).resolves.toEqual([{ createdBy: ownerId }]);
 
-    const revokeOwned = await app.inject({
-      method: "DELETE",
-      url: `/series/${ownSeriesId}/uploader`,
+    const returnOwnedToOwner = await app.inject({
+      method: "PUT",
+      url: `/series/${ownSeriesId}/responsible`,
       headers: { cookie: ownerCookie },
+      payload: { responsibleUserId: ownerId },
     });
-    expect(revokeOwned.statusCode).toBe(204);
+    expect(returnOwnedToOwner.statusCode).toBe(200);
     await expect(
       database.db
-        .select({ uploaderId: seriesAssignments.uploaderId })
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, ownSeriesId)),
-    ).resolves.toEqual([]);
+    ).resolves.toEqual([{ responsibleUserId: ownerId }]);
     await expect(
       database.db
         .select({ createdBy: series.createdBy })
@@ -769,27 +954,22 @@ describe("A1 identity, assignment and chapter numbering", () => {
 
     const adminAssignForeign = await app.inject({
       method: "PUT",
-      url: `/series/${foreignSeriesId}/uploader`,
+      url: `/series/${foreignSeriesId}/responsible`,
       headers: { cookie: adminCookie },
-      payload: { uploaderId },
+      payload: { responsibleUserId: uploaderId },
     });
     expect(adminAssignForeign.statusCode).toBe(200);
     for (const request of [
       {
         method: "PUT" as const,
-        url: `/series/${foreignSeriesId}/uploader`,
-        payload: { uploaderId: secondUploaderId },
-        cookie: ownerCookie,
-      },
-      {
-        method: "DELETE" as const,
-        url: `/series/${foreignSeriesId}/uploader`,
+        url: `/series/${foreignSeriesId}/responsible`,
+        payload: { responsibleUserId: secondUploaderId },
         cookie: ownerCookie,
       },
       {
         method: "PUT" as const,
-        url: `/series/${ownSeriesId}/uploader`,
-        payload: { uploaderId },
+        url: `/series/${ownSeriesId}/responsible`,
+        payload: { responsibleUserId: uploaderId },
         cookie: uploaderCookie,
       },
     ]) {
@@ -855,12 +1035,8 @@ describe("A1 identity, assignment and chapter numbering", () => {
       { method: "DELETE" as const, url: `/series/${foreignSeriesId}` },
       {
         method: "PUT" as const,
-        url: `/series/${foreignSeriesId}/uploader`,
-        payload: { uploaderId },
-      },
-      {
-        method: "DELETE" as const,
-        url: `/series/${foreignSeriesId}/uploader`,
+        url: `/series/${foreignSeriesId}/responsible`,
+        payload: { responsibleUserId: uploaderId },
       },
     ]) {
       expect(
@@ -1009,7 +1185,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
         .select({ id: seriesAssignments.id })
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, foreignSeriesId)),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
     expect(
       await database.db
         .select({
@@ -1038,7 +1214,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
     ).toBe(204);
   });
 
-  it("keeps concurrent assignment and revocation in one valid row", async () => {
+  it("keeps concurrent responsibility changes in one valid row", async () => {
     const ownerCookie = await login(emails.owner);
     const adminCookie = await login(emails.admin);
     const created = await app.inject({
@@ -1056,57 +1232,45 @@ describe("A1 identity, assignment and chapter numbering", () => {
     const results = await Promise.all([
       app.inject({
         method: "PUT",
-        url: `/series/${seriesId}/uploader`,
+        url: `/series/${seriesId}/responsible`,
         headers: { cookie: adminCookie },
-        payload: { uploaderId },
+        payload: { responsibleUserId: uploaderId },
       }),
       app.inject({
         method: "PUT",
-        url: `/series/${seriesId}/uploader`,
+        url: `/series/${seriesId}/responsible`,
         headers: { cookie: adminCookie },
-        payload: { uploaderId: secondUploaderId },
-      }),
-      app.inject({
-        method: "DELETE",
-        url: `/series/${seriesId}/uploader`,
-        headers: { cookie: adminCookie },
+        payload: { responsibleUserId: secondUploaderId },
       }),
     ]);
     expect(results.map((response) => response.statusCode).sort()).toEqual([
-      200, 200, 204,
+      200, 200,
     ]);
     const rows = await database.db
-      .select({ uploaderId: seriesAssignments.uploaderId })
+      .select({ responsibleUserId: seriesAssignments.responsibleUserId })
       .from(seriesAssignments)
       .where(eq(seriesAssignments.seriesId, seriesId));
-    expect(rows.length).toBeLessThanOrEqual(1);
+    expect(rows).toHaveLength(1);
     if (rows[0])
-      expect([uploaderId, secondUploaderId]).toContain(rows[0].uploaderId);
+      expect([uploaderId, secondUploaderId]).toContain(
+        rows[0].responsibleUserId,
+      );
 
     expect(
       (
         await app.inject({
           method: "PUT",
-          url: `/series/${seriesId}/uploader`,
+          url: `/series/${seriesId}/responsible`,
           headers: { cookie: adminCookie },
-          payload: { uploaderId },
+          payload: { responsibleUserId: uploaderId },
         })
       ).statusCode,
     ).toBe(200);
-    expect(
-      (
-        await app.inject({
-          method: "DELETE",
-          url: `/series/${seriesId}/uploader`,
-          headers: { cookie: adminCookie },
-        })
-      ).statusCode,
-    ).toBe(204);
     expect(
       await database.db
         .select()
         .from(seriesAssignments)
         .where(eq(seriesAssignments.seriesId, seriesId)),
-    ).toHaveLength(0);
+    ).toHaveLength(1);
   });
 });

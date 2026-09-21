@@ -7,6 +7,7 @@ import {
   chapterReplacementItems,
   chapterReplacementOperations,
   chapters,
+  domainEventOutbox,
   images,
   imageVersions,
   mediaEffectOutbox,
@@ -296,6 +297,17 @@ export class DrizzleChapterMediaReplacementRepository
         .returning();
       if (!completed)
         throw new Error("chapter-replacement-completion-conflict");
+      await tx.insert(domainEventOutbox).values({
+        eventType: "upload.completed",
+        aggregateType: "chapter_replacement",
+        aggregateId: operation.id,
+        actorUserId: operation.requestedByUserId,
+        payload: {
+          targetUserId: operation.requestedByUserId,
+          chapterId: chapter.id,
+          operationKind: "chapter_replacement",
+        },
+      });
       const result = completedResult(completed);
       if (!result) throw new Error("chapter-replacement-result-invalid");
       return { outcome: "completed" as const, result };

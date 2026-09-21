@@ -22,6 +22,11 @@ export interface Chapter {
   updatedAt: string;
 }
 
+/** Read projection for the scoped Series chapters collection. */
+export interface SeriesChapterListItem extends Chapter {
+  imageCount: number;
+}
+
 export interface ChapterInput {
   chapterNumber: number;
   title?: string | null;
@@ -33,6 +38,12 @@ export interface ChapterCapabilitiesProjection {
 
 export interface GlobalChapter extends Chapter {
   series: { id: string; title: string; slug: string; coverUrl: string | null };
+  imageCount: number;
+  responsibleUser: {
+    id: string;
+    email: string;
+    role: "admin" | "gestor" | "uploader";
+  } | null;
 }
 
 export interface ChapterHelper {

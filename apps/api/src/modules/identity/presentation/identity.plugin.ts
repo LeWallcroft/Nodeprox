@@ -1,15 +1,15 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
-import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import type { SessionService } from "../../authentication/application/services/session.service.js";
 import { Argon2PasswordHasher } from "../../authentication/infrastructure/crypto/argon2-password-hasher.js";
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
-import type { SessionService } from "../../authentication/application/services/session.service.js";
-import { requireSession } from "../../authentication/presentation/session-guards.js";
-import { validateMutationOrigin } from "../../authentication/presentation/origin-policy.js";
-import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import { UserRepository } from "../../authentication/infrastructure/persistence/drizzle/user.repository.js";
+import { validateMutationOrigin } from "../../authentication/presentation/origin-policy.js";
+import { requireSession } from "../../authentication/presentation/session-guards.js";
+import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import {
   IdentityService,
   IdentityStateConflictError,
@@ -29,6 +29,22 @@ const reviewSchema = z
   })
   .strict();
 const userIdSchema = z.object({ userId: z.uuid() }).strict();
+const lookupSchema = z
+  .object({
+    search: z.string().trim().min(1).max(100).optional(),
+    cursor: z.string().min(1).max(512).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(20),
+  })
+  .strict();
+const managementListSchema = z
+  .object({
+    search: z.string().trim().min(1).max(100).optional(),
+    status: z.enum(["pending", "active", "rejected", "suspended"]).optional(),
+    role: z.enum(["admin", "gestor", "uploader"]).optional(),
+    cursor: z.string().min(1).max(512).optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(10),
+  })
+  .strict();
 
 function problem(
   code: string,
@@ -121,6 +137,15 @@ export function registerIdentityPlugin(
   );
   app.get("/admin/users", { preHandler: session }, async () =>
     service.list(context()),
+  );
+  app.get("/admin/users/lookup", { preHandler: session }, async (request) =>
+    service.lookup(context(), parse(lookupSchema, request.query)),
+  );
+  app.get("/admin/users/management", { preHandler: session }, async (request) =>
+    service.listManagement(
+      context(),
+      parse(managementListSchema, request.query),
+    ),
   );
 
   app.patch(

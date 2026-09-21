@@ -39,6 +39,11 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
   cleanup: string[] = [];
   calls: string[] = [];
   failEvidenceOnce = false;
+  activeImages: Array<{
+    sortOrder: number;
+    logicalFilename: string;
+    currentVersion: number;
+  }> = [];
 
   async claimForProcessing(input: {
     replacementId: string;
@@ -60,6 +65,7 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
         seriesSlug: "one-piece",
         chapterPublicKey: "chapter-1",
         status: "processing" as const,
+        activeImages: this.activeImages,
       },
     };
   }
@@ -213,21 +219,36 @@ describe("CHR3 replacement Worker processing", () => {
     expect(target.repository.manifest).toHaveLength(3);
   });
 
-  it("CHR3-WRK-05 creates opaque final-compatible keys", async () => {
+  it("CHR3-WRK-05 creates versioned final-compatible keys", async () => {
     const target = harness();
     await target.service.process(target.input);
     expect(
-      target.repository.manifest.every((item) =>
-        new RegExp(
-          `^Media/one-piece/chapter-1/${replacementId}-[0-9a-f-]+\\.png$`,
-        ).test(item.candidateStorageKey),
-      ),
-    ).toBe(true);
+      target.repository.manifest.map((item) => item.candidateStorageKey),
+    ).toEqual([
+      "Media/one-piece/chapter-1/01.png",
+      "Media/one-piece/chapter-1/02.png",
+      "Media/one-piece/chapter-1/03.png",
+    ]);
     expect(
       target.repository.manifest.some((item) =>
-        /_v\d+/.test(item.physicalFilename),
+        /^\d{2}\.(?:jpg|jpeg|png|webp|gif)$/.test(item.physicalFilename),
       ),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("CHR3-WRK-05A retains logical names and advances their versions", async () => {
+    const target = harness(2);
+    target.repository.activeImages = [
+      { sortOrder: 1, logicalFilename: "01.jpg", currentVersion: 2 },
+      { sortOrder: 2, logicalFilename: "02.png", currentVersion: 1 },
+    ];
+
+    await target.service.process(target.input);
+
+    expect(target.repository.manifest.map((item) => item.physicalFilename)).toEqual([
+      "01_v3.png",
+      "02_v2.png",
+    ]);
   });
 
   it("CHR3-WRK-06 persists stored evidence for every candidate", async () => {

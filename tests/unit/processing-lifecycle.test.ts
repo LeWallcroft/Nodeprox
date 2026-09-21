@@ -98,6 +98,7 @@ describe("ChapterProcessingService lifecycle", () => {
       input.chapterId,
       input.uploadId,
       false,
+      "user-1",
     );
     expect(retry.storage.delete).not.toHaveBeenCalledWith(
       input.sourceStorageKey,
@@ -119,6 +120,7 @@ describe("ChapterProcessingService lifecycle", () => {
       input.chapterId,
       input.uploadId,
       true,
+      "user-1",
     );
     expect(final.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
   });
@@ -143,6 +145,7 @@ describe("ChapterProcessingService lifecycle", () => {
       input.chapterId,
       input.uploadId,
       false,
+      "user-1",
     );
   });
 

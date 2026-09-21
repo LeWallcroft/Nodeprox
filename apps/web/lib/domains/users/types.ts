@@ -11,6 +11,17 @@ export type ManagedUser = {
   updatedAt: string;
 };
 
+export type ManagedUserProjection = ManagedUser & {
+  assignedSeriesCount: number;
+  lastAccessAt: string | null;
+};
+
+export type ManagedUserPage = {
+  items: ManagedUserProjection[];
+  nextCursor: string | null;
+  total: number;
+};
+
 export type ReviewUserInput = {
   status: Extract<ManagedUserStatus, "active" | "rejected" | "suspended">;
   role?: ManagedUserRole;

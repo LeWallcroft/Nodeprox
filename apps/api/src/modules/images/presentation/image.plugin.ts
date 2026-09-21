@@ -28,6 +28,7 @@ import {
 } from "../application/services/image-query.service.js";
 import {
   ImageReplacementPrepareDeniedError,
+  ImageReplacementPrepareConflictError,
   ImageReplacementPrepareInvalidError,
   ImageReplacementPrepareNotFoundError,
   type PrepareImageReplacementService,
@@ -93,11 +94,10 @@ const replacementSessionResponseSchema = z
   .strict();
 const replacementCompletionResponseSchema = z
   .object({
+    replacementId: z.uuid(),
     imageId: z.uuid(),
-    versionId: z.uuid(),
-    version: z.number().int().positive(),
-    filename: z.string().min(1),
-    publicUrl: z.url(),
+    chapterId: z.uuid(),
+    status: z.enum(["uploaded", "completing", "completed"]),
   })
   .strict();
 const REPLACEMENT_UPLOAD_GRANT_TTL_SECONDS = 15 * 60;
@@ -339,13 +339,12 @@ export function registerImagePlugin(
           replacementId,
           ...(requestId ? { requestId } : {}),
         });
-        return reply.code(200).send(
+        return reply.code(result.status === "completed" ? 200 : 202).send(
           replacementCompletionResponseSchema.parse({
+            replacementId: result.replacementId,
             imageId: result.imageId,
-            versionId: result.versionId,
-            version: result.version,
-            filename: result.filename,
-            publicUrl: result.publicUrl,
+            chapterId: result.chapterId,
+            status: result.status,
           }),
         );
       } catch (error) {
@@ -371,6 +370,8 @@ function mapReplacementPreparationError(error: unknown): AppError {
     return replacementNotFound;
   if (error instanceof ImageReplacementPrepareInvalidError)
     return replacementInvalid;
+  if (error instanceof ImageReplacementPrepareConflictError)
+    return replacementCompletionConflict;
   if (error instanceof UploadTransferProviderError)
     return replacementProviderUnavailable;
   return error instanceof AppError ? error : internal;

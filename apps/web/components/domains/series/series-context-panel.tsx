@@ -11,7 +11,7 @@ export function SeriesContextPanel({
     <aside
       aria-label="Panel contextual de la serie"
       data-open={open}
-      className="min-h-0 w-full overflow-y-auto xl:h-full xl:self-stretch"
+      className="min-h-0 w-full xl:h-full xl:self-stretch"
     >
       {children}
     </aside>

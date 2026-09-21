@@ -1,4 +1,4 @@
-export { sessions, users } from "./authentication.js";
+export { passwordResetTokens, sessions, users } from "./authentication.js";
 export {
   auditLogs,
   auditResultEnum,
@@ -27,6 +27,7 @@ export {
   helperSeriesCooldowns,
 } from "./chapters.js";
 export {
+  seriesCreationGrantIssueSourceEnum,
   seriesCreationGrantStatusEnum,
   seriesCreationGrants,
 } from "./discord.js";

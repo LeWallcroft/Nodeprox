@@ -7,6 +7,8 @@ export {
 
 export interface RequestContext {
   requestId: string;
+  /** Monotonic request-start marker used to record durable audit timing. */
+  requestStartedAt?: number;
   /** The authenticated user when the request has been resolved. */
   actorId?: string;
   userId?: string;

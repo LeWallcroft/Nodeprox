@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
 import { DEFAULT_PUBLIC_MEDIA_ORIGIN } from "@nodeprox/config";
@@ -7,6 +8,11 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import type { NodeProxDatabase } from "../../../database/client.js";
+import {
+  BrevoTransactionalEmail,
+  NoopTransactionalEmail,
+} from "./modules/authentication/infrastructure/email/brevo-transactional-email.js";
+import { registerAccountPlugin } from "./modules/authentication/presentation/account.plugin.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
 import { requireSession } from "./modules/authentication/presentation/session-guards.js";
 import { registerAuditPlugin } from "./modules/authorization/presentation/audit.plugin.js";
@@ -23,25 +29,26 @@ import { registerChapterReplacementPlugin } from "./modules/chapter-replacements
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { DiscordGatewayService } from "./modules/discord/application/discord-gateway.service.js";
 import { DiscordRoleConfigurationService } from "./modules/discord/application/discord-role-configuration.service.js";
+import type { DiscordSeriesChannelGateway } from "./modules/discord/application/discord-series-channel-gateway.js";
 import { ListSeriesCreationGrantsForAdministrationService } from "./modules/discord/application/list-series-creation-grants-for-administration.service.js";
+import { WebSeriesCreationGrantService } from "./modules/discord/application/web-series-creation-grant.service.js";
 import { DiscordBotGuildRoleVerifier } from "./modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
 import { DiscordBotSeriesChannelGateway } from "./modules/discord/infrastructure/discord-bot-series-channel-gateway.js";
 import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "./modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
 import { RedisLinkCodeStore } from "./modules/discord/infrastructure/redis-link-code.store.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
 import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
+import { registerSeriesGrantAdminPlugin } from "./modules/discord/presentation/series-grant-admin.plugin.js";
 import { DrizzleDomainEventOutbox } from "./modules/events/infrastructure/persistence/drizzle-domain-event-outbox.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
 import { HealthService } from "./modules/health/health.service.js";
 import { registerIdentityPlugin } from "./modules/identity/presentation/identity.plugin.js";
-import { ActivateImageCandidateService } from "./modules/images/application/services/activate-image-candidate.service.js";
 import { CompleteImageReplacementService } from "./modules/images/application/services/complete-image-replacement.service.js";
 import { ImageQueryService } from "./modules/images/application/services/image-query.service.js";
 import { PrepareImageReplacementService } from "./modules/images/application/services/prepare-image-replacement.service.js";
 import { DrizzleImageRepository } from "./modules/images/infrastructure/persistence/drizzle/image.repository.js";
 import { DrizzleImageReplacementOperationRepository } from "./modules/images/infrastructure/persistence/drizzle/image-replacement-operation.repository.js";
-import { DrizzleImageVersionResultRepository } from "./modules/images/infrastructure/persistence/drizzle/image-version-result.repository.js";
 import { DrizzleMediaReplacementRepository } from "./modules/images/infrastructure/persistence/drizzle/media-replacement.repository.js";
 import { registerImagePlugin } from "./modules/images/presentation/image.plugin.js";
 import { registerImportBatchPlugin } from "./modules/ingestion/presentation/import-batch.plugin.js";
@@ -52,10 +59,13 @@ import { GetPublishedChapter } from "./modules/publication/application/services/
 import { DrizzlePublishedChapterRepository } from "./modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
 import { registerPublicationPlugin } from "./modules/publication/presentation/publication.plugin.js";
 import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
+import { ListUploadOperationsService } from "./modules/uploads/application/services/list-upload-operations.service.js";
+import { DrizzleUploadOperationReadRepository } from "./modules/uploads/infrastructure/persistence/drizzle/upload-operation-read.repository.js";
 import { B2Storage } from "./modules/uploads/infrastructure/storage/b2.storage.js";
 import { FilesystemStorage } from "./modules/uploads/infrastructure/storage/filesystem.storage.js";
 import { UnavailableUploadTransfer } from "./modules/uploads/infrastructure/storage/unavailable-upload-transfer.js";
 import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
+import { registerUploadCenterPlugin } from "./modules/uploads/presentation/upload-center.plugin.js";
 import { API_LOGGER_OPTIONS } from "./observability/logger.js";
 import {
   DrizzleOperationAuditWriter,
@@ -71,6 +81,8 @@ export interface AppDependencies {
   uploadTransfer?: UploadTransferPort;
   publicMediaOrigin?: string;
   operationAuditWriter?: OperationAuditWriter;
+  /** Dependency-injection seam for explicit compositions, including integration tests. */
+  seriesChannelGateway?: DiscordSeriesChannelGateway;
   discord?: {
     internalToken?: string | undefined;
     botInternalUrl?: string | undefined;
@@ -96,9 +108,9 @@ export function buildApp(
               ? configuredLogger.redact
               : API_LOGGER_OPTIONS.redact,
         };
-  const app = Fastify({ ...options, logger });
+  const app = Fastify({ ...options, logger, genReqId: () => randomUUID() });
 
-  registerRequestContext(app);
+  registerRequestContext(app, dependencies.database);
   registerErrorHandler(
     app,
     dependencies.operationAuditWriter ??
@@ -113,19 +125,50 @@ export function buildApp(
       dependencies.database,
       dependencies.secureCookie ?? false,
     );
+    const email =
+      process.env.EMAIL_PROVIDER === "brevo" &&
+      process.env.BREVO_API_KEY &&
+      process.env.EMAIL_FROM_EMAIL
+        ? new BrevoTransactionalEmail({
+            apiKey: process.env.BREVO_API_KEY,
+            fromEmail: process.env.EMAIL_FROM_EMAIL,
+            fromName: process.env.EMAIL_FROM_NAME ?? "NodeProx",
+          })
+        : new NoopTransactionalEmail();
+    registerAccountPlugin(app, {
+      db: dependencies.database,
+      authentication,
+      email,
+      publicUrl: process.env.APP_PUBLIC_URL ?? "http://localhost:3000",
+      resetTtlMinutes: Number(process.env.PASSWORD_RESET_TTL_MINUTES ?? 30),
+    });
     const authorization = registerAuthorization(
       app,
       dependencies.database,
       authentication,
     );
     const domainEvents = new DrizzleDomainEventOutbox();
+    registerSeriesGrantAdminPlugin(app, {
+      list: new ListSeriesCreationGrantsForAdministrationService(
+        dependencies.database,
+        authorization,
+      ),
+      commands: new WebSeriesCreationGrantService(
+        dependencies.database,
+        authorization,
+        domainEvents,
+      ),
+      authentication,
+    });
     const seriesChannelGateway =
-      dependencies.discord?.botInternalUrl && dependencies.discord.internalToken
+      dependencies.seriesChannelGateway ??
+      (dependencies.discord?.botInternalUrl &&
+      dependencies.discord.internalToken
         ? new DiscordBotSeriesChannelGateway(
             dependencies.discord.botInternalUrl,
             dependencies.discord.internalToken,
           )
-        : undefined;
+        : undefined);
     if (dependencies.discord) {
       const discordService = new DiscordGatewayService(
         dependencies.database,
@@ -153,11 +196,6 @@ export function buildApp(
       );
       registerDiscordPlugin(app, {
         service: discordService,
-        grantAdministration:
-          new ListSeriesCreationGrantsForAdministrationService(
-            dependencies.database,
-            authorization,
-          ),
         internalToken: dependencies.discord.internalToken,
         authentication,
         authorization,
@@ -277,6 +315,15 @@ export function buildApp(
       storageConfig,
       uploadTransfer,
     );
+    registerUploadCenterPlugin(app, {
+      service: new ListUploadOperationsService(
+        new DrizzleUploadOperationReadRepository(dependencies.database),
+      ),
+      sessionGuard: requireSession(
+        authentication.service,
+        authentication.cookies,
+      ),
+    });
     registerImportBatchPlugin(
       app,
       dependencies.database,
@@ -294,10 +341,6 @@ export function buildApp(
       new DrizzleImageReplacementOperationRepository(dependencies.database);
     const publicMediaOrigin =
       dependencies.publicMediaOrigin ?? DEFAULT_PUBLIC_MEDIA_ORIGIN;
-    const imageCandidateActivator = new ActivateImageCandidateService(
-      new DrizzleMediaReplacementRepository(dependencies.database),
-      publicMediaOrigin,
-    );
     registerImagePlugin(app, {
       imageQueryService: new ImageQueryService(
         imageRepository,
@@ -309,6 +352,7 @@ export function buildApp(
           imageRepository,
           chapterPermissions,
           imageReplacementOperations,
+          new DrizzleMediaReplacementRepository(dependencies.database),
           storageConfig.uploadMaxSizeBytes,
         ),
         transfer: uploadTransfer,
@@ -316,12 +360,7 @@ export function buildApp(
       replacementCompletion: {
         service: new CompleteImageReplacementService(
           imageReplacementOperations,
-          new DrizzleImageVersionResultRepository(
-            dependencies.database,
-            publicMediaOrigin,
-          ),
           uploadTransfer,
-          imageCandidateActivator,
           chapterPermissions,
         ),
       },

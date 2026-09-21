@@ -68,11 +68,14 @@ function component(customId: string, shape: "select" | "button" | "modal") {
 }
 
 function customId(payload: unknown, row: number, item: number) {
-  return (
+  const panel = (
     payload as {
       components: Array<{ components: Array<{ data: { custom_id: string } }> }>;
     }
-  ).components[row]!.components[item]!.data.custom_id;
+  ).components[row];
+  const control = panel?.components[item];
+  if (!control) throw new Error("missing-workflow-control");
+  return control.data.custom_id;
 }
 
 describe("/autorizar-serie workflow", () => {

@@ -68,8 +68,9 @@ export class ReplaceImageService {
     if (contentType !== candidateContext.currentContentType)
       throw new ImageReplacementInvalidError();
     const candidateKey = createImageCandidateStorageKey({
-      replacementId: operationId,
       currentStorageKey: candidateContext.currentStorageKey,
+      logicalFilename: candidateContext.logicalFilename,
+      nextVersion: candidateContext.currentVersion + 1,
       contentType,
     });
     let objectWritten = false;

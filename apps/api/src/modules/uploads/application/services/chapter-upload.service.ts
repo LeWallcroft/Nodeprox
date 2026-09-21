@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import {
   UploadTransferObjectNotFoundError,
-  UploadTransferProviderError,
   type UploadTransferPort,
+  UploadTransferProviderError,
   type VerifiedUploadedObject,
 } from "@nodeprox/storage/port";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
@@ -36,6 +36,7 @@ export class ChapterUploadService {
     filename: string;
     contentType: string;
     sizeBytes: number;
+    originRequestId?: string;
   }): Promise<InitiatedChapterUpload> {
     const decision = await this.authorize(input.context, input.chapterId);
     const metadata = validateUploadMetadata({
@@ -69,6 +70,7 @@ export class ChapterUploadService {
         "chapter.upload.initiated",
         input.chapterId,
         "pending",
+        input.originRequestId,
       );
       return {
         chapterId: input.chapterId,
@@ -85,6 +87,7 @@ export class ChapterUploadService {
         "chapter.upload.failed",
         input.chapterId,
         "failed",
+        input.originRequestId,
       );
       if (error instanceof UploadTransferProviderError)
         throw new UploadProviderUnavailableError();
@@ -110,8 +113,16 @@ export class ChapterUploadService {
       verified = await this.transfer.verify({ key: upload.storageKey });
     } catch (error) {
       await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
-      if (error instanceof UploadTransferObjectNotFoundError)
+      if (error instanceof UploadTransferObjectNotFoundError) {
+        await this.safeAudit(
+          input.context.userId,
+          "chapter.upload.completed",
+          input.chapterId,
+          "failed",
+          input.originRequestId,
+        );
         throw new UploadedObjectNotFoundError();
+      }
       if (error instanceof UploadTransferProviderError)
         throw new UploadProviderUnavailableError();
       throw error;
@@ -240,7 +251,7 @@ export class ChapterUploadService {
     actorId: string,
     action: string,
     chapterId: string,
-    result: string,
+    result: "pending" | "completed" | "aborted" | "expired" | "failed",
     requestId?: string,
   ) {
     try {
@@ -249,7 +260,12 @@ export class ChapterUploadService {
         action,
         resourceType: "chapter",
         resourceId: chapterId,
-        result: result === "failed" ? "failed" : "success",
+        result:
+          result === "failed"
+            ? "failed"
+            : result === "pending"
+              ? null
+              : "success",
         ...(requestId ? { requestId } : {}),
         metadata: { result },
       });

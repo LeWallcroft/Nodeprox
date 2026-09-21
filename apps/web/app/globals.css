@@ -138,3 +138,47 @@
     background-position: -200% 0;
   }
 }
+
+.dashboard-theme {
+  --color-background: #111419;
+  --color-surface: #191d24;
+  --color-surface-elevated: #20252e;
+  --color-surface-hover: #2a303b;
+  --color-border: #272e38;
+  --color-border-active: #a99ae8;
+  --color-text: #eef0f5;
+  --color-text-secondary: #bdc4d0;
+  --color-muted: #9ca6b7;
+  --color-primary: #7764bc;
+  --color-primary-hover: #8874cc;
+  --color-primary-soft: #292738;
+  --color-sidebar: #15181e;
+  --color-sidebar-elevated: #20252e;
+  --color-sidebar-active: #292738;
+  --color-sidebar-border: #2c333e;
+  --color-sidebar-text: #eef0f5;
+  --color-sidebar-muted: #9ca6b7;
+  --surface-input: #14181f;
+  --border-subtle: #282f39;
+  --border-focus: #a99ae8;
+  color-scheme: dark;
+}
+
+.dashboard-theme input:not([type="checkbox"]):not([type="radio"]),
+.dashboard-theme textarea,
+.dashboard-theme select {
+  background-color: var(--surface-input);
+}
+
+.dashboard-theme [aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+.dashboard-theme input:disabled,
+.dashboard-theme textarea:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.dashboard-theme input:read-only,
+.dashboard-theme textarea:read-only {
+  color: var(--color-text-secondary);
+}

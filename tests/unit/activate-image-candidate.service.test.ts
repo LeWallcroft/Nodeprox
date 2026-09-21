@@ -40,8 +40,9 @@ function subject(version = 1) {
     enqueueOrphanCleanup: vi.fn(),
   };
   const candidateStorageKey = createImageCandidateStorageKey({
-    replacementId: `operation-${version + 1}`,
     currentStorageKey: `Media/series/1/${version === 1 ? "00.jpg" : `00_v${version}.jpg`}`,
+    logicalFilename: "00.jpg",
+    nextVersion: version + 1,
     contentType: "image/jpeg",
   });
   return {
@@ -110,6 +111,7 @@ describe("ActivateImageCandidateService", () => {
     expect(completeReplacementOperation).toHaveBeenCalledWith({
       operationId: "op-1",
       imageId: "image-1",
+      actorId: "user-1",
       resultImageVersionId: "version-2",
       completedAt,
     });
@@ -138,8 +140,8 @@ describe("ActivateImageCandidateService", () => {
     });
     expect(result.version).toBe(3);
     expect(first.candidateStorageKey).not.toBe(second.candidateStorageKey);
-    expect(first.candidateStorageKey).not.toMatch(/_v2(?:\.|$)/);
-    expect(second.candidateStorageKey).not.toMatch(/_v3(?:\.|$)/);
+    expect(first.candidateStorageKey).toMatch(/_v2(?:\.|$)/);
+    expect(second.candidateStorageKey).toMatch(/_v3(?:\.|$)/);
     expect(first.repository).not.toHaveProperty("put");
     expect(first.repository).not.toHaveProperty("verify");
   });

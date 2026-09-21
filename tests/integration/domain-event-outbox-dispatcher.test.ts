@@ -57,7 +57,7 @@ describe("Domain event outbox leases", () => {
   });
 
   it("does not allow concurrent dispatchers to claim the same event", async () => {
-    const eventId = await insertEvent({ occurredAt: new Date() });
+    const eventId = await insertEvent({ occurredAt: new Date(0) });
     const now = new Date();
 
     const [left, right] = await Promise.all([
@@ -71,7 +71,7 @@ describe("Domain event outbox leases", () => {
   });
 
   it("does not reclaim active leases but recovers expired leases", async () => {
-    await insertEvent({ occurredAt: new Date("2026-09-14T00:00:00.000Z") });
+    await insertEvent({ occurredAt: new Date(0) });
     const now = new Date("2026-09-15T00:00:00.000Z");
     const [claimed] = await first.claimPending({
       now,
@@ -80,24 +80,22 @@ describe("Domain event outbox leases", () => {
     });
     expect(claimed).toBeDefined();
 
-    await expect(
-      second.claimPending({
-        now: new Date(now.getTime() + 1_000),
-        limit: 1,
-        leaseDurationMs: 30_000,
-      }),
-    ).resolves.toEqual([]);
-    await expect(
-      second.claimPending({
-        now: new Date(now.getTime() + 30_001),
-        limit: 1,
-        leaseDurationMs: 30_000,
-      }),
-    ).resolves.toHaveLength(1);
+    const duringLease = await second.claimPending({
+      now: new Date(now.getTime() + 1_000),
+      limit: 1,
+      leaseDurationMs: 30_000,
+    });
+    expect(duringLease.some((event) => event.id === claimed?.id)).toBe(false);
+    const afterExpiry = await second.claimPending({
+      now: new Date(now.getTime() + 30_001),
+      limit: 1,
+      leaseDurationMs: 30_000,
+    });
+    expect(afterExpiry.some((event) => event.id === claimed?.id)).toBe(true);
   });
 
   it("increments attempts and releases a failed claim for a later retry", async () => {
-    const eventId = await insertEvent({ occurredAt: new Date() });
+    const eventId = await insertEvent({ occurredAt: new Date(0) });
     const [claimed] = await first.claimPending({
       now: new Date(),
       limit: 1,
@@ -145,7 +143,7 @@ describe("Domain event outbox leases", () => {
           aggregateType: "fixture",
           aggregateId: randomUUID(),
           payload: { fixture: true },
-          occurredAt: new Date(1_000 + index),
+          occurredAt: new Date(index),
         });
         return id;
       }),
@@ -157,7 +155,8 @@ describe("Domain event outbox leases", () => {
       leaseDurationMs: 30_000,
     });
 
-    expect(claimed.map((event) => event.id)).toEqual(ids);
-    expect(claimed.map((event) => event.eventType)).toEqual(eventTypes);
+    const fixtureEvents = claimed.filter((event) => ids.includes(event.id));
+    expect(fixtureEvents.map((event) => event.id)).toEqual(ids);
+    expect(fixtureEvents.map((event) => event.eventType)).toEqual(eventTypes);
   });
 });

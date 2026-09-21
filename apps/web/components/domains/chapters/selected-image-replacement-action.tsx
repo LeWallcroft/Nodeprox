@@ -3,6 +3,7 @@
 import { ImagePlus, LoaderCircle } from "lucide-react";
 import { type ChangeEvent, useRef, useState } from "react";
 import { hasCapability } from "../../../lib/auth/visibility";
+import { ApiError } from "../../../lib/api/types";
 import {
   ImageReplacementFileValidationError,
   validateImageReplacementFile,
@@ -41,6 +42,16 @@ export function imageReplacementErrorMessage(
   error: unknown,
   failurePhase: "preparing" | "uploading" | "completing" | null,
 ) {
+  if (error instanceof ApiError) {
+    if (error.code === "image-replacement-conflict")
+      return "Ya hay un cambio de imagen o de capítulo en curso. Espera a que finalice antes de intentar nuevamente.";
+    if (error.code === "invalid-proxy-path")
+      return "La aplicación no pudo conectar el reemplazo. Actualiza la página e inténtalo nuevamente.";
+    if (error.code === "authorization-denied")
+      return "No tienes permisos para cambiar esta imagen.";
+    if (error.code === "upload-provider-unavailable")
+      return "El almacenamiento no está disponible temporalmente. Inténtalo nuevamente.";
+  }
   if (error instanceof ImageReplacementFileValidationError)
     return "Selecciona una imagen JPG, PNG, WEBP o GIF válida.";
   if (failurePhase === "uploading")
@@ -157,7 +168,7 @@ export function SelectedImageReplacementAction({
           className="text-[13px] text-success"
           role="status"
         >
-          Imagen actualizada
+          Cambio enviado al Centro de cargas
         </p>
       ) : null}
     </div>

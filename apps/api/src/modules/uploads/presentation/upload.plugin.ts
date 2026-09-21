@@ -1,21 +1,25 @@
-import type { UploadTransferPort } from "@nodeprox/storage/port";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
+import type { UploadTransferPort } from "@nodeprox/storage/port";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import { AppError } from "../../../errors/app-error.js";
-import { getRequestContext } from "../../../plugins/request-context.js";
-import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
+import {
+  getRequestContext,
+  markOperationAuditRecorded,
+  setOperationAuditContext,
+} from "../../../plugins/request-context.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
+import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
 import {
   ChapterUploadService,
   UploadConflictError,
   UploadDeniedError,
-  UploadNotFoundError,
   UploadedObjectMismatchError,
   UploadedObjectNotFoundError,
+  UploadNotFoundError,
   UploadProviderUnavailableError,
 } from "../application/services/chapter-upload.service.js";
 import {
@@ -168,14 +172,23 @@ export function registerUploadPlugin(
       try {
         const { chapterId } = parse(paramsSchema, request.params);
         const body = parse(initiateSchema, request.body);
-        return reply.code(201).send(
-          await service.initiate({
-            context: context(),
-            chapterId,
-            ...body,
-          }),
-        );
+        setOperationAuditContext({
+          action: "chapter.upload.initiated",
+          resourceType: "chapter",
+          chapterId,
+        });
+        const requestId = getRequestContext()?.requestId;
+        const result = await service.initiate({
+          context: context(),
+          chapterId,
+          ...body,
+          ...(requestId ? { originRequestId: requestId } : {}),
+        });
+        markOperationAuditRecorded();
+        return reply.code(201).send(result);
       } catch (error) {
+        if (error instanceof UploadProviderUnavailableError)
+          markOperationAuditRecorded();
         mapUploadError(error);
       }
     },
@@ -191,12 +204,19 @@ export function registerUploadPlugin(
           request.params,
         );
         const requestId = getRequestContext()?.requestId;
-        return await service.complete({
+        setOperationAuditContext({
+          action: "chapter.upload.completed",
+          resourceType: "chapter",
+          chapterId,
+        });
+        const result = await service.complete({
           context: context(),
           chapterId,
           uploadId,
           ...(requestId ? { originRequestId: requestId } : {}),
         });
+        markOperationAuditRecorded();
+        return result;
       } catch (error) {
         mapUploadError(error);
       }
@@ -212,7 +232,13 @@ export function registerUploadPlugin(
           uploadParamsSchema,
           request.params,
         );
+        setOperationAuditContext({
+          action: "chapter.upload.aborted",
+          resourceType: "chapter",
+          chapterId,
+        });
         await service.abort({ context: context(), chapterId, uploadId });
+        markOperationAuditRecorded();
         return reply.code(204).send();
       } catch (error) {
         mapUploadError(error);

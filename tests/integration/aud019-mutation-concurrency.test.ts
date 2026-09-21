@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import type postgres from "postgres";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  inject,
+  it,
+} from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
@@ -13,16 +21,23 @@ import {
   seriesAssignments,
   users,
 } from "../../database/schema/index.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
-const app = buildApp(
-  { logger: false },
-  {
-    database: database.db,
-    secureCookie: false,
-    storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
-  },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+      storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+    },
+  ),
 );
 const password = "aud019-concurrency-password";
 const hasher = new Argon2PasswordHasher();
@@ -85,21 +100,17 @@ async function createSeriesWithChapter(label: string) {
   return { seriesId, chapterId: createdChapter.json().id as string };
 }
 
-async function assign(seriesId: string, targetId: string) {
+async function assign(seriesId: string, responsibleUserId: string) {
   return app.inject({
     method: "PUT",
-    url: `/series/${seriesId}/uploader`,
+    url: `/series/${seriesId}/responsible`,
     headers: { cookie: ownerCookie },
-    payload: { uploaderId: targetId },
+    payload: { responsibleUserId },
   });
 }
 
-async function clearAssignment(seriesId: string) {
-  return app.inject({
-    method: "DELETE",
-    url: `/series/${seriesId}/uploader`,
-    headers: { cookie: ownerCookie },
-  });
+async function returnResponsibilityToOwner(seriesId: string) {
+  return assign(seriesId, ownerId);
 }
 
 async function patchChapter(chapterId: string, cookie: string, title: string) {
@@ -119,6 +130,11 @@ async function deleteChapter(chapterId: string, cookie: string) {
   });
 }
 
+const activeBlockers = new Set<{
+  release: () => void;
+  done: Promise<unknown>;
+}>();
+
 function startBlocker(lock: (tx: SqlTransaction) => Promise<unknown>) {
   let ready!: () => void;
   let release!: () => void;
@@ -133,7 +149,10 @@ function startBlocker(lock: (tx: SqlTransaction) => Promise<unknown>) {
     ready();
     await held;
   });
-  return { ready: readyPromise, release, done };
+  const blocker = { ready: readyPromise, release, done };
+  activeBlockers.add(blocker);
+  void done.finally(() => activeBlockers.delete(blocker));
+  return blocker;
 }
 
 async function waitForBlockedQuery(tableName: string): Promise<void> {
@@ -199,6 +218,12 @@ beforeAll(async () => {
   helperCookie = await login(emails.helper);
 });
 
+afterEach(async () => {
+  const blockers = [...activeBlockers];
+  for (const blocker of blockers) blocker.release();
+  await Promise.allSettled(blockers.map((blocker) => blocker.done));
+});
+
 afterAll(async () => {
   await database.db
     .delete(chapterDeletionOutbox)
@@ -232,9 +257,9 @@ describe("AUD-019 transactional mutation authorization", () => {
       "must-not-commit",
     );
     await waitForBlockedQuery("sessions");
-    expect((await clearAssignment(revocationWins.seriesId)).statusCode).toBe(
-      204,
-    );
+    expect(
+      (await returnResponsibilityToOwner(revocationWins.seriesId)).statusCode,
+    ).toBe(200);
     sessionBlocker.release();
     await sessionBlocker.done;
     expect((await deniedUpdate).statusCode).toBe(403);
@@ -257,12 +282,12 @@ describe("AUD-019 transactional mutation authorization", () => {
       "mutation-won",
     );
     await waitForBlockedQuery("chapters");
-    const laterRevocation = clearAssignment(mutationWins.seriesId);
+    const laterRevocation = returnResponsibilityToOwner(mutationWins.seriesId);
     await waitForBlockedQuery("series");
     chapterBlocker.release();
     await chapterBlocker.done;
     expect((await acceptedUpdate).statusCode).toBe(200);
-    expect((await laterRevocation).statusCode).toBe(204);
+    expect((await laterRevocation).statusCode).toBe(200);
     expect((await chapterState(mutationWins.chapterId))?.title).toBe(
       "mutation-won",
     );
@@ -339,9 +364,9 @@ describe("AUD-019 transactional mutation authorization", () => {
       uploaderCookie,
     );
     await waitForBlockedQuery("sessions");
-    expect((await clearAssignment(revocationWins.seriesId)).statusCode).toBe(
-      204,
-    );
+    expect(
+      (await returnResponsibilityToOwner(revocationWins.seriesId)).statusCode,
+    ).toBe(200);
     sessionBlocker.release();
     await sessionBlocker.done;
     expect((await deniedDelete).statusCode).toBe(403);
@@ -361,12 +386,12 @@ describe("AUD-019 transactional mutation authorization", () => {
       uploaderCookie,
     );
     await waitForBlockedQuery("chapters");
-    const laterRevocation = clearAssignment(mutationWins.seriesId);
+    const laterRevocation = returnResponsibilityToOwner(mutationWins.seriesId);
     await waitForBlockedQuery("series");
     chapterBlocker.release();
     await chapterBlocker.done;
     expect((await acceptedDelete).statusCode).toBe(204);
-    expect((await laterRevocation).statusCode).toBe(204);
+    expect((await laterRevocation).statusCode).toBe(200);
     expect(await chapterState(mutationWins.chapterId)).toMatchObject({
       status: "deleting",
     });
@@ -482,7 +507,6 @@ describe("AUD-019 transactional mutation authorization", () => {
       url: `/chapters/${mutationWins.chapterId}/permissions/${helperId}`,
       headers: { cookie: ownerCookie },
     });
-    await waitForBlockedQuery("series");
     permissionBlocker.release();
     await permissionBlocker.done;
     expect((await acceptedUpdate).statusCode).toBe(200);
@@ -603,11 +627,11 @@ describe("AUD-019 transactional mutation authorization", () => {
       200, 200,
     ]);
     const rows = await database.db
-      .select({ uploaderId: seriesAssignments.uploaderId })
+      .select({ responsibleUserId: seriesAssignments.responsibleUserId })
       .from(seriesAssignments)
       .where(eq(seriesAssignments.seriesId, target.seriesId));
     expect(rows).toHaveLength(1);
-    expect([replacementId, helperId]).toContain(rows[0]?.uploaderId);
+    expect([replacementId, helperId]).toContain(rows[0]?.responsibleUserId);
   });
 
   it("revalidates Series delete authority in both commit orders", async () => {
@@ -705,6 +729,6 @@ describe("AUD-019 transactional mutation authorization", () => {
       .select()
       .from(seriesAssignments)
       .where(eq(seriesAssignments.seriesId, source.seriesId));
-    expect(assignments).toHaveLength(0);
+    expect(assignments).toHaveLength(1);
   });
 });

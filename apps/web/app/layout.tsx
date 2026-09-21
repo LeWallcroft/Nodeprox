@@ -5,6 +5,7 @@ import { QueryProvider } from "../components/providers/query-provider";
 export const metadata: Metadata = {
   title: "NodeProx Dashboard",
   description: "NodeProx content operations dashboard",
+  icons: { icon: "/icon.svg" },
 };
 
 export default function RootLayout({
@@ -12,7 +13,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="es">
-      <body>
+      <body className="dashboard-theme">
         <QueryProvider>{children}</QueryProvider>
       </body>
     </html>

@@ -284,6 +284,40 @@ export class SeriesService {
     return this.assignResponsible(context, seriesId, uploaderId);
   }
 
+  async releaseUploader(context: AuthorizationContext, seriesId: string) {
+    const managed = await this.findManaged(
+      context,
+      seriesId,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+    );
+    if (!managed || "forbidden" in managed) return managed;
+    return this.assignResponsible(context, seriesId, managed.createdBy);
+  }
+
+  async replaceUserAssignments(
+    context: AuthorizationContext,
+    responsibleUserId: string,
+    seriesIds: readonly string[],
+  ) {
+    this.requireSession(context);
+    const management = await this.authorization.authorize(
+      context,
+      PERMISSIONS.ADMIN_USERS_MANAGE,
+    );
+    if (!management.allowed) return { forbidden: true as const };
+    const result = await this.mutations.replaceUserAssignmentsIfAuthorized({
+      actor: context,
+      responsibleUserId,
+      seriesIds,
+    });
+    if (result.outcome === "denied") return { forbidden: true as const };
+    if (result.outcome === "not-found") return null;
+    if (result.outcome === "invalid-target")
+      return { invalidTarget: true as const };
+    if (result.outcome === "conflict") return { conflict: true as const };
+    return result;
+  }
+
   async listResponsibleCandidates(
     context: AuthorizationContext,
     seriesId: string,

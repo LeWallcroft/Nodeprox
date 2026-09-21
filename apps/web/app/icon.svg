@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>NodeProx</title>
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#9a75ff"/>
+      <stop offset="1" stop-color="#5d35db"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="#121722"/>
+  <path d="M18 22 32 14l14 8v20L32 50l-14-8V22Z" fill="url(#g)"/>
+  <path d="m25 25 7 4 7-4M25 39l7-4 7 4M32 29v6" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

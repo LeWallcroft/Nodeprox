@@ -24,7 +24,7 @@ export function NotificationPanel({
   return (
     <section
       aria-label="Notificaciones"
-      className="absolute right-0 top-[calc(100%+0.75rem)] w-[min(25rem,calc(100vw-1.5rem))] rounded-panel border border-border bg-surface-elevated p-3 shadow-panel"
+      className="absolute right-0 top-[calc(100%+0.75rem)] w-[min(25rem,calc(100vw-1.5rem))] rounded-panel border border-[var(--border-subtle)] bg-surface-elevated p-3 shadow-panel"
       role="dialog"
     >
       <header className="mb-2 flex items-center justify-between gap-3 px-1">
@@ -54,7 +54,7 @@ export function NotificationPanel({
       {isLoading ? <NotificationPanelLoading /> : null}
       {isError ? (
         <p
-          className="m-0 rounded-control border border-danger/40 bg-danger-soft px-3 py-4 text-center text-sm text-text"
+          className="m-0 rounded-control border border-[var(--color-danger)] bg-danger-soft px-3 py-4 text-center text-sm text-text"
           role="alert"
         >
           No se pudieron cargar las notificaciones.
@@ -106,7 +106,7 @@ function NotificationItem({
     <button
       className={`w-full rounded-control border px-3 py-2.5 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
         unread
-          ? "border-primary/30 bg-primary-soft/60 hover:bg-primary-soft"
+          ? "border-[var(--border-subtle)] bg-primary-soft hover:bg-surface-hover"
           : "border-transparent bg-surface hover:bg-surface-hover"
       }`}
       type="button"

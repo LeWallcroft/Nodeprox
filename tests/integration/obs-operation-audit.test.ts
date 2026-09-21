@@ -1,7 +1,6 @@
-import { and, eq, inArray } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inject } from "vitest";
+import { and, eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
@@ -12,12 +11,22 @@ import {
   sessions,
   users,
 } from "../../database/schema/index.js";
+import {
+  FakeDiscordSeriesChannelGateway,
+  withM2DSeriesFixtures,
+} from "./helpers/discord-series-channel-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
-const app = buildApp(
-  { logger: false },
-  { database: database.db, secureCookie: false },
+const app = withM2DSeriesFixtures(
+  buildApp(
+    { logger: false },
+    {
+      database: database.db,
+      secureCookie: false,
+      seriesChannelGateway: new FakeDiscordSeriesChannelGateway(),
+    },
+  ),
 );
 const password = "obs-audit-test-password";
 const ownerId = randomUUID();
@@ -91,7 +100,11 @@ describe("operation audit context", () => {
     const created = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/chapters`,
-      headers: { cookie: ownerCookie },
+      headers: {
+        cookie: ownerCookie,
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128.0.0.0 Safari/537.36",
+      },
       payload: { chapterNumber: 10 },
     });
     expect(created.statusCode).toBe(201);
@@ -144,20 +157,97 @@ describe("operation audit context", () => {
       requestId,
     });
 
+    await database.db.insert(auditLogs).values({
+      actorId: ownerId,
+      action: "chapter.upload.completed",
+      resourceType: "chapter",
+      resourceId: createdChapterId,
+      metadata: {
+        imageCount: 11,
+        nested: { safe: "visible", secretToken: "must-not-leak" },
+      },
+    });
+
     const auditResponse = await app.inject({
       method: "GET",
       url: "/admin/audit",
       headers: { cookie: adminCookie },
     });
     expect(auditResponse.statusCode).toBe(200);
-    expect(auditResponse.json()).toEqual(
-      expect.arrayContaining([
+    const auditPage = auditResponse.json();
+    expect(auditPage).toMatchObject({
+      total: expect.any(Number),
+      items: expect.arrayContaining([
         expect.objectContaining({
           requestId,
           result: "rejected",
           reasonCode: "chapter-conflict",
         }),
       ]),
+    });
+    expect(auditPage.items).toContainEqual(
+      expect.objectContaining({
+        requestId: createdRequestId,
+        resource: expect.objectContaining({
+          type: "chapter",
+          id: createdChapterId,
+          chapter: expect.objectContaining({ number: 10 }),
+          series: expect.objectContaining({
+            id: seriesId,
+            title: "OBS audit series",
+          }),
+        }),
+        request: expect.objectContaining({
+          method: "POST",
+          browser: "Chrome 128.0.0.0",
+          operatingSystem: "Windows 10/11",
+        }),
+      }),
     );
+
+    const filteredPage = await app.inject({
+      method: "GET",
+      url: `/admin/audit?limit=1&result=rejected&search=chapter&actorId=${ownerId}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(filteredPage.statusCode).toBe(200);
+    expect(filteredPage.json()).toMatchObject({
+      total: 1,
+      items: [
+        expect.objectContaining({
+          action: "chapter.created",
+          result: "rejected",
+        }),
+      ],
+      nextCursor: null,
+    });
+
+    const safeMetadataPage = await app.inject({
+      method: "GET",
+      url: "/admin/audit?limit=10&search=upload",
+      headers: { cookie: adminCookie },
+    });
+    expect(safeMetadataPage.statusCode).toBe(200);
+    expect(safeMetadataPage.json().items).toContainEqual(
+      expect.objectContaining({
+        metadata: { imageCount: 11, nested: { safe: "visible" } },
+      }),
+    );
+
+    const exportResponse = await app.inject({
+      method: "GET",
+      url: "/admin/audit/export?result=rejected",
+      headers: { cookie: adminCookie },
+    });
+    expect(exportResponse.statusCode).toBe(200);
+    expect(exportResponse.headers["content-type"]).toContain("text/csv");
+    expect(exportResponse.body).toContain("chapter.created");
+
+    const denied = await app.inject({
+      method: "GET",
+      url: "/admin/audit",
+      headers: { cookie: ownerCookie },
+    });
+    expect(denied.statusCode).toBe(403);
   });
 });

@@ -6,6 +6,7 @@ export const queryKeys = {
   },
   users: {
     list: ["admin", "users"] as const,
+    lookup: (search: string) => ["admin", "users", "lookup", search] as const,
   },
   series: {
     list: ["series", "list"] as const,
@@ -30,6 +31,9 @@ export const queryKeys = {
   ingestion: {
     batch: (batchId: string) => ["ingestion", "batch", batchId] as const,
   },
+  uploads: {
+    operations: ["uploads", "operations"] as const,
+  },
   publication: {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,
   },
@@ -46,8 +50,22 @@ export const queryKeys = {
     all: ["authorizations"] as const,
     mine: (status?: string) =>
       ["authorizations", "mine", status ?? "all"] as const,
-    admin: (status?: string) =>
-      ["authorizations", "admin", status ?? "all"] as const,
+    admin: (input?: {
+      status?: string | undefined;
+      search?: string | undefined;
+      targetUserId?: string | undefined;
+      cursor?: string | undefined;
+    }) =>
+      [
+        "authorizations",
+        "admin",
+        input?.status ?? "all",
+        input?.search ?? "",
+        input?.targetUserId ?? "",
+        input?.cursor ?? "first",
+      ] as const,
+    history: (grantId: string) =>
+      ["authorizations", "history", grantId] as const,
   },
   notifications: {
     all: ["notifications"] as const,

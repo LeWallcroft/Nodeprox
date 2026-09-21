@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { MediaStorageKey } from "./media-storage-key.js";
+import { MediaVersion } from "./media-version.js";
 
 const extensionByContentType = {
   "image/jpeg": "jpg",
@@ -16,20 +16,29 @@ export class InvalidImageCandidateStorageKeyError extends Error {
 }
 
 export function createImageCandidateStorageKey(input: {
-  replacementId: string;
   currentStorageKey: string;
+  logicalFilename: string;
+  nextVersion: number;
   contentType: string;
 }) {
   const extension =
     extensionByContentType[
       input.contentType as keyof typeof extensionByContentType
     ];
-  if (!extension || input.replacementId.trim().length === 0)
+  if (!extension || !Number.isSafeInteger(input.nextVersion) || input.nextVersion <= 1)
     throw new InvalidImageCandidateStorageKeyError();
   const current = MediaStorageKey.parseExisting(input.currentStorageKey);
-  return MediaStorageKey.forPhysicalFilename({
+  return MediaStorageKey.forVersion({
     seriesSlug: current.seriesSlug,
     chapterPublicKey: current.chapterPublicKey,
-    physicalFilename: `${input.replacementId}-${randomUUID()}.${extension}`,
+    logicalFilename: withExtension(input.logicalFilename, extension),
+    version: MediaVersion.parse(input.nextVersion),
   }).storageKey;
+}
+
+function withExtension(logicalFilename: string, extension: string): string {
+  const dot = logicalFilename.lastIndexOf(".");
+  if (dot <= 0 || logicalFilename.includes("/") || logicalFilename.includes("\\"))
+    throw new InvalidImageCandidateStorageKeyError();
+  return `${logicalFilename.slice(0, dot)}.${extension}`;
 }

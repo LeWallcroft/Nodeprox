@@ -1,4 +1,3 @@
-import { Eye } from "lucide-react";
 import type { SeriesListItem } from "../../../lib/domains/series/view-model";
 import {
   DataTable,
@@ -26,6 +25,7 @@ export function SeriesList({
 }) {
   return (
     <DataTable
+      fillRemainingSpace={Boolean(minTableHeightClassName)}
       label="Series"
       {...(minTableHeightClassName
         ? { minHeightClassName: minTableHeightClassName }
@@ -40,27 +40,26 @@ export function SeriesList({
           <th className="p-3">Imágenes</th>
           <th className="p-3">Última actualización</th>
           <th className="p-3">Responsable</th>
-          <th className="p-3">Acciones</th>
         </tr>
       </thead>
       <tbody>
         {items.length === 0 ? (
           <DataTableEmptyRow
-            colSpan={8}
+            colSpan={7}
             title="No se encontraron resultados."
             description="No hay Series que coincidan con los filtros actuales."
           />
         ) : (
-          items.map((series) => {
+          items.map((series, index) => {
             const selected = selectedId === series.id;
             const responsible = series.responsibleUser?.email;
             return (
               <tr
                 {...getSelectableTableRowProps(() => onSelect(series.id))}
-                className={`cursor-pointer border-b border-border transition-colors last:border-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${selected ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
+                className={`h-[76px] cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${index === items.length - 1 ? "border-b-0" : "border-b border-border"} ${selected ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
                 key={series.id}
               >
-                <td className="p-3">
+                <td className="p-3 align-middle">
                   <button
                     aria-label={`Seleccionar ${series.title}`}
                     className="rounded-control focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -77,43 +76,37 @@ export function SeriesList({
                     />
                   </button>
                 </td>
-                <td className="min-w-[14rem] p-3">
+                <td className="min-w-[14rem] p-3 align-middle">
                   <button
                     aria-pressed={selected}
-                    className="grid text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                    className="grid min-w-0 grid-rows-[2rem_1rem] gap-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
                     type="button"
                     onClick={(event) => {
                       stopTableRowSelection(event);
                       onSelect(series.id);
                     }}
                   >
-                    <span className="line-clamp-2 font-semibold text-primary">
+                    <span className="line-clamp-2 h-8 overflow-hidden text-sm leading-4 font-semibold text-text">
                       {series.title}
                     </span>
-                    <span className="max-w-[18rem] truncate text-xs text-muted">
+                    <span className="h-4 max-w-[18rem] truncate text-xs leading-4 text-muted">
                       {series.slug}
                     </span>
                   </button>
                 </td>
-                <td className="p-3">
+                <td className="p-3 align-middle">
                   <StatusBadge label="Activa" tone="success" />
                 </td>
-                <td
-                  className="p-3 text-muted"
-                  title="Dato no disponible en la proyección actual"
-                >
-                  —
+                <td className="p-3 align-middle text-muted">
+                  {series.chapterCount}
                 </td>
-                <td
-                  className="p-3 text-muted"
-                  title="Dato no disponible en la proyección actual"
-                >
-                  —
+                <td className="p-3 align-middle text-muted">
+                  {series.imageCount}
                 </td>
-                <td className="whitespace-nowrap p-3 text-muted">
+                <td className="p-3 align-middle whitespace-nowrap text-muted">
                   {new Date(series.updatedAt).toLocaleDateString("es-PE")}
                 </td>
-                <td className="p-3">
+                <td className="p-3 align-middle">
                   {responsible ? (
                     <span className="flex min-w-36 items-center gap-2 text-sm text-muted">
                       <span
@@ -127,20 +120,6 @@ export function SeriesList({
                   ) : (
                     <span className="text-muted">—</span>
                   )}
-                </td>
-                <td className="p-3">
-                  <button
-                    aria-label={`Ver detalle de ${series.title}`}
-                    className="inline-flex size-8 items-center justify-center rounded-control border border-border bg-surface text-text hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                    title="Ver detalle"
-                    type="button"
-                    onClick={(event) => {
-                      stopTableRowSelection(event);
-                      onSelect(series.id);
-                    }}
-                  >
-                    <Eye aria-hidden="true" className="size-4" />
-                  </button>
                 </td>
               </tr>
             );

@@ -18,7 +18,7 @@ describe("Series-scoped Chapters presentation", () => {
     expect(page).toContain("setSelectedChapterId(initialChapterId)");
   });
 
-  it("keeps contextual actions, images, and metrics bound to real IDs", () => {
+  it("keeps contextual actions and images bound to real IDs", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/series/[seriesId]/chapters/page.tsx",
       "utf8",
@@ -28,19 +28,16 @@ describe("Series-scoped Chapters presentation", () => {
       "utf8",
     );
 
-    expect(page).toContain("Crear capítulo");
-    expect(page).toContain("useCreateChapter(seriesId)");
+    expect(page).toContain("GlobalChapterCreateDialog");
+    expect(page).toContain("fixedSeries");
     expect(page).toContain("BulkChapterUploadDialog");
     expect(page).toContain("AssignChapterCollaboratorDialog");
     expect(page).toContain("selectedChapterId");
     expect(page).toContain("QuickChapterImagesDialog");
-    expect(page).toContain("remainingImages > 0");
-    expect(page).toContain("Sin actividad reciente");
-    expect(page).toContain("h-52 overflow-y-auto");
-    expect(detail).toContain("showMetricsPlaceholder");
-    expect(detail).toContain("Métricas");
-    expect(detail).toContain("Muy pronto");
-    expect(detail).not.toContain("12,450");
+    expect(page).not.toContain("mt-4 grid gap-4 lg:grid-cols-3");
+    expect(page).toContain("showSeriesLink={false}");
+    expect(detail).toContain("<DetailPanel>");
+    expect(detail).toContain("UserRoundPlus");
   });
 
   it("gates upload and create entry points independently in the top action bar", () => {

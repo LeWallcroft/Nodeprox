@@ -16,6 +16,7 @@ import {
   chapterDeletionOutbox,
   chapterPermissions,
   chapters,
+  images,
   series,
   seriesAssignments,
   seriesCreationGrants,
@@ -38,6 +39,7 @@ import { evaluateChapterContextualAuthorization } from "../../../../chapters/dom
 import type { DomainEventOutbox } from "../../../../events/application/domain-event-outbox.js";
 import type {
   ChapterCoreRepositoryPort,
+  SeriesListProjection,
   SeriesMutationBoundaryPort,
   SeriesRepositoryPort,
 } from "../../../application/ports/series.ports.js";
@@ -283,13 +285,12 @@ export class DrizzleSeriesRepository
   }
 
   async listAll() {
-    const rows = await this.db.select().from(series);
-    return rows.map(toSeries);
+    return this.listSeriesProjection();
   }
 
   async listWithHelperAccess(userId: string) {
     const rows = await this.db
-      .selectDistinct({ series })
+      .selectDistinct({ id: series.id })
       .from(series)
       .innerJoin(chapters, eq(chapters.seriesId, series.id))
       .innerJoin(
@@ -303,7 +304,60 @@ export class DrizzleSeriesRepository
           ne(chapters.status, "deleting"),
         ),
       );
-    return rows.map((row) => toSeries(row.series));
+    return this.listSeriesProjection(rows.map((row) => row.id));
+  }
+
+  /**
+   * Produces a collection projection with aggregate subqueries. The
+   * joins are one row per Series, so collection cardinality and authorization
+   * filtering remain owned by the caller rather than being distorted by
+   * Chapter/Image multiplicity.
+   */
+  private async listSeriesProjection(
+    seriesIds?: readonly string[],
+  ): Promise<SeriesListProjection[]> {
+    if (seriesIds && !seriesIds.length) return [];
+
+    const chapterCounts = this.db
+      .select({
+        seriesId: chapters.seriesId,
+        chapterCount: count(chapters.id).mapWith(Number).as("chapter_count"),
+      })
+      .from(chapters)
+      .where(ne(chapters.status, "deleting"))
+      .groupBy(chapters.seriesId)
+      .as("series_chapter_counts");
+    const imageCounts = this.db
+      .select({
+        seriesId: chapters.seriesId,
+        imageCount: count(images.id).mapWith(Number).as("image_count"),
+      })
+      .from(chapters)
+      .innerJoin(images, eq(images.chapterId, chapters.id))
+      .where(and(ne(chapters.status, "deleting"), isNull(images.retiredAt)))
+      .groupBy(chapters.seriesId)
+      .as("series_image_counts");
+    const rows = await this.db
+      .select({
+        series,
+        chapterCount:
+          sql<number>`coalesce(${chapterCounts.chapterCount}, 0)`.mapWith(
+            Number,
+          ),
+        imageCount: sql<number>`coalesce(${imageCounts.imageCount}, 0)`.mapWith(
+          Number,
+        ),
+      })
+      .from(series)
+      .leftJoin(chapterCounts, eq(chapterCounts.seriesId, series.id))
+      .leftJoin(imageCounts, eq(imageCounts.seriesId, series.id))
+      .where(seriesIds ? inArray(series.id, [...seriesIds]) : undefined);
+
+    return rows.map((row) => ({
+      ...toSeries(row.series),
+      chapterCount: row.chapterCount,
+      imageCount: row.imageCount,
+    }));
   }
 
   async hasHelperAccess(seriesId: string, userId: string) {
@@ -516,6 +570,151 @@ export class DrizzleSeriesRepository
     });
   }
 
+  async replaceUserAssignmentsIfAuthorized(
+    input: Parameters<
+      SeriesMutationBoundaryPort["replaceUserAssignmentsIfAuthorized"]
+    >[0],
+  ): ReturnType<
+    SeriesMutationBoundaryPort["replaceUserAssignmentsIfAuthorized"]
+  > {
+    const requestedSeriesIds = [...new Set(input.seriesIds)].sort();
+    return this.db.transaction(async (tx) => {
+      const authorization = await lockCurrentAuthorization({
+        tx,
+        actor: input.actor,
+        permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+        additionalUserIds: [input.responsibleUserId],
+      });
+      if (!authorization.allowed) return { outcome: "denied" as const };
+      const target = authorization.usersById.get(input.responsibleUserId);
+      if (!canBeSeriesResponsible(target) || target.role !== "uploader")
+        return { outcome: "invalid-target" as const };
+
+      const existing = await tx
+        .select({ seriesId: seriesAssignments.seriesId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.responsibleUserId, input.responsibleUserId))
+        .for("update");
+      const existingSeriesIds = new Set(existing.map((item) => item.seriesId));
+      const relevantSeriesIds = [
+        ...new Set([...requestedSeriesIds, ...existingSeriesIds]),
+      ].sort();
+
+      // Acquire all Series/assignment locks in a deterministic order. Any
+      // inaccessible or missing row aborts the transaction, so replacement is
+      // all-or-nothing rather than a loop of partial reassignments.
+      for (const seriesId of relevantSeriesIds) {
+        const context = await this.lockMutationContext({
+          tx,
+          actor: input.actor,
+          seriesId,
+          permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+        });
+        if (context.outcome !== "authorized") return context;
+      }
+
+      const requested = new Set(requestedSeriesIds);
+      const unchanged = requestedSeriesIds.filter((seriesId) =>
+        existingSeriesIds.has(seriesId),
+      );
+      const toAssign = requestedSeriesIds.filter(
+        (seriesId) => !existingSeriesIds.has(seriesId),
+      );
+      const toRelease = [...existingSeriesIds].filter(
+        (seriesId) => !requested.has(seriesId),
+      );
+
+      for (const seriesId of toRelease) {
+        await tx
+          .delete(seriesAssignments)
+          .where(
+            and(
+              eq(seriesAssignments.seriesId, seriesId),
+              eq(seriesAssignments.responsibleUserId, input.responsibleUserId),
+            ),
+          );
+        await tx.insert(auditLogs).values({
+          actorId: input.actor.userId,
+          action: "series.responsibility.released",
+          resourceType: "series",
+          resourceId: seriesId,
+          metadata: {
+            previousResponsibleUserId: input.responsibleUserId,
+            reason: "admin-bulk-replace",
+          },
+        });
+      }
+
+      for (const seriesId of toAssign) {
+        const [previous] = await tx
+          .select({ responsibleUserId: seriesAssignments.responsibleUserId })
+          .from(seriesAssignments)
+          .where(eq(seriesAssignments.seriesId, seriesId))
+          .limit(1);
+        await tx
+          .insert(seriesAssignments)
+          .values({
+            seriesId,
+            responsibleUserId: input.responsibleUserId,
+            assignedBy: input.actor.userId,
+          })
+          .onConflictDoUpdate({
+            target: seriesAssignments.seriesId,
+            set: {
+              responsibleUserId: input.responsibleUserId,
+              assignedBy: input.actor.userId,
+              updatedAt: new Date(),
+            },
+          });
+        await tx.insert(auditLogs).values({
+          actorId: input.actor.userId,
+          action: "series.responsibility.reassigned",
+          resourceType: "series",
+          resourceId: seriesId,
+          metadata: {
+            previousResponsibleUserId: previous?.responsibleUserId ?? null,
+            responsibleUserId: input.responsibleUserId,
+            reason: "admin-bulk-replace",
+          },
+        });
+        await this.events?.append(
+          {
+            type: "series.responsibility.reassigned",
+            aggregateType: "series",
+            aggregateId: seriesId,
+            actorUserId: input.actor.userId,
+            payload: {
+              previousResponsibleUserId: previous?.responsibleUserId ?? null,
+              responsibleUserId: input.responsibleUserId,
+            },
+            occurredAt: new Date(),
+          },
+          tx,
+        );
+      }
+
+      if (toAssign.length || toRelease.length) {
+        await tx.insert(auditLogs).values({
+          actorId: input.actor.userId,
+          action: "user.series-responsibilities.replaced",
+          resourceType: "user",
+          resourceId: input.responsibleUserId,
+          metadata: {
+            assigned: toAssign.length,
+            released: toRelease.length,
+            unchanged: unchanged.length,
+          },
+        });
+      }
+      return {
+        outcome: "replaced" as const,
+        assigned: toAssign.length,
+        released: toRelease.length,
+        unchanged: unchanged.length,
+      };
+    });
+  }
+
   private async lockMutationContext(input: {
     tx: NodeProxTransaction;
     actor: AuthorizationContext;
@@ -631,14 +830,24 @@ export class DrizzleChapterCoreRepository
   }
 
   async listBySeries(seriesId: string) {
+    const imageCounts = this.chapterImageCounts();
     const rows = await this.db
-      .select()
+      .select({
+        chapter: chapters,
+        imageCount: sql<number>`coalesce(${imageCounts.imageCount}, 0)`.mapWith(
+          Number,
+        ),
+      })
       .from(chapters)
+      .leftJoin(imageCounts, eq(imageCounts.chapterId, chapters.id))
       .where(
         and(eq(chapters.seriesId, seriesId), ne(chapters.status, "deleting")),
       )
       .orderBy(asc(chapters.chapterNumber));
-    return rows.map(toChapter);
+    return rows.map((row) => ({
+      ...toChapter(row.chapter),
+      imageCount: row.imageCount,
+    }));
   }
 
   async listBySeriesVisibleForActor(input: {
@@ -651,13 +860,20 @@ export class DrizzleChapterCoreRepository
       (await this.isAssigned(input.seriesId, input.userId))
     )
       return this.listBySeries(input.seriesId);
+    const imageCounts = this.chapterImageCounts();
     const rows = await this.db
-      .selectDistinct({ chapter: chapters })
+      .selectDistinct({
+        chapter: chapters,
+        imageCount: sql<number>`coalesce(${imageCounts.imageCount}, 0)`.mapWith(
+          Number,
+        ),
+      })
       .from(chapters)
       .innerJoin(
         chapterPermissions,
         eq(chapterPermissions.chapterId, chapters.id),
       )
+      .leftJoin(imageCounts, eq(imageCounts.chapterId, chapters.id))
       .where(
         and(
           eq(chapters.seriesId, input.seriesId),
@@ -667,7 +883,22 @@ export class DrizzleChapterCoreRepository
         ),
       )
       .orderBy(asc(chapters.chapterNumber));
-    return rows.map((row) => toChapter(row.chapter));
+    return rows.map((row) => ({
+      ...toChapter(row.chapter),
+      imageCount: row.imageCount,
+    }));
+  }
+
+  private chapterImageCounts() {
+    return this.db
+      .select({
+        chapterId: images.chapterId,
+        imageCount: count(images.id).mapWith(Number).as("image_count"),
+      })
+      .from(images)
+      .where(isNull(images.retiredAt))
+      .groupBy(images.chapterId)
+      .as("series_chapter_image_counts");
   }
 
   async listVisibleForActor(input: {
@@ -710,10 +941,36 @@ export class DrizzleChapterCoreRepository
       if (!visibilityCondition) return [];
       where = visibilityCondition;
     }
+    // These aggregate and responsibility joins retain one row per chapter.
+    // They deliberately live in the read projection, avoiding per-row queries
+    // as the global chapters collection grows.
+    const imageCounts = this.db
+      .select({
+        chapterId: images.chapterId,
+        imageCount: count(images.id).mapWith(Number).as("image_count"),
+      })
+      .from(images)
+      .where(isNull(images.retiredAt))
+      .groupBy(images.chapterId)
+      .as("global_chapter_image_counts");
     const rows = await this.db
-      .select({ chapter: chapters, series: series })
+      .select({
+        chapter: chapters,
+        series,
+        imageCount: sql<number>`coalesce(${imageCounts.imageCount}, 0)`.mapWith(
+          Number,
+        ),
+        responsibleUser: {
+          id: users.id,
+          email: users.email,
+          role: users.role,
+        },
+      })
       .from(chapters)
       .innerJoin(series, eq(series.id, chapters.seriesId))
+      .leftJoin(imageCounts, eq(imageCounts.chapterId, chapters.id))
+      .leftJoin(seriesAssignments, eq(seriesAssignments.seriesId, series.id))
+      .leftJoin(users, eq(users.id, seriesAssignments.responsibleUserId))
       .where(where)
       .orderBy(desc(chapters.updatedAt));
     return rows.map((row) => ({
@@ -724,6 +981,8 @@ export class DrizzleChapterCoreRepository
         slug: row.series.slug,
         coverUrl: row.series.coverUrl,
       },
+      imageCount: row.imageCount,
+      responsibleUser: row.responsibleUser?.id ? row.responsibleUser : null,
     }));
   }
 

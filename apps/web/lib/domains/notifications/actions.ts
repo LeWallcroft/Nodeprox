@@ -1,5 +1,6 @@
 const notificationActions: Record<string, string> = {
   authorizations: "/autorizaciones",
+  chapters: "/chapters",
 };
 
 export function resolveNotificationAction(

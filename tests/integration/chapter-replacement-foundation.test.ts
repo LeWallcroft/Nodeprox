@@ -71,7 +71,7 @@ describe("CHR2 database foundation", () => {
       })
       .where(eq(chapterReplacementOperations.id, first.replacementId));
     await expect(
-      createReadyReplacement(database.db, chapter, 1),
+      createReadyReplacement(database.db, chapter, 1, { retainedVersion: 3 }),
     ).resolves.toBeDefined();
   });
 

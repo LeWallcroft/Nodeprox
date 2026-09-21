@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   copyFile,
   mkdir,
@@ -8,7 +9,6 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
@@ -18,6 +18,10 @@ const infrastructure = inject("infrastructure");
 const freshName = `nodeprox_fresh_${randomUUID().replaceAll("-", "")}`;
 const upgradeName = `nodeprox_upgrade_${randomUUID().replaceAll("-", "")}`;
 const partialHotfixName = `nodeprox_partial_${randomUUID().replaceAll("-", "")}`;
+const knownDuplicateName = `nodeprox_known_duplicate_${randomUUID().replaceAll("-", "")}`;
+const unexpectedDuplicateName = `nodeprox_unexpected_duplicate_${randomUUID().replaceAll("-", "")}`;
+const multipleDuplicatesName = `nodeprox_multiple_duplicates_${randomUUID().replaceAll("-", "")}`;
+const grantProvenanceName = `nodeprox_grant_provenance_${randomUUID().replaceAll("-", "")}`;
 const admin = postgres(infrastructure.databaseUrl, { max: 1 });
 
 function databaseUrl(name: string): string {
@@ -62,16 +66,69 @@ beforeAll(async () => {
   await createDatabaseNamed(freshName);
   await createDatabaseNamed(upgradeName);
   await createDatabaseNamed(partialHotfixName);
+  await createDatabaseNamed(knownDuplicateName);
+  await createDatabaseNamed(unexpectedDuplicateName);
+  await createDatabaseNamed(multipleDuplicatesName);
+  await createDatabaseNamed(grantProvenanceName);
 });
 
 afterAll(async () => {
   await dropDatabaseNamed(freshName);
   await dropDatabaseNamed(upgradeName);
   await dropDatabaseNamed(partialHotfixName);
+  await dropDatabaseNamed(knownDuplicateName);
+  await dropDatabaseNamed(unexpectedDuplicateName);
+  await dropDatabaseNamed(multipleDuplicatesName);
+  await dropDatabaseNamed(grantProvenanceName);
   await admin.end();
 });
 
 describe("convergent migration sequence", () => {
+  it("backfills Discord grant provenance and enforces Web/Discord source constraints", async () => {
+    const database = createDatabase(databaseUrl(grantProvenanceName));
+    const subset = await migrationsThrough(30);
+    const targetUserId = randomUUID();
+    const actorUserId = randomUUID();
+    try {
+      await migrate(database.db, { migrationsFolder: subset });
+      await database.sql`
+        INSERT INTO users (id, email, password_hash, status, role) VALUES
+          (${targetUserId}, ${`grant-target-${targetUserId}@example.com`}, 'hash', 'active', 'uploader'),
+          (${actorUserId}, ${`grant-actor-${actorUserId}@example.com`}, 'hash', 'active', 'admin')
+      `;
+      const legacyGrantId = randomUUID();
+      await database.sql`
+        INSERT INTO series_creation_grants (
+          id, display_code, target_user_id, issued_by_discord_id,
+          issued_from_channel_id, issued_interaction_id
+        ) VALUES (${legacyGrantId}, 'NPX-LEGACY', ${targetUserId}, 'discord-user', 'discord-channel', 'discord-interaction')
+      `;
+      await migrate(database.db, { migrationsFolder: "database/migrations" });
+      const [legacy] = await database.sql<
+        { issuedVia: string; issuedByUserId: string | null }[]
+      >`
+        SELECT issued_via AS "issuedVia", issued_by_user_id AS "issuedByUserId"
+        FROM series_creation_grants WHERE id = ${legacyGrantId}
+      `;
+      expect(legacy).toEqual({ issuedVia: "discord", issuedByUserId: null });
+      await database.sql`
+        INSERT INTO series_creation_grants (
+          id, display_code, target_user_id, issued_via, issued_by_user_id
+        ) VALUES (${randomUUID()}, 'NPX-WEB', ${targetUserId}, 'web', ${actorUserId})
+      `;
+      await expect(database.sql`
+        INSERT INTO series_creation_grants (id, display_code, target_user_id, issued_via)
+        VALUES (${randomUUID()}, 'NPX-WEB-BAD', ${targetUserId}, 'web')
+      `).rejects.toMatchObject({ code: "23514" });
+      await expect(database.sql`
+        INSERT INTO series_creation_grants (id, display_code, target_user_id, issued_via, issued_by_discord_id)
+        VALUES (${randomUUID()}, 'NPX-DISCORD-BAD', ${targetUserId}, 'discord', 'discord-user')
+      `).rejects.toMatchObject({ code: "23514" });
+    } finally {
+      await database.sql.end();
+      await rm(subset, { recursive: true, force: true });
+    }
+  });
   it("migrates an empty database through A1 and upload transfer", async () => {
     const database = createDatabase(databaseUrl(freshName));
     try {
@@ -165,8 +222,120 @@ describe("convergent migration sequence", () => {
       `;
       expect(activeUploadIndex?.definition).toContain("WHERE");
       expect(activeUploadIndex?.definition).toContain("uploaded");
+      const [seriesChannelIndex] = await database.sql<
+        { name: string | null }[]
+      >`
+        SELECT to_regclass('public.series_discord_channel_id_unique')::text AS name
+      `;
+      expect(seriesChannelIndex?.name).toBe("series_discord_channel_id_unique");
     } finally {
       await database.sql.end();
+    }
+  });
+
+  it("reconciles only the approved historical Discord channel duplicate", async () => {
+    const database = createDatabase(databaseUrl(knownDuplicateName));
+    const subset = await migrationsThrough(29);
+    const userId = randomUUID();
+    const channelId = "1485453020790784134";
+    try {
+      await migrate(database.db, { migrationsFolder: subset });
+      await database.sql`
+        INSERT INTO users (id, email, password_hash, status, role)
+        VALUES (${userId}, ${`migration-known-${userId}@example.com`}, 'not-a-real-hash', 'active', 'gestor')
+      `;
+      await database.sql`
+        INSERT INTO series (
+          id, title, slug, created_by, discord_channel_id, discord_channel_name_snapshot
+        ) VALUES
+          ('bd2357e8-2456-4ff4-9a5b-81d88b1d4e6a', 'Historical A', 'historical-a', ${userId}, ${channelId}, 'una-delicia-inesperada'),
+          ('a67c4575-4912-42b2-8f29-b09f0433fd43', 'Historical B', 'historical-b', ${userId}, ${channelId}, 'una-delicia-inesperada')
+      `;
+
+      await migrate(database.db, { migrationsFolder: "database/migrations" });
+
+      const rows = await database.sql<
+        { id: string; channelId: string | null; channelName: string | null }[]
+      >`
+        SELECT
+          id,
+          discord_channel_id AS "channelId",
+          discord_channel_name_snapshot AS "channelName"
+        FROM series
+        WHERE id IN (
+          'bd2357e8-2456-4ff4-9a5b-81d88b1d4e6a',
+          'a67c4575-4912-42b2-8f29-b09f0433fd43'
+        )
+        ORDER BY id
+      `;
+      expect(rows).toEqual([
+        {
+          id: "a67c4575-4912-42b2-8f29-b09f0433fd43",
+          channelId,
+          channelName: "una-delicia-inesperada",
+        },
+        {
+          id: "bd2357e8-2456-4ff4-9a5b-81d88b1d4e6a",
+          channelId: null,
+          channelName: null,
+        },
+      ]);
+      const [seriesChannelIndex] = await database.sql<
+        { name: string | null }[]
+      >`
+        SELECT to_regclass('public.series_discord_channel_id_unique')::text AS name
+      `;
+      expect(seriesChannelIndex?.name).toBe("series_discord_channel_id_unique");
+    } finally {
+      await database.sql.end();
+      await rm(subset, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unexpected and multiple Discord channel duplicate groups", async () => {
+    const names = [unexpectedDuplicateName, multipleDuplicatesName];
+    for (const [index, name] of names.entries()) {
+      const database = createDatabase(databaseUrl(name));
+      const subset = await migrationsThrough(29);
+      const userId = randomUUID();
+      try {
+        await migrate(database.db, { migrationsFolder: subset });
+        await database.sql`
+          INSERT INTO users (id, email, password_hash, status, role)
+          VALUES (${userId}, ${`migration-unexpected-${userId}@example.com`}, 'not-a-real-hash', 'active', 'gestor')
+        `;
+        const firstSeriesId = randomUUID();
+        const secondSeriesId = randomUUID();
+        await database.sql`
+          INSERT INTO series (id, title, slug, created_by, discord_channel_id)
+          VALUES
+            (${firstSeriesId}, 'Unexpected One', ${`unexpected-one-${firstSeriesId}`}, ${userId}, 'unexpected-channel-a'),
+            (${secondSeriesId}, 'Unexpected Two', ${`unexpected-two-${secondSeriesId}`}, ${userId}, 'unexpected-channel-a')
+        `;
+        if (index === 1) {
+          const thirdSeriesId = randomUUID();
+          const fourthSeriesId = randomUUID();
+          await database.sql`
+            INSERT INTO series (id, title, slug, created_by, discord_channel_id)
+            VALUES
+              (${thirdSeriesId}, 'Unexpected Three', ${`unexpected-three-${thirdSeriesId}`}, ${userId}, 'unexpected-channel-b'),
+              (${fourthSeriesId}, 'Unexpected Four', ${`unexpected-four-${fourthSeriesId}`}, ${userId}, 'unexpected-channel-b')
+          `;
+        }
+
+        await expect(
+          migrate(database.db, { migrationsFolder: "database/migrations" }),
+        ).rejects.toThrow("unexpected duplicate bindings");
+        const [seriesChannelIndex] = await database.sql<
+          { name: string | null }[]
+        >`
+          SELECT to_regclass('public.series_discord_channel_id_unique')::text AS name
+        `;
+        expect(seriesChannelIndex?.name).toBeNull();
+      } finally {
+        await database.sql.end();
+        await rm(subset, { recursive: true, force: true });
+      }
     }
   });
 

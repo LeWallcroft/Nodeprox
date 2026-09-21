@@ -8,6 +8,7 @@ import {
 } from "../../../lib/domains/chapters/hooks";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
+import { SearchableCombobox } from "../../ui/searchable-combobox";
 
 export function AssignChapterCollaboratorDialog({
   chapterId,
@@ -56,27 +57,28 @@ export function AssignChapterCollaboratorDialog({
         </div>
       }
     >
-      <label className="grid gap-1.5 text-sm font-medium text-secondary">
-        Colaborador
-        <select
-          value={userId}
-          disabled={candidates.isPending}
-          onChange={(event) => setUserId(event.target.value)}
-        >
-          <option value="">
-            {candidates.isPending
-              ? "Cargando candidatos…"
-              : "Selecciona un colaborador"}
-          </option>
-          {(candidates.data ?? []).map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.discordUsername
-                ? `${candidate.discordUsername} · ${candidate.email}`
-                : candidate.email}
-            </option>
-          ))}
-        </select>
-      </label>
+      <SearchableCombobox
+        id="chapter-collaborator"
+        label="Colaborador"
+        value={userId}
+        disabled={candidates.isPending}
+        loading={candidates.isPending}
+        error={
+          candidates.isError
+            ? "No se pudieron cargar los candidatos."
+            : undefined
+        }
+        onRetry={() => void candidates.refetch()}
+        placeholder="Buscar colaborador…"
+        emptyMessage="No hay colaboradores disponibles."
+        options={(candidates.data ?? []).map((candidate) => ({
+          id: candidate.id,
+          label: candidate.discordUsername
+            ? `${candidate.discordUsername} · ${candidate.email}`
+            : candidate.email,
+        }))}
+        onChange={setUserId}
+      />
     </AppDialog>
   );
 }
