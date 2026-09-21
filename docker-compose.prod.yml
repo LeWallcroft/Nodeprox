@@ -97,13 +97,17 @@ services:
       context: .
       dockerfile: apps/discord-bot/Dockerfile
     restart: unless-stopped
-    env_file:
-      - ${NODEPROX_ENV_FILE:-.env.production}
     environment:
       NODE_ENV: production
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:?set DISCORD_APPLICATION_ID in .env.production}
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:?set DISCORD_BOT_TOKEN in .env.production}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?set DISCORD_GUILD_ID in .env.production}
+      DISCORD_CONTROL_CHANNEL_ID: ${DISCORD_CONTROL_CHANNEL_ID:?set DISCORD_CONTROL_CHANNEL_ID in .env.production}
+      DISCORD_BOT_INTERNAL_TOKEN: ${DISCORD_BOT_INTERNAL_TOKEN:?set DISCORD_BOT_INTERNAL_TOKEN in .env.production}
       NODEPROX_INTERNAL_API_URL: http://api:3001
       DISCORD_BOT_INTERNAL_HOST: 0.0.0.0
       DISCORD_BOT_INTERNAL_PORT: 3002
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       api:
         condition: service_healthy
