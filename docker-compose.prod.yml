@@ -118,6 +118,8 @@ services:
       - "443:443"
     volumes:
       - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./deploy/caddy/maintenance:/srv/maintenance:ro
+      - ${NODEPROX_MAINTENANCE_STATE_DIR:-/run/nodeprox-maintenance}:/state:ro
       - caddy-data:/data
       - caddy-config:/config
     networks:

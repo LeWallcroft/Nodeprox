@@ -1,6 +1,33 @@
 app.nodeprox.org {
 	encode zstd gzip
 
-	# Next.js remains the same-origin API boundary and proxies /api/* to api.
-	reverse_proxy web:3000
+	# The flag is mounted independently of Web/API. When it exists, trigger a
+	# Caddy error so handle_errors can render the static page with status 503.
+	@maintenance file {
+		root /state
+		try_files /enabled
+	}
+
+	handle @maintenance {
+		error 503
+	}
+
+	handle_errors 503 {
+		@maintenance_error file {
+			root /state
+			try_files /enabled
+		}
+		handle @maintenance_error {
+			root * /srv/maintenance
+			rewrite * /index.html
+			header Retry-After "300"
+			file_server
+		}
+	}
+
+	# Next.js remains the same-origin API boundary and proxies /api/* to api
+	# only while maintenance is disabled.
+	handle {
+		reverse_proxy web:3000
+	}
 }
