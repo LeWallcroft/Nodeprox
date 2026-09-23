@@ -37,20 +37,34 @@ export const PERMISSION_CATALOG = Object.values(
   PERMISSIONS,
 ) as readonly Permission[];
 
-/** Permissions reserved for NodeProx administrators even though their names are
- * intentionally not prefixed with `admin.`. */
-const adminOnlyPermissions = new Set<Permission>([
-  PERMISSIONS.DISCORD_INTEGRATION_CONFIGURE,
-]);
-
-const nonAdminPermissions = PERMISSION_CATALOG.filter(
-  (permission) =>
-    !permission.startsWith("admin.") && !adminOnlyPermissions.has(permission),
-);
+const gestorPermissions = [
+  PERMISSIONS.SERIES_READ,
+  PERMISSIONS.SERIES_CREATE,
+  PERMISSIONS.SERIES_CREATE_WITH_GRANT,
+  PERMISSIONS.SERIES_EDIT,
+  PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+  PERMISSIONS.CHAPTERS_READ,
+  PERMISSIONS.CHAPTERS_CREATE,
+  PERMISSIONS.CHAPTERS_EDIT,
+  PERMISSIONS.CHAPTERS_REPLACE,
+  PERMISSIONS.CHAPTERS_DELETE,
+  PERMISSIONS.CHAPTERS_HELPER_GRANT,
+  PERMISSIONS.CHAPTERS_HELPER_REVOKE,
+  PERMISSIONS.IMAGES_UPLOAD,
+  PERMISSIONS.IMAGES_REPLACE,
+  PERMISSIONS.IMAGES_REORDER,
+  PERMISSIONS.IMAGES_DELETE,
+  PERMISSIONS.APPROVALS_READ,
+  PERMISSIONS.APPROVALS_CONSUME,
+  PERMISSIONS.APPROVALS_INVALIDATE,
+  PERMISSIONS.DISCORD_SERIES_GRANT_ISSUE,
+  PERMISSIONS.DISCORD_SERIES_GRANT_INVALIDATE,
+  PERMISSIONS.DISCORD_SERIES_GRANT_READ,
+] satisfies readonly Permission[];
 
 export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   admin: PERMISSION_CATALOG,
-  gestor: nonAdminPermissions,
+  gestor: gestorPermissions,
   uploader: [
     PERMISSIONS.SERIES_READ,
     PERMISSIONS.CHAPTERS_READ,

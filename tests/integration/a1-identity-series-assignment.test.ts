@@ -984,7 +984,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
     }
   });
 
-  it("allows Gestor Chapter support on a foreign Series without Series administration", async () => {
+  it("allows Gestor global Series operations while reserving deletion", async () => {
     const ownerCookie = await login(emails.owner);
     const supportGestorCookie = await login(emails.secondOwner);
     const unrelatedUploaderCookie = await login(emails.uploader);
@@ -1014,40 +1014,70 @@ describe("A1 identity, assignment and chapter numbering", () => {
     });
     expect(capabilities.statusCode).toBe(200);
     expect(capabilities.json().capabilities).toEqual(
-      expect.arrayContaining(["series.read", "chapters.create"]),
+      expect.arrayContaining([
+        "series.read",
+        "series.edit",
+        "series.assignment.manage",
+        "chapters.create",
+      ]),
     );
     expect(capabilities.json().capabilities).not.toEqual(
       expect.arrayContaining([
-        "series.edit",
         "series.delete",
-        "series.assignment.manage",
         "chapters.helper.grant",
         "chapters.helper.revoke",
       ]),
     );
 
-    for (const request of [
-      {
-        method: "PATCH" as const,
-        url: `/series/${foreignSeriesId}`,
-        payload: { title: "Denied foreign mutation" },
-      },
-      { method: "DELETE" as const, url: `/series/${foreignSeriesId}` },
-      {
-        method: "PUT" as const,
-        url: `/series/${foreignSeriesId}/responsible`,
-        payload: { responsibleUserId: uploaderId },
-      },
-    ]) {
-      expect(
-        (
-          await app.inject({
-            ...request,
-            headers: { cookie: supportGestorCookie },
-          })
-        ).statusCode,
-      ).toBe(403);
-    }
+    const edited = await app.inject({
+      method: "PATCH",
+      url: `/series/${foreignSeriesId}`,
+      headers: { cookie: supportGestorCookie },
+      payload: { title: "Edited foreign Series" },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().title).toBe("Edited foreign Series");
+
+    const assigned = await app.inject({
+      method: "PUT",
+      url: `/series/${foreignSeriesId}/responsible`,
+      headers: { cookie: supportGestorCookie },
+      payload: { responsibleUserId: uploaderId },
+    });
+    expect(assigned.statusCode).toBe(200);
+    await expect(
+      database.db
+        .select({ responsibleUserId: seriesAssignments.responsibleUserId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, foreignSeriesId)),
+    ).resolves.toEqual([{ responsibleUserId: uploaderId }]);
+    await expect(
+      database.db
+        .select({ action: auditLogs.action, actorId: auditLogs.actorId })
+        .from(auditLogs)
+        .where(eq(auditLogs.resourceId, foreignSeriesId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "series.responsibility.reassigned",
+          actorId: secondOwnerId,
+        }),
+      ]),
+    );
+
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/series/${foreignSeriesId}`,
+          headers: { cookie: supportGestorCookie },
+          payload: {
+            role: "admin",
+            capabilities: ["series.delete"],
+          },
+        })
+      ).statusCode,
+    ).toBe(403);
 
     const chapter = await app.inject({
       method: "POST",
@@ -1212,6 +1242,94 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(204);
+  });
+
+  it("reserves Series deletion for admins and preserves the Chapter conflict", async () => {
+    const gestorCookie = await login(emails.owner);
+    const foreignGestorCookie = await login(emails.secondOwner);
+    const adminCookie = await login(emails.admin);
+    const ownSeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: gestorCookie },
+      payload: {
+        title: "Gestor deletion own",
+        slug: `a1-delete-own-${randomUUID()}`,
+      },
+    });
+    const foreignSeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: foreignGestorCookie },
+      payload: {
+        title: "Gestor deletion foreign",
+        slug: `a1-delete-foreign-${randomUUID()}`,
+      },
+    });
+    expect(ownSeries.statusCode).toBe(201);
+    expect(foreignSeries.statusCode).toBe(201);
+    for (const seriesId of [
+      ownSeries.json().id as string,
+      foreignSeries.json().id as string,
+    ]) {
+      expect(
+        (
+          await app.inject({
+            method: "DELETE",
+            url: `/series/${seriesId}`,
+            headers: { cookie: gestorCookie },
+          })
+        ).statusCode,
+      ).toBe(403);
+    }
+
+    const emptySeries = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: adminCookie },
+      payload: { title: "Admin deletable", slug: `a1-delete-${randomUUID()}` },
+    });
+    expect(emptySeries.statusCode).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/series/${emptySeries.json().id as string}`,
+          headers: { cookie: adminCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+
+    const withChapter = await app.inject({
+      method: "POST",
+      url: "/series",
+      headers: { cookie: adminCookie },
+      payload: {
+        title: "Admin Chapter conflict",
+        slug: `a1-delete-conflict-${randomUUID()}`,
+      },
+    });
+    expect(withChapter.statusCode).toBe(201);
+    const withChapterId = withChapter.json().id as string;
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/series/${withChapterId}/chapters`,
+          headers: { cookie: adminCookie },
+          payload: { chapterNumber: 1, title: "Blocks deletion" },
+        })
+      ).statusCode,
+    ).toBe(201);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/series/${withChapterId}`,
+          headers: { cookie: adminCookie },
+        })
+      ).statusCode,
+    ).toBe(409);
   });
 
   it("keeps concurrent responsibility changes in one valid row", async () => {

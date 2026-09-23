@@ -3,7 +3,14 @@ import type { AuthorizationContext } from "../../../authorization/domain/authori
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import { ChapterNumber } from "../../../chapters/domain/chapter-number.js";
 import type { DiscordSeriesChannelGateway } from "../../../discord/application/discord-series-channel-gateway.js";
-import { canAdministerSeries, isOwner } from "../../domain/series.policy.js";
+import {
+  canAdministerSeries,
+  canDeleteSeries,
+  canEditSeries,
+  canManageSeriesAssignment,
+  isOwner,
+  type SeriesAuthorizationInput,
+} from "../../domain/series.policy.js";
 import { canBeSeriesResponsible } from "../../domain/series-responsibility.policy.js";
 import { SeriesSlug } from "../../domain/series-slug.js";
 import type {
@@ -136,9 +143,13 @@ export class SeriesService {
     if (!item || "forbidden" in item) return item;
 
     const capabilities: string[] = [PERMISSIONS.SERIES_READ];
+    const editable = await this.findEditable(context, id);
+    if (editable && !("forbidden" in editable))
+      capabilities.push(PERMISSIONS.SERIES_EDIT);
+    const deletable = await this.findDeletable(context, id);
+    if (deletable && !("forbidden" in deletable))
+      capabilities.push(PERMISSIONS.SERIES_DELETE);
     for (const permission of [
-      PERMISSIONS.SERIES_EDIT,
-      PERMISSIONS.SERIES_DELETE,
       PERMISSIONS.CHAPTERS_HELPER_GRANT,
       PERMISSIONS.CHAPTERS_HELPER_REVOKE,
     ] as const) {
@@ -153,12 +164,11 @@ export class SeriesService {
       PERMISSIONS.IMAGES_UPLOAD,
     );
     if (importUpload.allowed) capabilities.push(PERMISSIONS.IMAGES_UPLOAD);
-    const assignment = await this.findManaged(
+    const assignmentManageable = await this.findAssignmentManageable(
       context,
       id,
-      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
     );
-    if (assignment && !("forbidden" in assignment))
+    if (assignmentManageable && !("forbidden" in assignmentManageable))
       capabilities.push(PERMISSIONS.SERIES_ASSIGNMENT_MANAGE);
     return { capabilities };
   }
@@ -172,7 +182,7 @@ export class SeriesService {
       coverUrl?: string | null | undefined;
     },
   ) {
-    const owner = await this.findManaged(context, id, PERMISSIONS.SERIES_EDIT);
+    const owner = await this.findEditable(context, id);
     if (!owner || "forbidden" in owner) return owner;
     const result = await this.mutations.updateIfAuthorized({
       actor: context,
@@ -187,11 +197,7 @@ export class SeriesService {
   }
 
   async remove(context: AuthorizationContext, id: string) {
-    const owner = await this.findManaged(
-      context,
-      id,
-      PERMISSIONS.SERIES_DELETE,
-    );
+    const owner = await this.findDeletable(context, id);
     if (!owner || "forbidden" in owner) return owner;
     const result = await this.mutations.deleteIfAuthorized({
       actor: context,
@@ -251,11 +257,7 @@ export class SeriesService {
     seriesId: string,
     responsibleUserId: string,
   ) {
-    const managed = await this.findManaged(
-      context,
-      seriesId,
-      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
-    );
+    const managed = await this.findAssignmentManageable(context, seriesId);
     if (!managed || "forbidden" in managed) return managed;
     const responsible = await this.users.findById(responsibleUserId);
     if (!canBeSeriesResponsible(responsible))
@@ -285,11 +287,7 @@ export class SeriesService {
   }
 
   async releaseUploader(context: AuthorizationContext, seriesId: string) {
-    const managed = await this.findManaged(
-      context,
-      seriesId,
-      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
-    );
+    const managed = await this.findAssignmentManageable(context, seriesId);
     if (!managed || "forbidden" in managed) return managed;
     return this.assignResponsible(context, seriesId, managed.createdBy);
   }
@@ -322,11 +320,7 @@ export class SeriesService {
     context: AuthorizationContext,
     seriesId: string,
   ) {
-    const managed = await this.findManaged(
-      context,
-      seriesId,
-      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
-    );
+    const managed = await this.findAssignmentManageable(context, seriesId);
     if (!managed || "forbidden" in managed) return managed;
     return this.assignments.listActiveResponsibleCandidates();
   }
@@ -394,6 +388,58 @@ export class SeriesService {
     )
       return { forbidden: true as const };
     return item;
+  }
+
+  private async findEditable(context: AuthorizationContext, id: string) {
+    return this.findAuthorizedForOperation(
+      context,
+      id,
+      PERMISSIONS.SERIES_EDIT,
+      canEditSeries,
+    );
+  }
+
+  private async findAssignmentManageable(
+    context: AuthorizationContext,
+    id: string,
+  ) {
+    return this.findAuthorizedForOperation(
+      context,
+      id,
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+      canManageSeriesAssignment,
+    );
+  }
+
+  private async findDeletable(context: AuthorizationContext, id: string) {
+    return this.findAuthorizedForOperation(
+      context,
+      id,
+      PERMISSIONS.SERIES_DELETE,
+      canDeleteSeries,
+    );
+  }
+
+  private async findAuthorizedForOperation(
+    context: AuthorizationContext,
+    id: string,
+    permission: (typeof PERMISSIONS)[keyof typeof PERMISSIONS],
+    policy: (input: SeriesAuthorizationInput) => boolean,
+  ) {
+    this.requireSession(context);
+    const item = await this.series.findById(id);
+    if (!item) return null;
+    const decision = await this.authorization.authorize(context, permission);
+    if (!decision.allowed || !decision.role)
+      return { forbidden: true as const };
+    const isAssigned = await this.assignments.isAssigned(id, context.userId);
+    return policy({
+      role: decision.role,
+      isOwner: isOwner(context.userId, item.createdBy),
+      isAssigned,
+    })
+      ? item
+      : { forbidden: true as const };
   }
 
   private async findChapterOperational(
