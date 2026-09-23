@@ -43,7 +43,10 @@ import type {
   SeriesMutationBoundaryPort,
   SeriesRepositoryPort,
 } from "../../../application/ports/series.ports.js";
-import { canAdministerSeries } from "../../../domain/series.policy.js";
+import {
+  canPerformSeriesMutation,
+  type SeriesMutationOperation,
+} from "../../../domain/series.policy.js";
 import type {
   ChapterCoreRecord,
   SeriesRecord,
@@ -467,6 +470,7 @@ export class DrizzleSeriesRepository
         actor: input.actor,
         seriesId: input.seriesId,
         permission: PERMISSIONS.SERIES_EDIT,
+        operation: "edit",
       });
       if (context.outcome !== "authorized") return context;
       const [updated] = await tx
@@ -489,6 +493,7 @@ export class DrizzleSeriesRepository
         actor: input.actor,
         seriesId: input.seriesId,
         permission: PERMISSIONS.SERIES_DELETE,
+        operation: "delete",
       });
       if (context.outcome !== "authorized") return context;
       const [chapter] = await tx
@@ -516,6 +521,7 @@ export class DrizzleSeriesRepository
         actor: input.actor,
         seriesId: input.seriesId,
         permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+        operation: "assignment",
         additionalUserIds: [input.responsibleUserId],
       });
       if (context.outcome !== "authorized") return context;
@@ -609,6 +615,7 @@ export class DrizzleSeriesRepository
           actor: input.actor,
           seriesId,
           permission: PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+          operation: "assignment",
         });
         if (context.outcome !== "authorized") return context;
       }
@@ -720,6 +727,7 @@ export class DrizzleSeriesRepository
     actor: AuthorizationContext;
     seriesId: string;
     permission: Permission;
+    operation: SeriesMutationOperation;
     additionalUserIds?: readonly string[];
   }): Promise<
     | {
@@ -753,7 +761,7 @@ export class DrizzleSeriesRepository
       .where(eq(seriesAssignments.seriesId, input.seriesId))
       .limit(1)
       .for("update");
-    const allowed = canAdministerSeries({
+    const allowed = canPerformSeriesMutation(input.operation, {
       role: actor.role,
       isOwner: lockedSeries.createdBy === input.actor.userId,
       isAssigned: assignment?.responsibleUserId === input.actor.userId,

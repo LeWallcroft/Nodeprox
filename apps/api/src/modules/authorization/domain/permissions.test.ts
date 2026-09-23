@@ -18,4 +18,13 @@ describe("central role permissions", () => {
     expect(ROLE_PERMISSIONS.gestor).toContain(PERMISSIONS.SERIES_CREATE);
     expect(ROLE_PERMISSIONS.gestor).toContain(PERMISSIONS.IMAGES_UPLOAD);
   });
+
+  it("grants Gestor Series edit and assignment management but not deletion", () => {
+    expect(ROLE_PERMISSIONS.admin).toContain(PERMISSIONS.SERIES_DELETE);
+    expect(ROLE_PERMISSIONS.gestor).toContain(PERMISSIONS.SERIES_EDIT);
+    expect(ROLE_PERMISSIONS.gestor).toContain(
+      PERMISSIONS.SERIES_ASSIGNMENT_MANAGE,
+    );
+    expect(ROLE_PERMISSIONS.gestor).not.toContain(PERMISSIONS.SERIES_DELETE);
+  });
 });
