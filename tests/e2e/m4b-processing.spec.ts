@@ -8,10 +8,11 @@ import {
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { loadDatabaseConfig } from "@nodeprox/config";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { createDatabase } from "../../database/client.js";
 import {
   chapters,
+  chapterProcessingAttempts,
   images,
   series,
   uploads,
@@ -97,8 +98,26 @@ async function pollStatus(
       .from(chapters)
       .where(eq(chapters.id, chapterId));
     if (chapter?.status === expected) return;
-    if (chapter?.status === "ready" || chapter?.status === "failed")
-      throw new Error(`unexpected final chapter status: ${chapter.status}`);
+    if (chapter?.status === "ready" || chapter?.status === "failed") {
+      const [attempt] = await db
+        .select()
+        .from(chapterProcessingAttempts)
+        .where(eq(chapterProcessingAttempts.chapterId, chapterId))
+        .orderBy(desc(chapterProcessingAttempts.attemptNumber))
+        .limit(1);
+      throw new Error(
+        `unexpected final chapter status: ${JSON.stringify({
+          chapterId,
+          chapterStatus: chapter.status,
+          processingAttemptId: attempt?.id ?? null,
+          attemptStatus: attempt?.status ?? null,
+          errorCode: attempt?.errorCode ?? null,
+          errorMessage: attempt?.errorMessage ?? null,
+          jobId: attempt?.jobId ?? null,
+          uploadId: attempt?.uploadId ?? null,
+        })}`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`timed out waiting for chapter ${expected}`);

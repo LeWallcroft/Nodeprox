@@ -122,6 +122,12 @@ const conflict = error(
   409,
   "Conflict",
 );
+const invalidChapterTransition = error(
+  "invalid-chapter-transition",
+  "The requested Chapter lifecycle transition is not allowed.",
+  409,
+  "Invalid Chapter transition",
+);
 const chapterConflict = error(
   "chapter-conflict",
   "A chapter with this number already exists in the series.",
@@ -543,6 +549,7 @@ export function registerSeriesPlugin(
       if ("unauthenticated" in result) throw unauthorized;
       if ("notFound" in result) throw notFound;
       if ("denied" in result) throw forbidden;
+      if ("invalidTransition" in result) throw invalidChapterTransition;
       if ("conflict" in result) throw conflict;
       return reply.code(204).send();
     },

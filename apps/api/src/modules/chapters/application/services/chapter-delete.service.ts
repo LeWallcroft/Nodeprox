@@ -43,6 +43,8 @@ export class ChapterDeleteService {
     });
     if (result.outcome === "denied") return { denied: true as const };
     if (result.outcome === "not-found") return { notFound: true as const };
+    if (result.outcome === "invalid-transition")
+      return { invalidTransition: true as const };
     if (result.outcome === "conflict") return { conflict: true as const };
     return { deletionRequested: true as const };
   }

@@ -1058,7 +1058,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
         expect.objectContaining({
           clientId: "item-0.5",
           status: "failed",
-          errorCode: "processing-failed",
+          errorCode: "ZIP_READ_FAILED",
         }),
         expect.objectContaining({ clientId: "item-30", status: "ready" }),
       ]),

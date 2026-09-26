@@ -1,5 +1,6 @@
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
 import {
   auditLogs,
   chapterImportItems,
@@ -75,17 +76,11 @@ export class DrizzleUploadRepository
           )
           .limit(1);
         if (active) throw uploadStateConflict;
-        const [chapter] = await tx
-          .update(chapters)
-          .set({ status: "uploading", updatedAt: new Date() })
-          .where(
-            and(
-              eq(chapters.id, input.chapterId),
-              sql`${chapters.status} in ('draft', 'failed')`,
-            ),
-          )
-          .returning({ id: chapters.id });
-        if (!chapter) throw uploadStateConflict;
+        const transition = await transitionChapterState(tx, {
+          chapterId: input.chapterId,
+          transition: "start-upload",
+        });
+        if (!transition.transitioned) throw uploadStateConflict;
         const [row] = await tx.insert(uploads).values(input).returning();
         if (!row) throw new Error("upload-create-failed");
         return toRecord(row);
@@ -115,10 +110,16 @@ export class DrizzleUploadRepository
         const { chapter, upload } = context;
         if (
           upload?.status !== "verifying" ||
-          chapter.status !== "uploading" ||
           !verifiedMatchesUpload(input.verifiedObject, upload)
         )
           return { outcome: "conflict" as const };
+
+        const transition = await transitionChapterState(tx, {
+          chapterId: input.chapterId,
+          transition: "complete-upload",
+          expectedStates: [chapter.status],
+        });
+        if (!transition.transitioned) return { outcome: "conflict" as const };
 
         const [completed] = await tx
           .update(uploads)
@@ -138,17 +139,6 @@ export class DrizzleUploadRepository
           )
           .returning();
         if (!completed) throw uploadStateConflict;
-        const [updatedChapter] = await tx
-          .update(chapters)
-          .set({ status: "uploaded", updatedAt: new Date() })
-          .where(
-            and(
-              eq(chapters.id, input.chapterId),
-              eq(chapters.status, "uploading"),
-            ),
-          )
-          .returning({ seriesId: chapters.seriesId });
-        if (!updatedChapter) throw uploadStateConflict;
         await tx
           .update(chapterImportItems)
           .set({
@@ -160,7 +150,7 @@ export class DrizzleUploadRepository
         await tx.insert(processingOutbox).values({
           uploadId: completed.id,
           chapterId: completed.chapterId,
-          seriesId: updatedChapter.seriesId,
+          seriesId: chapter.seriesId,
           storageKey: completed.storageKey,
           ...(input.originRequestId
             ? { originRequestId: input.originRequestId }
@@ -315,17 +305,11 @@ export class DrizzleUploadRepository
           .where(and(eq(uploads.id, id), eq(uploads.status, status)))
           .returning({ id: uploads.id });
         if (!removed) throw uploadStateConflict;
-        const [chapter] = await tx
-          .update(chapters)
-          .set({ status: "draft", updatedAt: new Date() })
-          .where(
-            and(
-              eq(chapters.id, row.chapterId),
-              eq(chapters.status, "uploading"),
-            ),
-          )
-          .returning({ id: chapters.id });
-        if (!chapter) throw uploadStateConflict;
+        const transition = await transitionChapterState(tx, {
+          chapterId: row.chapterId,
+          transition: "abort-upload",
+        });
+        if (!transition.transitioned) throw uploadStateConflict;
         return true;
       });
     } catch (error) {

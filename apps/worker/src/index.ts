@@ -142,7 +142,10 @@ const worker = new Worker(
         storage,
         extractor,
         repository,
-      ).process(job.data, finalAttempt);
+      ).process(job.data, finalAttempt, {
+        jobId: String(job.id),
+        jobAttempt: job.attemptsMade + 1,
+      });
     }
     logger.info(correlation, "Worker job completed");
   },

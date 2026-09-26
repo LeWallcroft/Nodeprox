@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+import type { ChapterState } from "@nodeprox/types";
 import type { ValidatedImage } from "../domain/image-policy.js";
 export type ProcessingUpload = {
   uploadId: string;
@@ -14,22 +15,53 @@ export type ProcessingUpload = {
 export type ImageRecordInput = Omit<ValidatedImage, "tempPath"> & {
   storageKey: string;
 };
+export type ProcessingAttemptStatus =
+  | "processing"
+  | "retryable_failed"
+  | "terminal_failed"
+  | "succeeded";
+export type ProcessingAttempt = {
+  id: string;
+  chapterId: string;
+  uploadId: string | null;
+  jobId: string | null;
+  jobAttempt: number | null;
+  attemptNumber: number;
+  status: ProcessingAttemptStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  startedAt: Date;
+  finishedAt: Date | null;
+};
+export type ProcessingClaimResult =
+  | { outcome: "claimed" | "resumed"; attempt: ProcessingAttempt }
+  | { outcome: "finished"; attempt: ProcessingAttempt }
+  | {
+      outcome: "not-found" | "invalid-transition" | "concurrent-state-change";
+      currentState?: ChapterState;
+    };
 export interface ProcessingRepositoryPort {
   findUpload(uploadId: string): Promise<ProcessingUpload | null>;
-  claimChapter(chapterId: string, uploadId: string): Promise<boolean>;
+  claimChapter(input: {
+    chapterId: string;
+    uploadId: string;
+    jobId?: string;
+    jobAttempt?: number;
+  }): Promise<ProcessingClaimResult>;
   replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,
+    attemptId: string,
     requestedByUserId: string,
     images: ImageRecordInput[],
   ): Promise<void>;
   markFailed(
     chapterId: string,
     uploadId: string,
-    terminal: boolean,
+    attemptId: string,
+    failure: { terminal: boolean; errorCode: string; errorMessage: string },
     requestedByUserId: string,
   ): Promise<void>;
-  deleteImages(chapterId: string): Promise<void>;
 }
 export interface ZipExtractorPort {
   inspect(source: Readable): Promise<ValidatedImage[]>;

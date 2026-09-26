@@ -10,3 +10,6 @@ export function createDatabase(connectionString: string) {
 }
 
 export type NodeProxDatabase = ReturnType<typeof createDatabase>["db"];
+export type NodeProxTransaction = Parameters<
+  Parameters<NodeProxDatabase["transaction"]>[0]
+>[0];
