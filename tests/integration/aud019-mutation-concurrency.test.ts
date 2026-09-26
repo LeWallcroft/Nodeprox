@@ -42,17 +42,20 @@ const app = withM2DSeriesFixtures(
 const password = "aud019-concurrency-password";
 const hasher = new Argon2PasswordHasher();
 const ownerId = randomUUID();
+const adminId = randomUUID();
 const uploaderId = randomUUID();
 const replacementId = randomUUID();
 const helperId = randomUUID();
-const actorIds = [ownerId, uploaderId, replacementId, helperId];
+const actorIds = [ownerId, adminId, uploaderId, replacementId, helperId];
 const emails = {
   owner: `aud019-owner-${ownerId}@example.com`,
+  admin: `aud019-admin-${adminId}@example.com`,
   uploader: `aud019-uploader-${uploaderId}@example.com`,
   replacement: `aud019-replacement-${replacementId}@example.com`,
   helper: `aud019-helper-${helperId}@example.com`,
 };
 let ownerCookie: string;
+let adminCookie: string;
 let uploaderCookie: string;
 let helperCookie: string;
 
@@ -192,6 +195,13 @@ beforeAll(async () => {
       role: "gestor",
     },
     {
+      id: adminId,
+      email: emails.admin,
+      passwordHash,
+      status: "active",
+      role: "admin",
+    },
+    {
       id: uploaderId,
       email: emails.uploader,
       passwordHash,
@@ -214,6 +224,7 @@ beforeAll(async () => {
     },
   ]);
   ownerCookie = await login(emails.owner);
+  adminCookie = await login(emails.admin);
   uploaderCookie = await login(emails.uploader);
   helperCookie = await login(emails.helper);
 });
@@ -222,6 +233,10 @@ afterEach(async () => {
   const blockers = [...activeBlockers];
   for (const blocker of blockers) blocker.release();
   await Promise.allSettled(blockers.map((blocker) => blocker.done));
+  await database.db
+    .update(users)
+    .set({ status: "active", updatedAt: new Date() })
+    .where(inArray(users.id, [ownerId, adminId]));
 });
 
 afterAll(async () => {
@@ -634,22 +649,40 @@ describe("AUD-019 transactional mutation authorization", () => {
     expect([replacementId, helperId]).toContain(rows[0]?.responsibleUserId);
   });
 
-  it("revalidates Series delete authority in both commit orders", async () => {
+  it("rejects Gestor Series delete before the mutation transaction", async () => {
+    const seriesId = await createSeriesOnly("series-delete-gestor-denied");
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/series/${seriesId}`,
+      headers: { cookie: ownerCookie },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(
+      (
+        await database.db
+          .select({ id: series.id })
+          .from(series)
+          .where(eq(series.id, seriesId))
+      )[0],
+    ).toBeDefined();
+  });
+
+  it("revalidates Admin Series delete authority in both commit orders", async () => {
     const revocationWinsId = await createSeriesOnly("series-delete-loss-first");
     const sessionBlocker = startBlocker(
-      (tx) => tx`select id from sessions where user_id = ${ownerId} for update`,
+      (tx) => tx`select id from sessions where user_id = ${adminId} for update`,
     );
     await sessionBlocker.ready;
     const deniedDelete = app.inject({
       method: "DELETE",
       url: `/series/${revocationWinsId}`,
-      headers: { cookie: ownerCookie },
+      headers: { cookie: adminCookie },
     });
     await waitForBlockedQuery("sessions");
     await database.db
       .update(users)
       .set({ status: "suspended", updatedAt: new Date() })
-      .where(eq(users.id, ownerId));
+      .where(eq(users.id, adminId));
     sessionBlocker.release();
     await sessionBlocker.done;
     expect((await deniedDelete).statusCode).toBe(403);
@@ -664,7 +697,7 @@ describe("AUD-019 transactional mutation authorization", () => {
     await database.db
       .update(users)
       .set({ status: "active", updatedAt: new Date() })
-      .where(eq(users.id, ownerId));
+      .where(eq(users.id, adminId));
 
     const mutationWinsId = await createSeriesOnly("series-delete-first");
     const seriesBlocker = startBlocker(
@@ -674,14 +707,14 @@ describe("AUD-019 transactional mutation authorization", () => {
     const acceptedDelete = app.inject({
       method: "DELETE",
       url: `/series/${mutationWinsId}`,
-      headers: { cookie: ownerCookie },
+      headers: { cookie: adminCookie },
     });
     await waitForBlockedQuery("series");
     const laterSuspension = Promise.resolve(
       database.db
         .update(users)
         .set({ status: "suspended", updatedAt: new Date() })
-        .where(eq(users.id, ownerId)),
+        .where(eq(users.id, adminId)),
     );
     await waitForBlockedQuery("users");
     seriesBlocker.release();
@@ -699,7 +732,7 @@ describe("AUD-019 transactional mutation authorization", () => {
     await database.db
       .update(users)
       .set({ status: "active", updatedAt: new Date() })
-      .where(eq(users.id, ownerId));
+      .where(eq(users.id, adminId));
   });
 
   it("rejects mutation of the stable public slug without changing the Series", async () => {
