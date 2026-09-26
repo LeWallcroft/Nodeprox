@@ -46,6 +46,8 @@
   },
   "dependencies": {
     "@nodeprox/config": "workspace:*",
+    "@nodeprox/storage": "workspace:*",
+    "@nodeprox/types": "workspace:*",
     "argon2": "^0.44.0",
     "dotenv": "^17.2.1",
     "drizzle-orm": "^0.44.4",

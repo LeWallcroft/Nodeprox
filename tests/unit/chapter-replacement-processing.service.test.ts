@@ -9,10 +9,7 @@ import type {
   PlannedChapterReplacementItem,
 } from "../../apps/worker/src/processing/chapter-replacements/application/ports.js";
 import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
-import type {
-  StoragePort,
-  StoredObject,
-} from "../../packages/storage/src/port.js";
+import type { StoragePort, StoredObject } from "@nodeprox/storage/port";
 
 const replacementId = "33333333-3333-4333-8333-333333333333";
 const chapterId = "11111111-1111-4111-8111-111111111111";
@@ -245,10 +242,9 @@ describe("CHR3 replacement Worker processing", () => {
 
     await target.service.process(target.input);
 
-    expect(target.repository.manifest.map((item) => item.physicalFilename)).toEqual([
-      "01_v3.png",
-      "02_v2.png",
-    ]);
+    expect(
+      target.repository.manifest.map((item) => item.physicalFilename),
+    ).toEqual(["01_v3.png", "02_v2.png"]);
   });
 
   it("CHR3-WRK-06 persists stored evidence for every candidate", async () => {

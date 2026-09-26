@@ -5,8 +5,7 @@ import {
   loadStorageConfig,
   type NodeProxStorageConfig,
 } from "@nodeprox/config";
-import { B2Storage } from "../apps/api/src/modules/uploads/infrastructure/storage/b2.storage.js";
-import { B2UploadTransfer } from "../packages/storage/src/adapters.js";
+import { B2Storage, B2UploadTransfer } from "@nodeprox/storage";
 
 type SafeFailure = {
   name?: string;

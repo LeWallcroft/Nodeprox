@@ -2,7 +2,7 @@ import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { eq, like } from "drizzle-orm";
 import { loadConfig, loadStorageConfig } from "@nodeprox/config";
-import { B2Storage } from "../apps/api/src/modules/uploads/infrastructure/storage/b2.storage.js";
+import { B2Storage } from "@nodeprox/storage";
 import { createDatabase } from "../database/client.js";
 import { chapters, images, series, uploads } from "../database/schema/index.js";
 

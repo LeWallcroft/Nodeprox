@@ -12,6 +12,12 @@ importers:
       '@nodeprox/config':
         specifier: workspace:*
         version: link:packages/config
+      '@nodeprox/storage':
+        specifier: workspace:*
+        version: link:packages/storage
+      '@nodeprox/types':
+        specifier: workspace:*
+        version: link:packages/types
       argon2:
         specifier: ^0.44.0
         version: 0.44.0

@@ -7,8 +7,10 @@ import type {
   ProcessingRepositoryPort,
   ZipExtractorPort,
 } from "../../apps/worker/src/processing/application/ports.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
-import { StorageObjectAlreadyExistsError } from "../../packages/storage/src/port.js";
+import {
+  StorageObjectAlreadyExistsError,
+  type StoragePort,
+} from "@nodeprox/storage/port";
 
 const input = {
   chapterId: "chapter-1",

@@ -29,10 +29,7 @@ import {
   uploads,
   users,
 } from "../../database/schema/index.js";
-import type {
-  StoragePort,
-  UploadTransferPort,
-} from "../../packages/storage/src/port.js";
+import type { StoragePort, UploadTransferPort } from "@nodeprox/storage/port";
 import {
   FakeDiscordSeriesChannelGateway,
   withM2DSeriesFixtures,

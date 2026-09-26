@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StorageCleanupRepositoryPort } from "../../apps/worker/src/storage-cleanup/application/ports.js";
 import { StorageCleanupProcessor } from "../../apps/worker/src/storage-cleanup/application/storage-cleanup.processor.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 
 function harness(safe: boolean, deleteFails = false) {
   const effect = {

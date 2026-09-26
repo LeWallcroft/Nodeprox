@@ -23,7 +23,7 @@ import {
   uploads,
   users,
 } from "../../database/schema/index.js";
-import { FilesystemStorage } from "../../packages/storage/src/adapters.js";
+import { FilesystemStorage } from "@nodeprox/storage";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);

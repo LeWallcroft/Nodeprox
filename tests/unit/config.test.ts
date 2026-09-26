@@ -4,7 +4,7 @@ import {
   loadDatabaseConfig,
   loadMediaEffectsConfig,
   loadProcessingConfig,
-} from "../../packages/config/src/index.js";
+} from "@nodeprox/config";
 
 describe("NodeProx configuration", () => {
   it("loads the required runtime configuration", () => {

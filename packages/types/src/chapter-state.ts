@@ -51,12 +51,6 @@ export type TransitionChapterStateResult =
       currentState?: ChapterState;
     };
 
-export interface ChapterStateTransitionRepository {
-  transitionChapterState(
-    input: TransitionChapterStateInput,
-  ): Promise<TransitionChapterStateResult>;
-}
-
 const transitionTargets: Partial<
   Record<ChapterState, Partial<Record<ChapterTransition, ChapterState>>>
 > = {
