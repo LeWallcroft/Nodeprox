@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { sanitizeAuditMetadata } from "@nodeprox/types";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import { transitionChapterState } from "../../../../../../../database/chapter-state-transition.js";
 import {
   auditLogs,
   chapterImportItems,
   chapterProcessingAttempts,
+  chapterProcessingObjects,
   chapters,
   domainEventOutbox,
   images,
@@ -120,6 +121,49 @@ export class DrizzleProcessingRepository
       return { outcome: "claimed" as const, attempt: toAttempt(attempt) };
     });
   }
+  async reserveCandidate(
+    attemptId: string,
+    storageKey: string,
+    checksum: string,
+  ): Promise<void> {
+    await this.db
+      .insert(chapterProcessingObjects)
+      .values({
+        attemptId,
+        storageKey,
+        checksum,
+      })
+      .onConflictDoNothing();
+    const [candidate] = await this.db
+      .select({ checksum: chapterProcessingObjects.checksum })
+      .from(chapterProcessingObjects)
+      .where(
+        and(
+          eq(chapterProcessingObjects.attemptId, attemptId),
+          eq(chapterProcessingObjects.storageKey, storageKey),
+        ),
+      )
+      .limit(1);
+    if (!candidate || candidate.checksum !== checksum)
+      throw new Error("storage-key-content-conflict");
+  }
+  async markCandidate(
+    attemptId: string,
+    storageKey: string,
+    status: "created" | "reused" | "cleaned",
+  ): Promise<void> {
+    const [updated] = await this.db
+      .update(chapterProcessingObjects)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(chapterProcessingObjects.attemptId, attemptId),
+          eq(chapterProcessingObjects.storageKey, storageKey),
+        ),
+      )
+      .returning({ id: chapterProcessingObjects.id });
+    if (!updated) throw new Error("chapter-candidate-not-reserved");
+  }
   async replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,
@@ -153,6 +197,23 @@ export class DrizzleProcessingRepository
       });
       if (!stateResult.transitioned)
         throw new Error("chapter-ready-transition-conflict");
+      const candidates = await tx
+        .select({
+          storageKey: chapterProcessingObjects.storageKey,
+          status: chapterProcessingObjects.status,
+        })
+        .from(chapterProcessingObjects)
+        .where(eq(chapterProcessingObjects.attemptId, attemptId));
+      if (
+        candidates.length !== records.length ||
+        candidates.some(
+          (candidate) =>
+            !records.some(
+              (record) => record.storageKey === candidate.storageKey,
+            ) || !["created", "reused"].includes(candidate.status),
+        )
+      )
+        throw new Error("chapter-candidate-publication-conflict");
       await tx.delete(images).where(eq(images.chapterId, chapterId));
       const prepared = records.map((record) => ({
         imageId: randomUUID(),
@@ -199,6 +260,15 @@ export class DrizzleProcessingRepository
         .returning({ id: chapterProcessingAttempts.id });
       if (!finishedAttempt)
         throw new Error("chapter-attempt-transition-conflict");
+      await tx
+        .update(chapterProcessingObjects)
+        .set({ status: "published", updatedAt: new Date() })
+        .where(
+          and(
+            eq(chapterProcessingObjects.attemptId, attemptId),
+            inArray(chapterProcessingObjects.status, ["created", "reused"]),
+          ),
+        );
       await tx
         .update(chapterImportItems)
         .set({ status: "ready", errorCode: null, updatedAt: new Date() })
@@ -272,6 +342,15 @@ export class DrizzleProcessingRepository
           updatedAt: new Date(),
         })
         .where(eq(chapterImportItems.uploadId, uploadId));
+      await tx
+        .update(chapterProcessingObjects)
+        .set({ status: "cleanup_pending", updatedAt: new Date() })
+        .where(
+          and(
+            eq(chapterProcessingObjects.attemptId, attemptId),
+            eq(chapterProcessingObjects.status, "created"),
+          ),
+        );
       if (failure.terminal)
         await tx.insert(domainEventOutbox).values({
           eventType: "upload.failed",

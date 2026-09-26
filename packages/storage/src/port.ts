@@ -7,6 +7,18 @@ export type StoredObject = {
   etag?: string;
 };
 
+export type StoredObjectMetadata = {
+  sizeBytes: number;
+  contentType?: string;
+};
+
+export class StorageObjectAlreadyExistsError extends Error {
+  constructor() {
+    super("storage-object-already-exists");
+    this.name = "StorageObjectAlreadyExistsError";
+  }
+}
+
 export interface StoragePort {
   put(input: {
     key: string;
@@ -17,6 +29,7 @@ export interface StoragePort {
   get(key: string): Promise<Readable>;
   delete(key: string): Promise<void>;
   exists(key: string): Promise<boolean>;
+  head?(key: string): Promise<StoredObjectMetadata | null>;
 }
 
 export type UploadTransferGrant =

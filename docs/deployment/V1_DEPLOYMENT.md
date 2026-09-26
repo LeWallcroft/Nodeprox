@@ -37,6 +37,12 @@ chmod 600 .env.production
 
 Edit `.env.production` and replace every `replace-with-...` value. `DATABASE_URL` and `REDIS_URL` must reference the Compose service names `postgres` and `redis`, never `localhost`. Production requires `STORAGE_PROVIDER=b2` and all B2 variables; the application fails closed if B2 configuration is incomplete.
 
+### B2 write-credential hardening gate
+
+Before declaring production storage hardened, inventory all Backblaze Application Keys with write authority. Restrict them to the `nodeprox` bucket, grant only the capabilities each component needs, and restrict file-name prefixes wherever the component's actual keys allow it. Prefer separate keys for API, Worker, and controlled maintenance commands; the current Compose configuration passes the same environment file to API, Worker, and migration operations, so component isolation must be verified during deployment. Avoid routine manual sharing of production write credentials. Rotate or revoke unnecessary broad keys after inventory, under the normal credential-change procedure.
+
+Web clients receive scoped upload grants, not permanent B2 credentials. Confirm that no external or manual writer shares the keys used for Chapter media publication. NodeProx protects its controlled writers through PostgreSQL serialization, canonical keys, create-exclusive writes, equivalence verification, post-write verification, and reconciliation. This does not provide atomic exclusion against an external writer with the same credentials. Credential exclusivity is a deployment/security gate, not a code-commit gate.
+
 The current session implementation is database-backed and cookie-based. There is no JWT/session-signing environment variable to invent or expose.
 
 ## F. Build images

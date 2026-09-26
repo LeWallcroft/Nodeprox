@@ -1,4 +1,5 @@
 import type { MediaWarning } from "@nodeprox/types";
+import { buildChapterMediaStorageKey } from "@nodeprox/storage";
 
 export type ImageContentType =
   | "image/jpeg"
@@ -143,7 +144,11 @@ export function buildPermanentImageStorageKey(input: {
   )
     throw new Error("invalid-public-storage-identity");
   validateImageName(input.filename);
-  return `Media/${input.seriesPublicSlug}/${input.chapterPublicKey}/${input.filename}`;
+  return buildChapterMediaStorageKey({
+    seriesSlug: input.seriesPublicSlug,
+    chapterPublicKey: input.chapterPublicKey,
+    physicalFilename: input.filename,
+  });
 }
 
 export function mediaWarnings(input: {

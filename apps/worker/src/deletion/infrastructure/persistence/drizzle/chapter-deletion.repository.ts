@@ -3,8 +3,11 @@ import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
+  chapterProcessingAttempts,
+  chapterProcessingObjects,
   chapters,
   images,
+  imageVersions,
   uploads,
 } from "../../../../../../../database/schema/index.js";
 import type { ChapterDeletionRepositoryPort } from "../../../application/ports.js";
@@ -34,16 +37,38 @@ export class DrizzleChapterDeletionRepository
       .select({ key: images.storageKey })
       .from(images)
       .where(eq(images.chapterId, chapterId));
+    const imageVersionRows = await this.db
+      .select({ key: imageVersions.storageKey })
+      .from(imageVersions)
+      .innerJoin(images, eq(images.id, imageVersions.imageId))
+      .where(eq(images.chapterId, chapterId));
     const uploadRows = await this.db
       .select({ key: uploads.storageKey })
       .from(uploads)
       .where(eq(uploads.chapterId, chapterId));
+    const candidateRows = await this.db
+      .select({ key: chapterProcessingObjects.storageKey })
+      .from(chapterProcessingObjects)
+      .innerJoin(
+        chapterProcessingAttempts,
+        eq(chapterProcessingAttempts.id, chapterProcessingObjects.attemptId),
+      )
+      .where(eq(chapterProcessingAttempts.chapterId, chapterId));
     return {
       deletionId,
       chapterId,
       requestedBy: request.requestedBy,
       originRequestId: request.originRequestId,
-      storageKeys: [...imageRows, ...uploadRows].map((row) => row.key),
+      storageKeys: [
+        ...new Set(
+          [
+            ...imageRows,
+            ...imageVersionRows,
+            ...uploadRows,
+            ...candidateRows,
+          ].map((row) => row.key),
+        ),
+      ],
     };
   }
 

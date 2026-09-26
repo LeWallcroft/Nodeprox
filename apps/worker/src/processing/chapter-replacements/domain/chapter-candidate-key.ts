@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { buildChapterMediaStorageKey } from "@nodeprox/storage";
 
 const publicSegment = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const extension = /^[a-z0-9]+$/;
@@ -31,6 +32,10 @@ export function createChapterCandidateIdentity(input: {
   return {
     itemId,
     physicalFilename,
-    storageKey: `Media/${input.seriesSlug}/${input.chapterPublicKey}/${physicalFilename}`,
+    storageKey: buildChapterMediaStorageKey({
+      seriesSlug: input.seriesSlug,
+      chapterPublicKey: input.chapterPublicKey,
+      physicalFilename,
+    }),
   };
 }

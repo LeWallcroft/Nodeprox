@@ -48,6 +48,16 @@ export interface ProcessingRepositoryPort {
     jobId?: string;
     jobAttempt?: number;
   }): Promise<ProcessingClaimResult>;
+  reserveCandidate(
+    attemptId: string,
+    storageKey: string,
+    checksum: string,
+  ): Promise<void>;
+  markCandidate(
+    attemptId: string,
+    storageKey: string,
+    status: "created" | "reused" | "cleaned",
+  ): Promise<void>;
   replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,

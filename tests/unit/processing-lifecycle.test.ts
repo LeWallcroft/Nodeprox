@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
@@ -7,6 +8,7 @@ import type {
   ZipExtractorPort,
 } from "../../apps/worker/src/processing/application/ports.js";
 import type { StoragePort } from "../../packages/storage/src/port.js";
+import { StorageObjectAlreadyExistsError } from "../../packages/storage/src/port.js";
 
 const input = {
   chapterId: "chapter-1",
@@ -42,6 +44,8 @@ function setup() {
         finishedAt: null,
       },
     }),
+    reserveCandidate: vi.fn().mockResolvedValue(undefined),
+    markCandidate: vi.fn().mockResolvedValue(undefined),
     replaceImagesAndMarkReady: vi.fn().mockResolvedValue(undefined),
     markFailed: vi.fn().mockResolvedValue(undefined),
   };
@@ -51,7 +55,15 @@ function setup() {
       sizeBytes: 3,
       contentType: "image/jpeg",
     }),
-    get: vi.fn().mockResolvedValue(Readable.from([Buffer.from("zip")])),
+    get: vi
+      .fn()
+      .mockImplementation((key: string) =>
+        Promise.resolve(
+          Readable.from([
+            Buffer.from(key.startsWith("Media/") ? "img" : "zip"),
+          ]),
+        ),
+      ),
     exists: vi.fn().mockResolvedValue(true),
     delete: vi.fn().mockResolvedValue(undefined),
   };
@@ -63,7 +75,7 @@ function setup() {
         contentType: "image/jpeg",
         sortOrder: 1,
         sizeBytes: 3,
-        checksum: "checksum",
+        checksum: createHash("sha256").update("img").digest("hex"),
         warnings: [],
         tempPath: "temporary",
       },
@@ -78,6 +90,111 @@ function setup() {
 }
 
 describe("ChapterProcessingService lifecycle", () => {
+  it("rejects a storage object whose persisted content type differs", async () => {
+    const deps = setup();
+    deps.storage.head = vi.fn().mockResolvedValue({
+      sizeBytes: 3,
+      contentType: "application/octet-stream",
+    });
+    await expect(
+      new ChapterProcessingService(
+        deps.repository,
+        deps.storage,
+        deps.extractor,
+        deps.audit,
+      ).process(input),
+    ).rejects.toThrow("storage-verification-failed");
+    expect(deps.repository.replaceImagesAndMarkReady).not.toHaveBeenCalled();
+  });
+
+  it("accepts an existing identical object without taking cleanup ownership", async () => {
+    const deps = setup();
+    vi.mocked(deps.storage.put).mockRejectedValueOnce(
+      new StorageObjectAlreadyExistsError(),
+    );
+    await new ChapterProcessingService(
+      deps.repository,
+      deps.storage,
+      deps.extractor,
+      deps.audit,
+    ).process(input);
+    expect(deps.repository.markCandidate).toHaveBeenCalledWith(
+      "attempt-1",
+      "Media/prueba1/6/01.jpg",
+      "reused",
+    );
+    expect(deps.storage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
+    expect(deps.storage.delete).not.toHaveBeenCalledWith(
+      "Media/prueba1/6/01.jpg",
+    );
+  });
+
+  it("rejects different content at the same key without deleting published media", async () => {
+    const deps = setup();
+    vi.mocked(deps.storage.put).mockRejectedValueOnce(
+      new StorageObjectAlreadyExistsError(),
+    );
+    vi.mocked(deps.storage.get).mockImplementation((key: string) =>
+      Promise.resolve(
+        Readable.from([
+          Buffer.from(key.startsWith("Media/") ? "different" : "zip"),
+        ]),
+      ),
+    );
+    await expect(
+      new ChapterProcessingService(
+        deps.repository,
+        deps.storage,
+        deps.extractor,
+        deps.audit,
+      ).process(input),
+    ).rejects.toThrow("storage-key-content-conflict");
+    expect(deps.repository.replaceImagesAndMarkReady).not.toHaveBeenCalled();
+    expect(deps.repository.markFailed).toHaveBeenCalledWith(
+      input.chapterId,
+      input.uploadId,
+      "attempt-1",
+      expect.objectContaining({
+        terminal: true,
+        errorCode: "STORAGE_WRITE_KEY_MISMATCH",
+      }),
+      "user-1",
+    );
+    expect(deps.storage.delete).not.toHaveBeenCalledWith(
+      "Media/prueba1/6/01.jpg",
+    );
+  });
+
+  it("records a created candidate before a DB publication failure and cleans only that key", async () => {
+    const deps = setup();
+    vi.mocked(deps.repository.replaceImagesAndMarkReady).mockRejectedValueOnce(
+      new Error("database-unavailable"),
+    );
+    await expect(
+      new ChapterProcessingService(
+        deps.repository,
+        deps.storage,
+        deps.extractor,
+        deps.audit,
+      ).process(input),
+    ).rejects.toThrow("database-unavailable");
+    expect(deps.repository.reserveCandidate).toHaveBeenCalledWith(
+      "attempt-1",
+      "Media/prueba1/6/01.jpg",
+      expect.any(String),
+    );
+    expect(deps.repository.markCandidate).toHaveBeenCalledWith(
+      "attempt-1",
+      "Media/prueba1/6/01.jpg",
+      "created",
+    );
+    expect(deps.storage.delete).toHaveBeenCalledWith("Media/prueba1/6/01.jpg");
+    expect(deps.repository.markCandidate).toHaveBeenCalledWith(
+      "attempt-1",
+      "Media/prueba1/6/01.jpg",
+      "cleaned",
+    );
+  });
   it("moves uploaded to ready and removes the temporary ZIP", async () => {
     const deps = setup();
     await new ChapterProcessingService(

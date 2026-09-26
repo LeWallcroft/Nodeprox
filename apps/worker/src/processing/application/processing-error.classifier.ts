@@ -49,6 +49,10 @@ export function classifyProcessingError(
       retryable: false,
       message,
     };
+  if (raw === "storage-key-content-conflict")
+    return { code: "STORAGE_WRITE_KEY_MISMATCH", retryable: false, message };
+  if (raw === "storage-verification-failed")
+    return { code: "STORAGE_VERIFY_FAILED", retryable: true, message };
   if (
     raw === "storage-object-body-missing" ||
     raw === "storage-object-body-not-readable"
