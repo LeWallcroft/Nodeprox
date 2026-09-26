@@ -148,15 +148,12 @@ export class DrizzleChapterRepository
         return { outcome: "denied" as const };
 
       const [lockedSeries] = await tx
-        .select({ createdBy: series.createdBy })
+        .select({ id: series.id })
         .from(series)
         .where(eq(series.id, snapshot.seriesId))
         .limit(1)
         .for("update");
       if (!lockedSeries) return { outcome: "not-found" as const };
-      const isSeriesOwner =
-        actor.role === "gestor" &&
-        lockedSeries.createdBy === input.actor.userId;
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx
@@ -178,7 +175,6 @@ export class DrizzleChapterRepository
         return { outcome: "denied" as const };
       const reason = evaluateChapterAdministrationAuthorization({
         role: actor.role,
-        isSeriesOwner,
         isAssigned,
       });
       if (!reason) return { outcome: "denied" as const };
@@ -253,15 +249,12 @@ export class DrizzleChapterRepository
       if (!actor.allowed) return { outcome: "denied" as const };
 
       const [lockedSeries] = await tx
-        .select({ createdBy: series.createdBy })
+        .select({ id: series.id })
         .from(series)
         .where(eq(series.id, snapshot.seriesId))
         .limit(1)
         .for("update");
       if (!lockedSeries) return { outcome: "not-found" as const };
-      const isSeriesOwner =
-        actor.role === "gestor" &&
-        lockedSeries.createdBy === input.actor.userId;
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx
@@ -284,7 +277,6 @@ export class DrizzleChapterRepository
         return { outcome: "denied" as const };
       const reason = evaluateChapterAdministrationAuthorization({
         role: actor.role,
-        isSeriesOwner,
         isAssigned,
       });
       if (!reason) return { outcome: "denied" as const };
