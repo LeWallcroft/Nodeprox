@@ -133,7 +133,7 @@ describe("Domain event outbox leases", () => {
       "series.creation_grant.consumed",
       "discord.identity.linked",
     ];
-    const ids = await Promise.all(
+    const ids: string[] = await Promise.all(
       eventTypes.map(async (eventType, index) => {
         const id = randomUUID();
         insertedIds.push(id);

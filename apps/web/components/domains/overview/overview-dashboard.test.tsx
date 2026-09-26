@@ -2,10 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Activity, Settings } from "lucide-react";
 import type { OverviewReadModel } from "../../../lib/domains/overview/types";
-import {
-  formatBytes,
-  getActivityPresentation,
-} from "./activity-presentation";
+import { formatBytes, getActivityPresentation } from "./activity-presentation";
 import { OverviewActivityChart } from "./overview-activity-chart";
 import { OverviewDashboard } from "./overview-dashboard";
 
@@ -39,7 +36,10 @@ const overview: OverviewReadModel = {
 describe("Overview dashboard presentation", () => {
   it("renders four real KPI cards and capability-aware audit navigation", () => {
     const markup = renderToStaticMarkup(
-      <OverviewDashboard overview={overview} capabilities={["admin.system.manage"]} />,
+      <OverviewDashboard
+        overview={overview}
+        capabilities={["admin.system.manage"]}
+      />,
     );
 
     expect(markup).toContain("Series totales");
@@ -67,7 +67,9 @@ describe("Overview dashboard presentation", () => {
   });
 
   it("renders human activity labels, contextual and fallback icons, and empty activity", () => {
-    expect(getActivityPresentation("settings.updated", "product-settings")).toMatchObject({
+    expect(
+      getActivityPresentation("settings.updated", "product-settings"),
+    ).toMatchObject({
       label: "Configuración actualizada",
       icon: Settings,
     });
@@ -90,7 +92,7 @@ describe("Overview dashboard presentation", () => {
     );
     expect(markup).toContain("Series");
     expect(markup).toContain("Capítulos");
-    expect((markup.match(/<circle/g) ?? [])).toHaveLength(14);
+    expect(markup.match(/<circle/g) ?? []).toHaveLength(14);
     expect(markup).not.toContain("%");
   });
 
@@ -107,7 +109,11 @@ describe("Overview dashboard presentation", () => {
           system: {
             ...overview.system,
             overallStatus: "degraded",
-            storage: { usedBytes: null, quotaBytes: null, source: "unavailable" },
+            storage: {
+              usedBytes: null,
+              quotaBytes: null,
+              source: "unavailable",
+            },
             activity7d: zeroPoints,
           },
         }}
@@ -116,7 +122,10 @@ describe("Overview dashboard presentation", () => {
     );
     const unknown = renderToStaticMarkup(
       <OverviewDashboard
-        overview={{ ...overview, system: { ...overview.system, overallStatus: "unknown" } }}
+        overview={{
+          ...overview,
+          system: { ...overview.system, overallStatus: "unknown" },
+        }}
         capabilities={[]}
       />,
     );

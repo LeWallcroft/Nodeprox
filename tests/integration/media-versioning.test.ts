@@ -121,6 +121,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
       sizeBytes: 123,
       status: "pending_upload",
     });
+    if (!created) throw new Error("missing-replacement-operation");
     expect(created.status).toBe("pending_upload");
     expect(await repository.findById(randomUUID())).toBeNull();
     expect((await repository.markUploaded(operationId, now))?.status).toBe(
@@ -362,6 +363,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
         await transaction.completeReplacementOperation({
           operationId,
           imageId,
+          actorId: userId,
           resultImageVersionId: cutover.versionId,
           completedAt,
         });
@@ -439,6 +441,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
         await transaction.completeReplacementOperation({
           operationId: durableOperationId,
           imageId,
+          actorId: userId,
           resultImageVersionId: cutover.versionId,
           completedAt: new Date(),
         });
@@ -511,6 +514,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
         await transaction.completeReplacementOperation({
           operationId,
           imageId: randomUUID(),
+          actorId: userId,
           resultImageVersionId: cutover.versionId,
           completedAt,
         });

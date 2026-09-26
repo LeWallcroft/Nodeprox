@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, afterEach, beforeAll, describe, expect, inject, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  inject,
+  it,
+} from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";

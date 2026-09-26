@@ -45,7 +45,10 @@ function subject(
       operation: completing,
     })),
     markCompleted: vi.fn(),
-    markFailed: vi.fn(async () => ({ ...operation, status: "failed" })),
+    markFailed: vi.fn(async () => ({
+      ...operation,
+      status: "failed" as const,
+    })),
   };
   const transfer: UploadTransferPort = {
     initiate: vi.fn(),

@@ -64,9 +64,9 @@ class MemoryOutbox implements DomainEventOutboxRepository {
     const event = this.findClaimed(input.eventId, input.claimToken);
     if (!event) return false;
     event.processedAt = input.processedAt;
-    event.claimToken = undefined;
-    event.lockedUntil = undefined;
-    event.nextAttemptAt = undefined;
+    delete event.claimToken;
+    delete event.lockedUntil;
+    delete event.nextAttemptAt;
     return true;
   }
 
@@ -81,8 +81,8 @@ class MemoryOutbox implements DomainEventOutboxRepository {
     if (!event) return false;
     event.attemptCount += 1;
     event.nextAttemptAt = input.nextAttemptAt;
-    event.claimToken = undefined;
-    event.lockedUntil = undefined;
+    delete event.claimToken;
+    delete event.lockedUntil;
     return true;
   }
 
@@ -94,8 +94,8 @@ class MemoryOutbox implements DomainEventOutboxRepository {
     const event = this.findClaimed(input.eventId, input.claimToken);
     if (!event) return false;
     event.nextAttemptAt = input.nextAttemptAt;
-    event.claimToken = undefined;
-    event.lockedUntil = undefined;
+    delete event.claimToken;
+    delete event.lockedUntil;
     return true;
   }
 
