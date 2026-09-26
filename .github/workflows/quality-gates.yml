@@ -38,6 +38,10 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Legacy fixtures concatenate a Windows separator to os.tmpdir(). Keep
+    # their isolated directories under /tmp until those fixtures are portable.
+    env:
+      TMPDIR: /tmp/.
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -54,6 +58,8 @@ jobs:
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      TMPDIR: /tmp/.
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
