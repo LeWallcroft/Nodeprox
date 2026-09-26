@@ -239,16 +239,18 @@ describe("M3 Series and Chapters Core", () => {
       headers: { cookie: ownerCookie },
     });
     expect(seriesCapabilities.statusCode).toBe(200);
-    expect(seriesCapabilities.json().capabilities).toEqual(
+    const gestorCapabilities = seriesCapabilities.json()
+      .capabilities as string[];
+    expect(gestorCapabilities).toEqual(
       expect.arrayContaining([
         "series.read",
         "series.edit",
-        "series.delete",
         "chapters.create",
         "images.upload",
         "series.assignment.manage",
       ]),
     );
+    expect(gestorCapabilities).not.toContain("series.delete");
 
     const chapterCapabilities = await app.inject({
       method: "GET",
@@ -320,24 +322,27 @@ describe("M3 Series and Chapters Core", () => {
     expect(candidateIds).not.toContain(pendingUploaderId);
     expect(candidateIds).not.toContain(suspendedUploaderId);
 
-    const unauthorized = await app.inject({
+    const foreignCandidates = await app.inject({
       method: "GET",
       url: `/series/${seriesId}/responsible-candidates`,
       headers: { cookie: otherCookie },
     });
-    expect(unauthorized.statusCode).toBe(403);
+    expect(foreignCandidates.statusCode).toBe(200);
+    expect(
+      foreignCandidates.json().map((item: { id: string }) => item.id),
+    ).toEqual(expect.arrayContaining([helperId, uploaderTwoId]));
 
     const assign = await app.inject({
       method: "PUT",
       url: `/series/${seriesId}/responsible`,
-      headers: { cookie: ownerCookie },
+      headers: { cookie: otherCookie },
       payload: { responsibleUserId: helperId },
     });
     expect(assign.statusCode).toBe(200);
     const reassign = await app.inject({
       method: "PUT",
       url: `/series/${seriesId}/responsible`,
-      headers: { cookie: ownerCookie },
+      headers: { cookie: otherCookie },
       payload: { responsibleUserId: uploaderTwoId },
     });
     expect(reassign.statusCode).toBe(200);
@@ -355,7 +360,7 @@ describe("M3 Series and Chapters Core", () => {
     const returnToOwner = await app.inject({
       method: "PUT",
       url: `/series/${seriesId}/responsible`,
-      headers: { cookie: ownerCookie },
+      headers: { cookie: otherCookie },
       payload: { responsibleUserId: ownerId },
     });
     expect(returnToOwner.statusCode).toBe(200);
@@ -464,6 +469,7 @@ describe("M3 Series and Chapters Core", () => {
 
   it("implements the authenticated Series and Chapter CRUD contract", async () => {
     const ownerCookie = await login(emails.owner);
+    const adminCookie = await login(emails.admin);
     const createdSeries = await app.inject({
       method: "POST",
       url: "/series",
@@ -548,12 +554,28 @@ describe("M3 Series and Chapters Core", () => {
         })
       ).statusCode,
     ).toBe(409);
+    const adminCapabilities = await app.inject({
+      method: "GET",
+      url: `/series/${seriesId}/capabilities`,
+      headers: { cookie: adminCookie },
+    });
+    expect(adminCapabilities.statusCode).toBe(200);
+    expect(adminCapabilities.json().capabilities).toContain("series.delete");
     expect(
       (
         await app.inject({
           method: "DELETE",
           url: `/series/${seriesId}`,
           headers: { cookie: ownerCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/series/${seriesId}`,
+          headers: { cookie: adminCookie },
         })
       ).statusCode,
     ).toBe(409);
@@ -580,7 +602,7 @@ describe("M3 Series and Chapters Core", () => {
         await app.inject({
           method: "DELETE",
           url: `/series/${seriesId}`,
-          headers: { cookie: ownerCookie },
+          headers: { cookie: adminCookie },
         })
       ).statusCode,
     ).toBe(204);
@@ -689,7 +711,7 @@ describe("M3 Series and Chapters Core", () => {
     ).toMatchObject({ code: "chapter-conflict" });
   });
 
-  it("keeps Series administration owned while allowing Gestor Chapter support", async () => {
+  it("allows Gestor operational administration across Series while keeping delete admin-only", async () => {
     const ownerCookie = await login(emails.owner);
     const otherCookie = await login(emails.other);
     const created = await app.inject({
@@ -725,7 +747,7 @@ describe("M3 Series and Chapters Core", () => {
           payload: { title: "attack" },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await app.inject({
