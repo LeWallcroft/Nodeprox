@@ -37,6 +37,13 @@ export type ChapterContextualAuthorizationReason =
   | "assigned"
   | "helper";
 
+export type ChapterAdministrationAuthorizationInput = {
+  role: Role;
+  isAssigned: boolean;
+};
+
+export type ChapterAdministrationAuthorizationReason = "role" | "assigned";
+
 export function evaluateChapterContextualAuthorization(input: {
   role: Role;
   isSeriesOwner: boolean;
@@ -52,16 +59,14 @@ export function evaluateChapterContextualAuthorization(input: {
 }
 
 /**
- * Helper grants/revocations are Series administration, not ordinary Chapter
- * operations. Keep Gestor restricted to its own Series for that boundary.
+ * Helper grants/revocations are Chapter administration. Admin and Gestor
+ * administer them globally; Uploader authority remains assignment-scoped.
  */
-export function evaluateChapterAdministrationAuthorization(input: {
-  role: Role;
-  isSeriesOwner: boolean;
-  isAssigned: boolean;
-}): "role" | "assigned" | null {
+export function evaluateChapterAdministrationAuthorization(
+  input: ChapterAdministrationAuthorizationInput,
+): ChapterAdministrationAuthorizationReason | null {
   if (input.role === "admin") return "role";
-  if (input.role === "gestor" && input.isSeriesOwner) return "role";
+  if (input.role === "gestor") return "role";
   if (input.role === "uploader" && input.isAssigned) return "assigned";
   return null;
 }

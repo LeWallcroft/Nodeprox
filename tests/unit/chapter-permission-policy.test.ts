@@ -29,7 +29,7 @@ describe("chapter permission policy", () => {
     );
   });
 
-  it("keeps Gestor Chapter operations global but helper administration owned", () => {
+  it("keeps Gestor Chapter operations and helper administration global", () => {
     expect(
       evaluateChapterContextualAuthorization({
         role: "gestor",
@@ -38,12 +38,21 @@ describe("chapter permission policy", () => {
         hasHelperPermission: false,
       }),
     ).toBe("role");
-    expect(
-      evaluateChapterAdministrationAuthorization({
-        role: "gestor",
-        isSeriesOwner: false,
-        isAssigned: false,
-      }),
-    ).toBeNull();
   });
+
+  it.each([
+    ["admin", false, "role"],
+    ["admin", true, "role"],
+    ["gestor", false, "role"],
+    ["gestor", true, "role"],
+    ["uploader", true, "assigned"],
+    ["uploader", false, null],
+  ] as const)(
+    "evaluates helper administration for %s assigned=%s",
+    (role, isAssigned, expected) => {
+      expect(
+        evaluateChapterAdministrationAuthorization({ role, isAssigned }),
+      ).toBe(expected);
+    },
+  );
 });

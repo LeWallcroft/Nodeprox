@@ -610,7 +610,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
           payload: { responsibleUserId: uploaderId },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(200);
     expect(
       (
         await app.inject({
@@ -818,6 +818,58 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/chapters/${assignedChapterId}/capabilities`,
+          headers: { cookie: secondUploaderCookie },
+        })
+      ).json().capabilities,
+    ).toEqual(
+      expect.arrayContaining([
+        "chapters.helper.grant",
+        "chapters.helper.revoke",
+      ]),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${assignedChapterId}/permissions`,
+          headers: { cookie: secondUploaderCookie },
+          payload: { userId: uploaderId, permissions: ["chapters.edit"] },
+        })
+      ).statusCode,
+    ).toBe(204);
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${assignedChapterId}/permissions`,
+          headers: { cookie: uploaderCookie },
+          payload: { userId: ownerId, permissions: ["chapters.read"] },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/chapters/${assignedChapterId}/permissions/${secondUploaderId}`,
+          headers: { cookie: uploaderCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/chapters/${assignedChapterId}/permissions/${uploaderId}`,
+          headers: { cookie: secondUploaderCookie },
+        })
+      ).statusCode,
+    ).toBe(204);
     const uploadResponse = await app.inject({
       method: "POST",
       url: `/chapters/${assignedChapterId}/uploads/initiate`,
@@ -861,6 +913,30 @@ describe("A1 identity, assignment and chapter numbering", () => {
       headers: { cookie: secondUploaderCookie },
     });
     expect(deniedAfterRevocation.statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/chapters/${assignedChapterId}/capabilities`,
+          headers: { cookie: secondUploaderCookie },
+        })
+      ).json().capabilities,
+    ).not.toEqual(
+      expect.arrayContaining([
+        "chapters.helper.grant",
+        "chapters.helper.revoke",
+      ]),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${assignedChapterId}/permissions`,
+          headers: { cookie: secondUploaderCookie },
+          payload: { userId: uploaderId, permissions: ["chapters.read"] },
+        })
+      ).statusCode,
+    ).toBe(403);
     const completeAfterRevocation = await app.inject({
       method: "POST",
       url: `/chapters/${assignedChapterId}/uploads/${assignedUploadId}/complete`,
@@ -959,29 +1035,26 @@ describe("A1 identity, assignment and chapter numbering", () => {
       payload: { responsibleUserId: uploaderId },
     });
     expect(adminAssignForeign.statusCode).toBe(200);
-    for (const request of [
-      {
-        method: "PUT" as const,
-        url: `/series/${foreignSeriesId}/responsible`,
-        payload: { responsibleUserId: secondUploaderId },
-        cookie: ownerCookie,
-      },
-      {
-        method: "PUT" as const,
-        url: `/series/${ownSeriesId}/responsible`,
-        payload: { responsibleUserId: uploaderId },
-        cookie: uploaderCookie,
-      },
-    ]) {
-      expect(
-        (
-          await app.inject({
-            ...request,
-            headers: { cookie: request.cookie },
-          })
-        ).statusCode,
-      ).toBe(403);
-    }
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/series/${foreignSeriesId}/responsible`,
+          headers: { cookie: ownerCookie },
+          payload: { responsibleUserId: secondUploaderId },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: `/series/${ownSeriesId}/responsible`,
+          headers: { cookie: uploaderCookie },
+          payload: { responsibleUserId: uploaderId },
+        })
+      ).statusCode,
+    ).toBe(403);
   });
 
   it("allows Gestor global Series operations while reserving deletion", async () => {
@@ -1022,11 +1095,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
       ]),
     );
     expect(capabilities.json().capabilities).not.toEqual(
-      expect.arrayContaining([
-        "series.delete",
-        "chapters.helper.grant",
-        "chapters.helper.revoke",
-      ]),
+      expect.arrayContaining(["series.delete"]),
     );
 
     const edited = await app.inject({
@@ -1142,6 +1211,18 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(204);
+    const chapterCapabilities = await app.inject({
+      method: "GET",
+      url: `/chapters/${chapterId}/capabilities`,
+      headers: { cookie: supportGestorCookie },
+    });
+    expect(chapterCapabilities.statusCode).toBe(200);
+    expect(chapterCapabilities.json().capabilities).toEqual(
+      expect.arrayContaining([
+        "chapters.helper.grant",
+        "chapters.helper.revoke",
+      ]),
+    );
     expect(
       (
         await app.inject({
@@ -1150,7 +1231,91 @@ describe("A1 identity, assignment and chapter numbering", () => {
           headers: { cookie: supportGestorCookie },
         })
       ).statusCode,
+    ).toBe(200);
+    const helperCookie = await login(emails.secondUploader);
+    const foreignGrant = await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/permissions`,
+      headers: { cookie: supportGestorCookie },
+      payload: { userId: secondUploaderId, permissions: ["chapters.edit"] },
+    });
+    expect(foreignGrant.statusCode).toBe(204);
+    await expect(
+      database.db
+        .select({
+          grantedBy: chapterPermissions.grantedBy,
+          permission: chapterPermissions.permission,
+          revokedAt: chapterPermissions.revokedAt,
+        })
+        .from(chapterPermissions)
+        .where(eq(chapterPermissions.chapterId, chapterId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          grantedBy: secondOwnerId,
+          permission: "chapters.edit",
+          revokedAt: null,
+        }),
+      ]),
+    );
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${chapterId}/permissions`,
+          headers: { cookie: helperCookie },
+          payload: { userId: uploaderId, permissions: ["chapters.read"] },
+        })
+      ).statusCode,
     ).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: `/chapters/${chapterId}/permissions/${secondUploaderId}`,
+          headers: { cookie: helperCookie },
+        })
+      ).statusCode,
+    ).toBe(403);
+    const foreignRevoke = await app.inject({
+      method: "DELETE",
+      url: `/chapters/${chapterId}/permissions/${secondUploaderId}`,
+      headers: { cookie: supportGestorCookie },
+    });
+    expect(foreignRevoke.statusCode).toBe(204);
+    await expect(
+      database.db
+        .select({
+          revokedAt: chapterPermissions.revokedAt,
+          revokedBy: chapterPermissions.revokedBy,
+        })
+        .from(chapterPermissions)
+        .where(eq(chapterPermissions.chapterId, chapterId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          revokedAt: expect.any(Date),
+          revokedBy: secondOwnerId,
+        }),
+      ]),
+    );
+    await expect(
+      database.db
+        .select({ action: auditLogs.action, actorId: auditLogs.actorId })
+        .from(auditLogs)
+        .where(eq(auditLogs.resourceId, chapterId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "chapter.permission.granted",
+          actorId: secondOwnerId,
+        }),
+        expect.objectContaining({
+          action: "chapter.permission.revoked",
+          actorId: secondOwnerId,
+        }),
+      ]),
+    );
 
     const batch = await app.inject({
       method: "POST",
@@ -1203,7 +1368,7 @@ describe("A1 identity, assignment and chapter numbering", () => {
           payload: { chapterNumber: 93 },
         })
       ).statusCode,
-    ).toBe(403);
+    ).toBe(201);
 
     const [storedSeries] = await database.db
       .select({ createdBy: series.createdBy })
