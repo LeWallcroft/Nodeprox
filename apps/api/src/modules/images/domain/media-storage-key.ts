@@ -1,4 +1,5 @@
 import type { MediaVersion } from "./media-version.js";
+import { buildChapterMediaStorageKey } from "@nodeprox/storage";
 
 const publicSegment = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -32,7 +33,7 @@ export const MediaStorageKey = {
 
     return {
       physicalFilename: input.physicalFilename,
-      storageKey: `Media/${input.seriesSlug}/${input.chapterPublicKey}/${input.physicalFilename}`,
+      storageKey: buildChapterMediaStorageKey(input),
     };
   },
 

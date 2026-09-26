@@ -7,6 +7,7 @@ import type {
   ZipExtractorPort,
 } from "./ports.js";
 import { classifyProcessingError } from "./processing-error.classifier.js";
+import { putIfAbsentOrVerifyEquivalent } from "./put-if-absent-or-verify-equivalent.js";
 export class ChapterProcessingService {
   constructor(
     private readonly repository: ProcessingRepositoryPort,
@@ -51,21 +52,32 @@ export class ChapterProcessingService {
           chapterPublicKey: upload.chapterPublicKey,
           filename: image.filename,
         });
-        const stored = await this.storage.put({
+        await this.repository.reserveCandidate(
+          attempt.id,
+          storageKey,
+          image.checksum,
+        );
+        const write = await putIfAbsentOrVerifyEquivalent({
+          storage: this.storage,
           key: storageKey,
           body: this.extractor.readImage(image),
           contentType: image.contentType,
           sizeBytes: image.sizeBytes,
+          checksum: image.checksum,
+          onCreated: async () => {
+            createdKeys.push(storageKey);
+            await this.repository.markCandidate(
+              attempt.id,
+              storageKey,
+              "created",
+            );
+          },
         });
-        if (
-          stored.key !== storageKey ||
-          stored.sizeBytes !== image.sizeBytes ||
-          stored.sizeBytes <= 0 ||
-          stored.contentType !== image.contentType
-        )
-          throw new Error("stored-image-metadata-mismatch");
-        createdKeys.push(stored.key);
-        records.push({ ...image, storageKey: stored.key });
+        if (write.outcome === "existing-conflict")
+          throw new Error("storage-key-content-conflict");
+        if (write.outcome === "existing-equivalent")
+          await this.repository.markCandidate(attempt.id, storageKey, "reused");
+        records.push({ ...image, storageKey: write.key });
       }
       await this.repository.replaceImagesAndMarkReady(
         input.chapterId,
@@ -109,15 +121,6 @@ export class ChapterProcessingService {
     } catch (error) {
       const classification = classifyProcessingError(error);
       const terminal = !classification.retryable || removeSourceOnFailure;
-      await Promise.all(
-        createdKeys.map((key) =>
-          this.storage.delete(key).catch(() => undefined),
-        ),
-      );
-      if (terminal)
-        await this.storage
-          .delete(input.sourceStorageKey)
-          .catch(() => undefined);
       await this.repository.markFailed(
         input.chapterId,
         input.uploadId,
@@ -129,6 +132,20 @@ export class ChapterProcessingService {
         },
         upload.createdBy,
       );
+      await Promise.all(
+        createdKeys.map(async (key) => {
+          try {
+            await this.storage.delete(key);
+            await this.repository.markCandidate(attempt.id, key, "cleaned");
+          } catch {
+            // The durable cleanup_pending row is handled by reconciliation.
+          }
+        }),
+      );
+      if (terminal)
+        await this.storage
+          .delete(input.sourceStorageKey)
+          .catch(() => undefined);
       await this.audit
         .append({
           actorId: upload.createdBy,

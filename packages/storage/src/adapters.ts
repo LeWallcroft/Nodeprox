@@ -8,14 +8,16 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
 import { createReadStream, createWriteStream } from "node:fs";
-import { access, mkdir, rm } from "node:fs/promises";
+import { access, mkdir, rm, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   UploadTransferObjectNotFoundError,
   UploadTransferProviderError,
+  StorageObjectAlreadyExistsError,
   type StoragePort,
+  type StoredObjectMetadata,
   type StoredObject,
   type UploadTransferPort,
   type VerifiedUploadedObject,
@@ -63,6 +65,11 @@ export class B2Storage implements StoragePort {
     sizeBytes: number;
   }): Promise<StoredObject> {
     requirePositiveSize(input.sizeBytes);
+    // B2 does not document conditional PutObject writes. Chapter processing
+    // serializes logical writers in PostgreSQL; this read prevents a retry
+    // from replacing a key already present in B2.
+    if (await this.exists(input.key))
+      throw new StorageObjectAlreadyExistsError();
     const result = await this.client.send(
       new PutObjectCommand({
         Bucket: this.bucket,
@@ -99,13 +106,22 @@ export class B2Storage implements StoragePort {
   }
 
   async exists(key: string): Promise<boolean> {
+    return (await this.head(key)) !== null;
+  }
+
+  async head(key: string): Promise<StoredObjectMetadata | null> {
     try {
-      await this.client.send(
+      const result = await this.client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
       );
-      return true;
+      if (result.ContentLength === undefined)
+        throw new Error("storage-object-size-missing");
+      return {
+        sizeBytes: result.ContentLength,
+        ...(result.ContentType ? { contentType: result.ContentType } : {}),
+      };
     } catch (error) {
-      if (isNotFound(error)) return false;
+      if (isNotFound(error)) return null;
       throw error;
     }
   }
@@ -134,11 +150,24 @@ export class FilesystemStorage implements StoragePort {
         callback(null, chunk);
       },
     });
-    await pipeline(
-      input.body,
-      counter,
-      createWriteStream(target, { flags: "wx" }),
-    );
+    const output = createWriteStream(target, { flags: "wx" });
+    let createdByThisWrite = false;
+    output.once("open", () => {
+      createdByThisWrite = true;
+    });
+    try {
+      await pipeline(input.body, counter, output);
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "EEXIST"
+      )
+        throw new StorageObjectAlreadyExistsError();
+      if (createdByThisWrite) await rm(target, { force: true });
+      throw error;
+    }
     if (sizeBytes !== input.sizeBytes) {
       await rm(target, { force: true });
       throw new Error("storage-size-mismatch");
@@ -163,6 +192,22 @@ export class FilesystemStorage implements StoragePort {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  async head(key: string): Promise<StoredObjectMetadata | null> {
+    try {
+      const metadata = await stat(this.safePath(key));
+      return { sizeBytes: metadata.size };
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      )
+        return null;
+      throw error;
     }
   }
 

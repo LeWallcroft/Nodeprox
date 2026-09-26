@@ -238,13 +238,13 @@ test.describe("M4-B real upload processing", () => {
   test("keeps bulk items independent and persistently retries only the failed item", async () => {
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
-    const slug = `e2e-bulk-${Date.now()}`;
+    const title = `M4-B E2E bulk ${Date.now()}`;
     let seriesId = "";
     const chapterIds: string[] = [];
     try {
       api = await login(api, await createTestAdmin(database));
       const createdSeries = await api.post("/series", {
-        data: { title: "M4-B E2E bulk", slug },
+        data: { title },
         headers: { origin: e2eApiOrigin },
       });
       expect(createdSeries.status()).toBe(201);
@@ -406,17 +406,20 @@ test.describe("M4-B real upload processing", () => {
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
-    const slug = `e2e-valid-${Date.now()}`;
+    const title = `M4-B E2E valid ${Date.now()}`;
+    let slug = "";
     let seriesId = "";
     let chapterId = "";
     try {
       api = await login(api, await createTestAdmin(database));
       const createdSeries = await api.post("/series", {
-        data: { title: "M4-B E2E valid", slug },
+        data: { title },
         headers: { origin: e2eApiOrigin },
       });
       expect(createdSeries.status()).toBe(201);
-      seriesId = (await createdSeries.json()).id;
+      const createdSeriesBody = await createdSeries.json();
+      seriesId = createdSeriesBody.id;
+      slug = createdSeriesBody.slug;
       const createdChapter = await api.post(`/series/${seriesId}/chapters`, {
         data: { chapterNumber: 1, title: "Valid ZIP" },
         headers: { origin: e2eApiOrigin },
@@ -453,8 +456,7 @@ test.describe("M4-B real upload processing", () => {
       ]);
       expect(
         rows.every(
-          (row) =>
-            row.storageKey === `Media/${slug}/1/${row.filename}`,
+          (row) => row.storageKey === `Media/${slug}/1/${row.filename}`,
         ),
       ).toBe(true);
       expect(
@@ -537,7 +539,6 @@ test.describe("M4-B real upload processing", () => {
       expect(webpContent.status()).toBe(200);
       expect(webpContent.headers()["content-type"]).toContain("image/webp");
       expect(await webpContent.body()).toEqual(webp);
-
     } finally {
       if (chapterId) {
         await database.db.delete(images).where(eq(images.chapterId, chapterId));
@@ -558,16 +559,19 @@ test.describe("M4-B real upload processing", () => {
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
-    const slug = `e2e-invalid-${Date.now()}`;
+    const title = `M4-B E2E invalid ${Date.now()}`;
+    let slug = "";
     let seriesId = "";
     let chapterId = "";
     try {
       api = await login(api, await createTestAdmin(database));
       const createdSeries = await api.post("/series", {
-        data: { title: "M4-B E2E invalid", slug },
+        data: { title },
         headers: { origin: e2eApiOrigin },
       });
-      seriesId = (await createdSeries.json()).id;
+      const createdSeriesBody = await createdSeries.json();
+      seriesId = createdSeriesBody.id;
+      slug = createdSeriesBody.slug;
       const createdChapter = await api.post(`/series/${seriesId}/chapters`, {
         data: { chapterNumber: 1 },
         headers: { origin: e2eApiOrigin },
@@ -620,10 +624,10 @@ test.describe("M4-B real upload processing", () => {
       }
       if (seriesId)
         await database.db.delete(series).where(eq(series.id, seriesId));
-      rmSync(
-        `${process.cwd()}/.nodeprox-storage/Media/${slug}/1`,
-        { recursive: true, force: true },
-      );
+      rmSync(`${process.cwd()}/.nodeprox-storage/Media/${slug}/1`, {
+        recursive: true,
+        force: true,
+      });
       await database.sql.end();
       await api.dispose();
       await anonymous?.dispose();

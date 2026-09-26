@@ -1,10 +1,11 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import { DrizzleIntegrityRepository } from "../../apps/api/src/modules/reconciliation/infrastructure/drizzle-integrity.repository.js";
 import type {
   ProcessingAuditPort,
   ZipExtractorPort,
@@ -15,6 +16,7 @@ import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapterProcessingAttempts,
+  chapterProcessingObjects,
   chapters,
   images,
   series,
@@ -37,7 +39,7 @@ const image: ValidatedImage = {
   contentType: "image/jpeg",
   sortOrder: 1,
   sizeBytes: 3,
-  checksum: "checksum-01",
+  checksum: createHash("sha256").update("img").digest("hex"),
   warnings: [],
   tempPath: "temporary-image",
 };
@@ -108,6 +110,76 @@ afterAll(async () => {
 });
 
 describe("M4-B processing integration", () => {
+  it("serializes orphan cleanup with a Chapter processing claim", async () => {
+    const { chapterId, uploadId } = await createFixture();
+    const storage = new FilesystemStorage(storageRoot);
+    const attemptId = randomUUID();
+    const candidateId = randomUUID();
+    const storageKey = `Media/m4b-${seriesId}/${chapterIds.length}/01.jpg`;
+    await database.db
+      .update(chapters)
+      .set({ status: "failed" })
+      .where(eq(chapters.id, chapterId));
+    await database.db.insert(chapterProcessingAttempts).values({
+      id: attemptId,
+      chapterId,
+      uploadId,
+      attemptNumber: 1,
+      status: "terminal_failed",
+      finishedAt: new Date(),
+    });
+    await database.db.insert(chapterProcessingObjects).values({
+      id: candidateId,
+      attemptId,
+      storageKey,
+      checksum: image.checksum,
+      status: "cleanup_pending",
+    });
+    await storage.put({
+      key: storageKey,
+      body: Readable.from([Buffer.from("img")]),
+      contentType: "image/jpeg",
+      sizeBytes: 3,
+    });
+    const candidate = {
+      id: candidateId,
+      chapterId,
+      uploadId,
+      attemptId,
+      storageKey,
+      checksum: image.checksum,
+      status: "cleanup_pending" as const,
+      attemptStatus: "terminal_failed",
+      createdAt: new Date("2020-01-01"),
+    };
+    const repository = new DrizzleIntegrityRepository(database.db);
+    await database.db
+      .update(chapters)
+      .set({ status: "processing" })
+      .where(eq(chapters.id, chapterId));
+    expect(
+      await repository.withCandidateCleanupLock(candidate, () =>
+        storage.delete(storageKey),
+      ),
+    ).toBe(false);
+    expect(await storage.exists(storageKey)).toBe(true);
+    await database.db
+      .update(chapters)
+      .set({ status: "failed" })
+      .where(eq(chapters.id, chapterId));
+    expect(
+      await repository.withCandidateCleanupLock(candidate, () =>
+        storage.delete(storageKey),
+      ),
+    ).toBe(true);
+    expect(await storage.exists(storageKey)).toBe(false);
+    const [cleaned] = await database.db
+      .select({ status: chapterProcessingObjects.status })
+      .from(chapterProcessingObjects)
+      .where(eq(chapterProcessingObjects.id, candidateId));
+    expect(cleaned?.status).toBe("cleaned");
+  });
+
   it("sanitizes processing audit metadata at the persistence boundary", async () => {
     const repository = new DrizzleProcessingRepository(database.db);
     const actorId = userId;
@@ -401,6 +473,9 @@ describe("M4-B processing integration", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.storageKey).toBe(publishedKey);
     await expect(storage.exists(publishedKey)).resolves.toBe(true);
+    expect(
+      Buffer.concat(await (await storage.get(publishedKey)).toArray()),
+    ).toEqual(Buffer.from("img"));
   });
 
   it("allows only one concurrent processor to claim a Chapter", async () => {

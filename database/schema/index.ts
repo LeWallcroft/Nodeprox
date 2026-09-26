@@ -13,6 +13,10 @@ export {
   chapterProcessingAttemptStatusEnum,
 } from "./chapter-processing-attempts.js";
 export {
+  chapterProcessingObjects,
+  chapterProcessingObjectStatusEnum,
+} from "./chapter-processing-objects.js";
+export {
   chapterDeletionOutbox,
   chapterDeletionOutboxStatusEnum,
 } from "./chapter-deletion-outbox.js";

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { eq, inArray, sql } from "drizzle-orm";
 import {
@@ -58,14 +58,17 @@ class FakeTransfer implements UploadTransferPort {
 
 class MemoryStorage implements StoragePort {
   readonly keys = new Set<string>();
+  readonly objects = new Map<string, Buffer>();
   async put(input: {
     key: string;
     body: NodeJS.ReadableStream;
     sizeBytes: number;
     contentType: string;
   }) {
-    input.body.resume();
+    const chunks: Buffer[] = [];
+    for await (const chunk of input.body) chunks.push(Buffer.from(chunk));
     this.keys.add(input.key);
+    this.objects.set(input.key, Buffer.concat(chunks));
     return {
       key: input.key,
       sizeBytes: input.sizeBytes,
@@ -74,10 +77,11 @@ class MemoryStorage implements StoragePort {
   }
   async get(key: string) {
     this.keys.add(key);
-    return Readable.from([Buffer.from("zip!")]);
+    return Readable.from([this.objects.get(key) ?? Buffer.from("zip!")]);
   }
   async delete(key: string) {
     this.keys.delete(key);
+    this.objects.delete(key);
   }
   async exists(key: string) {
     return this.keys.has(key);
@@ -90,7 +94,7 @@ const processedImage: ValidatedImage = {
   contentType: "image/jpeg",
   sortOrder: 1,
   sizeBytes: 4,
-  checksum: "batch-image-checksum",
+  checksum: createHash("sha256").update("img!").digest("hex"),
   warnings: [],
   tempPath: "batch-image",
 };

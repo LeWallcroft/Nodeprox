@@ -39,8 +39,12 @@ describe("B2Storage contract", () => {
     const adapter: StoragePort = new B2Storage(b2Config);
     const send = vi
       .fn()
+      .mockRejectedValueOnce({ $metadata: { httpStatusCode: 404 } })
       .mockResolvedValueOnce({ ETag: '"etag-1"' })
-      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({
+        ContentLength: 4,
+        ContentType: "application/zip",
+      })
       .mockResolvedValueOnce({});
     Object.defineProperty(adapter, "client", { value: { send } });
 
@@ -56,10 +60,11 @@ describe("B2Storage contract", () => {
       etag: "etag-1",
       sizeBytes: input.sizeBytes,
     });
-    const putCommand = send.mock.calls[0]?.[0] as {
+    const putCommand = send.mock.calls[1]?.[0] as {
       input: Record<string, unknown>;
     };
     expect(putCommand.input.ContentLength).toBe(input.sizeBytes);
+    expect(putCommand.input.IfNoneMatch).toBeUndefined();
     expect(putCommand.input.Body).toBe(input.body);
     expect((input.body as Readable).readableFlowing).toBeNull();
     await expect(
@@ -69,7 +74,7 @@ describe("B2Storage contract", () => {
       adapter.delete("chapters/chapter/uploads/upload.zip"),
     ).resolves.toBeUndefined();
     expect(JSON.stringify(adapter)).not.toContain("application-secret");
-    expect(send).toHaveBeenCalledTimes(3);
+    expect(send).toHaveBeenCalledTimes(4);
   });
 
   it("returns false only for a not-found head response and rethrows other errors", async () => {
@@ -85,6 +90,28 @@ describe("B2Storage contract", () => {
       value: { send: vi.fn().mockRejectedValue(failure) },
     });
     await expect(adapter.exists("unknown.zip")).rejects.toBe(failure);
+  });
+
+  it("normalizes an existing B2 object without overwriting it", async () => {
+    const adapter: StoragePort = new B2Storage(b2Config);
+    const send = vi
+      .fn()
+      .mockResolvedValue({ ContentLength: 3, ContentType: "image/jpeg" });
+    Object.defineProperty(adapter, "client", {
+      value: { send },
+    });
+    await expect(
+      adapter.put({
+        key: "Media/a/1/01.jpg",
+        body: Readable.from([Buffer.from("img")]),
+        contentType: "image/jpeg",
+        sizeBytes: 3,
+      }),
+    ).rejects.toMatchObject({
+      name: "StorageObjectAlreadyExistsError",
+      message: "storage-object-already-exists",
+    });
+    expect(send).toHaveBeenCalledTimes(1);
   });
 
   it("reads a B2 object as a stream and preserves provider errors", async () => {
@@ -105,6 +132,34 @@ describe("B2Storage contract", () => {
 });
 
 describe("FilesystemStorage contract", () => {
+  it("normalizes an existing object and leaves its bytes unchanged", async () => {
+    const root = await mkdtemp(`${tmpdir()}\\nodeprox-storage-test-`);
+    try {
+      const adapter: StoragePort = new FilesystemStorage(root);
+      await adapter.put({
+        key: "Media/a/1/01.jpg",
+        body: Readable.from([Buffer.from("original")]),
+        contentType: "image/jpeg",
+        sizeBytes: 8,
+      });
+      await expect(
+        adapter.put({
+          key: "Media/a/1/01.jpg",
+          body: Readable.from([Buffer.from("different")]),
+          contentType: "image/jpeg",
+          sizeBytes: 9,
+        }),
+      ).rejects.toMatchObject({
+        name: "StorageObjectAlreadyExistsError",
+        message: "storage-object-already-exists",
+      });
+      expect(
+        Buffer.concat(await (await adapter.get("Media/a/1/01.jpg")).toArray()),
+      ).toEqual(Buffer.from("original"));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("reads objects as streams and rejects traversal", async () => {
     const root = await mkdtemp(`${tmpdir()}\\nodeprox-storage-test-`);
     try {
