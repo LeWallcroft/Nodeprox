@@ -145,11 +145,7 @@ describe("UnzipperExtractor", () => {
     try {
       const images = await instance.inspect(
         Readable.from([
-          zipStored(
-            names
-              .toReversed()
-              .map((name) => ({ name, data: webp })),
-          ),
+          zipStored(names.toReversed().map((name) => ({ name, data: webp }))),
         ]),
       );
       expect(images.map((image) => image.filename)).toEqual(names);

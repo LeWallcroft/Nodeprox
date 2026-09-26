@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DomainEventEnvelope } from "../../apps/api/src/modules/events/application/domain-event-handler.js";
 import type {
   NotificationRecord,
+  NotificationPage,
   NotificationRepository,
 } from "../../apps/api/src/modules/notifications/application/notification.repository.js";
 import { NotificationProjector } from "../../apps/api/src/modules/notifications/application/notification-projector.js";
@@ -29,19 +30,19 @@ class MemoryNotifications implements NotificationRepository {
     return { created: true, notification };
   }
 
-  async listForUser() {
+  async listForUser(): Promise<NotificationPage> {
     throw new Error("not implemented");
   }
 
-  async countUnread() {
+  async countUnread(): Promise<number> {
     throw new Error("not implemented");
   }
 
-  async markRead() {
+  async markRead(): Promise<boolean> {
     throw new Error("not implemented");
   }
 
-  async markAllRead() {
+  async markAllRead(): Promise<number> {
     throw new Error("not implemented");
   }
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import type { buildApp } from "../../../apps/api/src/app.js";
 import type {
   DiscordSeriesChannelGateway,
   SeriesChannelValidationResult,
@@ -35,7 +35,9 @@ export class FakeDiscordSeriesChannelGateway
  * reaches the application boundary. The production application never adds a
  * channel ID itself, and the fake gateway still validates every supplied ID.
  */
-export function withM2DSeriesFixtures<T extends FastifyInstance>(app: T): T {
+export function withM2DSeriesFixtures<T extends ReturnType<typeof buildApp>>(
+  app: T,
+): T {
   const inject = app.inject.bind(app);
   app.inject = ((options: unknown, callback?: unknown) => {
     const request = withFixtureChannel(options);

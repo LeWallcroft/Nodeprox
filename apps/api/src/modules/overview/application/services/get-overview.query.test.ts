@@ -26,9 +26,9 @@ function repository(): OverviewReadPort {
       quotaBytes: null,
       source: "database",
     }),
-    getActivity7d: vi.fn().mockResolvedValue([
-      { date: "2026-08-29", series: 0, chapters: 0 },
-    ]),
+    getActivity7d: vi
+      .fn()
+      .mockResolvedValue([{ date: "2026-08-29", series: 0, chapters: 0 }]),
   };
 }
 

@@ -34,6 +34,20 @@ class FakeUsers implements IdentityUserRepositoryPort {
   async list() {
     return this.records;
   }
+  async listManagement(
+    input: Parameters<IdentityUserRepositoryPort["listManagement"]>[0],
+  ) {
+    const items = this.records.slice(0, input.limit).map((record) => ({
+      ...record,
+      assignedSeriesCount: 0,
+      lastAccessAt: null,
+    }));
+    return {
+      items,
+      total: this.records.length,
+      hasMore: this.records.length > items.length,
+    };
+  }
   async lookup() {
     return this.records;
   }

@@ -132,5 +132,4 @@ describe("GetPublishedChapter", () => {
       ).execute(chapter.id),
     ).rejects.toMatchObject({ message: "published-chapter-integrity-error" });
   });
-
 });

@@ -28,9 +28,7 @@ import type {
 const MAX_RECENT_ACTIVITY = 50;
 const TECHNICAL_AUDIT_ACTIONS = ["chapter.upload.expired"];
 
-export class DrizzleOverviewReadRepository
-  implements OverviewReadPort
-{
+export class DrizzleOverviewReadRepository implements OverviewReadPort {
   constructor(
     private readonly db: NodeProxDatabase,
     private readonly now: () => Date = () => new Date(),

@@ -25,7 +25,11 @@ export function createImageCandidateStorageKey(input: {
     extensionByContentType[
       input.contentType as keyof typeof extensionByContentType
     ];
-  if (!extension || !Number.isSafeInteger(input.nextVersion) || input.nextVersion <= 1)
+  if (
+    !extension ||
+    !Number.isSafeInteger(input.nextVersion) ||
+    input.nextVersion <= 1
+  )
     throw new InvalidImageCandidateStorageKeyError();
   const current = MediaStorageKey.parseExisting(input.currentStorageKey);
   return MediaStorageKey.forVersion({
@@ -38,7 +42,11 @@ export function createImageCandidateStorageKey(input: {
 
 function withExtension(logicalFilename: string, extension: string): string {
   const dot = logicalFilename.lastIndexOf(".");
-  if (dot <= 0 || logicalFilename.includes("/") || logicalFilename.includes("\\"))
+  if (
+    dot <= 0 ||
+    logicalFilename.includes("/") ||
+    logicalFilename.includes("\\")
+  )
     throw new InvalidImageCandidateStorageKeyError();
   return `${logicalFilename.slice(0, dot)}.${extension}`;
 }

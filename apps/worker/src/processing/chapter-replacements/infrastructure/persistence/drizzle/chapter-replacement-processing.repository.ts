@@ -51,7 +51,10 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .limit(1)
         .for("update");
       if (!operation) return { outcome: "not-found" as const };
-      const initialVersion = aliasedTable(imageVersions, "initial_image_version");
+      const initialVersion = aliasedTable(
+        imageVersions,
+        "initial_image_version",
+      );
       const activeImages = await tx
         .select({
           sortOrder: images.sortOrder,

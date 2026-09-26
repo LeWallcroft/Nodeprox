@@ -31,14 +31,24 @@ export function getActivityPresentation(
     "chapter.upload.completed": { label: "Carga completada", icon: Images },
     "chapter.upload.failed": { label: "Carga fallida", icon: Upload },
     "chapter.upload.aborted": { label: "Carga cancelada", icon: Upload },
-    admin_bootstrap_created: { label: "Usuario administrador creado", icon: UserPlus },
-    admin_bootstrap_promoted: { label: "Usuario administrador actualizado", icon: Users },
+    admin_bootstrap_created: {
+      label: "Usuario administrador creado",
+      icon: UserPlus,
+    },
+    admin_bootstrap_promoted: {
+      label: "Usuario administrador actualizado",
+      icon: Users,
+    },
   };
   if (known[action]) return known[action];
-  if (resourceType === "series") return { label: "Actividad de serie", icon: Layers3 };
-  if (resourceType === "chapter") return { label: "Actividad de capítulo", icon: FileText };
-  if (resourceType === "image") return { label: "Actividad de imágenes", icon: Images };
-  if (resourceType === "user") return { label: "Actividad de usuario", icon: Users };
+  if (resourceType === "series")
+    return { label: "Actividad de serie", icon: Layers3 };
+  if (resourceType === "chapter")
+    return { label: "Actividad de capítulo", icon: FileText };
+  if (resourceType === "image")
+    return { label: "Actividad de imágenes", icon: Images };
+  if (resourceType === "user")
+    return { label: "Actividad de usuario", icon: Users };
   if (resourceType === "role" || resourceType === "permission")
     return { label: "Actividad de permisos", icon: ShieldCheck };
   return { label: "Actividad registrada", icon: Activity };
@@ -67,7 +77,10 @@ export function formatActivityDate(value: string): string {
 export function formatBytes(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB", "TB"];
-  const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const exponent = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1,
+  );
   const value = bytes / 1024 ** exponent;
   return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`;
 }

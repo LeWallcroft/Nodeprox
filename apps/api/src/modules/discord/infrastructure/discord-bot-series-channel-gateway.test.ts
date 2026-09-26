@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  DiscordBotSeriesChannelGateway,
-} from "./discord-bot-series-channel-gateway.js";
+import { DiscordBotSeriesChannelGateway } from "./discord-bot-series-channel-gateway.js";
 import { DiscordSeriesChannelGatewayUnavailableError } from "../application/discord-series-channel-gateway.js";
 
 const channel = { id: "12345678901234567", name: "series-manga" };
@@ -29,7 +27,9 @@ describe("DiscordBotSeriesChannelGateway", () => {
       1,
       new URL("/internal/discord/series-channels", "http://bot.internal"),
       expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer internal-token" }),
+        headers: expect.objectContaining({
+          authorization: "Bearer internal-token",
+        }),
       }),
     );
   });
@@ -49,8 +49,8 @@ describe("DiscordBotSeriesChannelGateway", () => {
       "token",
       vi.fn<typeof fetch>().mockRejectedValue(new Error("offline")),
     );
-    await expect(unavailable.validateChannel(channel.id)).rejects.toBeInstanceOf(
-      DiscordSeriesChannelGatewayUnavailableError,
-    );
+    await expect(
+      unavailable.validateChannel(channel.id),
+    ).rejects.toBeInstanceOf(DiscordSeriesChannelGatewayUnavailableError);
   });
 });
