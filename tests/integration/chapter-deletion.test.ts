@@ -36,6 +36,7 @@ const outsiderEmail = `delete-outsider-${outsiderId}@example.com`;
 const seriesSlug = `deletion-${seriesId}`;
 const imageKey = `Media/${seriesSlug}/25/01.webp`;
 const sourceKey = `uploads/${seriesId}/${chapterId}/${uploadId}.zip`;
+const lifecycleChapterIds: string[] = [];
 
 function cookieValue(header: string | string[] | undefined): string {
   const value = Array.isArray(header) ? header[0] : header;
@@ -111,6 +112,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (lifecycleChapterIds.length > 0) {
+    await database.db
+      .delete(chapterDeletionOutbox)
+      .where(inArray(chapterDeletionOutbox.chapterId, lifecycleChapterIds));
+    await database.db
+      .delete(chapters)
+      .where(inArray(chapters.id, lifecycleChapterIds));
+  }
   await database.db
     .delete(auditLogs)
     .where(eq(auditLogs.resourceId, chapterId));
@@ -127,6 +136,70 @@ afterAll(async () => {
 });
 
 describe("durable Chapter deletion", () => {
+  it.each(["draft", "uploading", "uploaded", "ready", "failed"] as const)(
+    "transitions %s to deleting and creates the outbox only after validation",
+    async (status) => {
+      const id = randomUUID();
+      lifecycleChapterIds.push(id);
+      await database.db.insert(chapters).values({
+        id,
+        seriesId,
+        chapterNumber: 100 + lifecycleChapterIds.length,
+        publicKey: `delete-${lifecycleChapterIds.length}`,
+        status,
+        createdBy: ownerId,
+      });
+      const response = await app.inject({
+        method: "DELETE",
+        url: `/chapters/${id}`,
+        headers: { cookie: await login(ownerEmail) },
+      });
+      expect(response.statusCode).toBe(204);
+      const [chapter] = await database.db
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, id));
+      const [outbox] = await database.db
+        .select({ id: chapterDeletionOutbox.id })
+        .from(chapterDeletionOutbox)
+        .where(eq(chapterDeletionOutbox.chapterId, id));
+      expect(chapter?.status).toBe("deleting");
+      expect(outbox).toBeDefined();
+    },
+  );
+
+  it("rejects processing to deleting with a stable 409 and no outbox", async () => {
+    const id = randomUUID();
+    lifecycleChapterIds.push(id);
+    await database.db.insert(chapters).values({
+      id,
+      seriesId,
+      chapterNumber: 200,
+      publicKey: "processing-delete",
+      status: "processing",
+      createdBy: ownerId,
+    });
+    const response = await app.inject({
+      method: "DELETE",
+      url: `/chapters/${id}`,
+      headers: { cookie: await login(ownerEmail) },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      code: "invalid-chapter-transition",
+    });
+    const [chapter] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, id));
+    const [outbox] = await database.db
+      .select({ id: chapterDeletionOutbox.id })
+      .from(chapterDeletionOutbox)
+      .where(eq(chapterDeletionOutbox.chapterId, id));
+    expect(chapter?.status).toBe("processing");
+    expect(outbox).toBeUndefined();
+  });
+
   it("denies an unrelated actor without changing lifecycle", async () => {
     const denied = await app.inject({
       method: "DELETE",

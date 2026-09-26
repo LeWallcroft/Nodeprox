@@ -6,6 +6,7 @@ import type {
   ProcessingRepositoryPort,
   ZipExtractorPort,
 } from "./ports.js";
+import { classifyProcessingError } from "./processing-error.classifier.js";
 export class ChapterProcessingService {
   constructor(
     private readonly repository: ProcessingRepositoryPort,
@@ -16,6 +17,7 @@ export class ChapterProcessingService {
   async process(
     input: ProcessChapterInput,
     removeSourceOnFailure = false,
+    invocation?: { jobId: string; jobAttempt: number },
   ): Promise<void> {
     const upload = await this.repository.findUpload(input.uploadId);
     if (
@@ -27,13 +29,18 @@ export class ChapterProcessingService {
     )
       return;
     if (upload.chapterStatus === "ready") {
-      await this.storage.delete(input.sourceStorageKey);
+      await this.storage.delete(input.sourceStorageKey).catch(() => undefined);
       return;
     }
-    if (!(await this.repository.claimChapter(input.chapterId, input.uploadId)))
-      return;
+    const claim = await this.repository.claimChapter({
+      chapterId: input.chapterId,
+      uploadId: input.uploadId,
+      ...(invocation?.jobId ? { jobId: invocation.jobId } : {}),
+      ...(invocation?.jobAttempt ? { jobAttempt: invocation.jobAttempt } : {}),
+    });
+    if (!("attempt" in claim) || claim.outcome === "finished") return;
+    const attempt = claim.attempt;
     const createdKeys: string[] = [];
-    let published = false;
     try {
       const source = await this.storage.get(input.sourceStorageKey);
       const images = await this.extractor.inspect(source);
@@ -63,11 +70,10 @@ export class ChapterProcessingService {
       await this.repository.replaceImagesAndMarkReady(
         input.chapterId,
         input.uploadId,
+        attempt.id,
         upload.createdBy,
         records,
       );
-      published = true;
-      await this.storage.delete(input.sourceStorageKey);
       await this.audit
         .append({
           actorId: upload.createdBy,
@@ -83,28 +89,46 @@ export class ChapterProcessingService {
           },
         })
         .catch(() => undefined);
+
+      await this.storage.delete(input.sourceStorageKey).catch(async () => {
+        await this.audit
+          .append({
+            actorId: upload.createdBy,
+            action: "chapter.processing.source-cleanup.failed",
+            resourceType: "chapter",
+            resourceId: input.chapterId,
+            result: "failed",
+            reasonCode: "source-cleanup-failed",
+            ...(input.originRequestId
+              ? { requestId: input.originRequestId }
+              : {}),
+            metadata: { uploadId: input.uploadId, attemptId: attempt.id },
+          })
+          .catch(() => undefined);
+      });
     } catch (error) {
-      if (published) throw error;
-      await this.repository
-        .deleteImages(input.chapterId)
-        .catch(() => undefined);
+      const classification = classifyProcessingError(error);
+      const terminal = !classification.retryable || removeSourceOnFailure;
       await Promise.all(
         createdKeys.map((key) =>
           this.storage.delete(key).catch(() => undefined),
         ),
       );
-      if (removeSourceOnFailure)
+      if (terminal)
         await this.storage
           .delete(input.sourceStorageKey)
           .catch(() => undefined);
-      await this.repository
-        .markFailed(
-          input.chapterId,
-          input.uploadId,
-          removeSourceOnFailure,
-          upload.createdBy,
-        )
-        .catch(() => undefined);
+      await this.repository.markFailed(
+        input.chapterId,
+        input.uploadId,
+        attempt.id,
+        {
+          terminal,
+          errorCode: classification.code,
+          errorMessage: classification.message,
+        },
+        upload.createdBy,
+      );
       await this.audit
         .append({
           actorId: upload.createdBy,
@@ -112,11 +136,16 @@ export class ChapterProcessingService {
           resourceType: "chapter",
           resourceId: input.chapterId,
           result: "failed",
-          reasonCode: "processing-failed",
+          reasonCode: classification.code,
           ...(input.originRequestId
             ? { requestId: input.originRequestId }
             : {}),
-          metadata: { result: "failed" },
+          metadata: {
+            result: "failed",
+            attemptId: attempt.id,
+            attemptNumber: attempt.attemptNumber,
+            retryable: !terminal,
+          },
         })
         .catch(() => undefined);
       throw error;

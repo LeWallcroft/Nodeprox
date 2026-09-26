@@ -9,6 +9,10 @@ export {
 } from "./authorization.js";
 export { bootstrapMetadata } from "./bootstrap.js";
 export {
+  chapterProcessingAttempts,
+  chapterProcessingAttemptStatusEnum,
+} from "./chapter-processing-attempts.js";
+export {
   chapterDeletionOutbox,
   chapterDeletionOutboxStatusEnum,
 } from "./chapter-deletion-outbox.js";

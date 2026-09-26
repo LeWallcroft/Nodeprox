@@ -11,6 +11,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
@@ -1098,25 +1099,13 @@ export class DrizzleChapterCoreRepository
         seriesOwner: context.isSeriesOwner,
       });
       if (!decision.allowed) return { outcome: "denied" as const };
-      if (context.chapter.status === "deleting") {
-        const [existing] = await tx
-          .select({ id: chapterDeletionOutbox.id })
-          .from(chapterDeletionOutbox)
-          .where(eq(chapterDeletionOutbox.chapterId, input.chapterId))
-          .limit(1);
-        return existing
-          ? {
-              outcome: "deletion-requested" as const,
-              deletionId: existing.id,
-            }
-          : { outcome: "conflict" as const };
-      }
-      const [marked] = await tx
-        .update(chapters)
-        .set({ status: "deleting", updatedAt: new Date() })
-        .where(eq(chapters.id, input.chapterId))
-        .returning({ id: chapters.id });
-      if (!marked) return { outcome: "conflict" as const };
+      const transition = await transitionChapterState(tx, {
+        chapterId: input.chapterId,
+        transition: "request-deletion",
+        expectedStates: [context.chapter.status],
+      });
+      if (!transition.transitioned)
+        return { outcome: "invalid-transition" as const };
       const [deletion] = await tx
         .insert(chapterDeletionOutbox)
         .values({

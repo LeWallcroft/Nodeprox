@@ -4,6 +4,19 @@ export {
   InvalidAuditMetadataError,
   sanitizeAuditMetadata,
 } from "./audit-metadata.js";
+export {
+  CHAPTER_STATES,
+  CHAPTER_TRANSITIONS,
+  evaluateChapterTransition,
+} from "./chapter-state.js";
+export type {
+  ChapterState,
+  ChapterStateTransitionRepository,
+  ChapterTransition,
+  ChapterTransitionDecision,
+  TransitionChapterStateInput,
+  TransitionChapterStateResult,
+} from "./chapter-state.js";
 
 export interface RequestContext {
   requestId: string;

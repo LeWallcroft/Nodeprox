@@ -23,6 +23,7 @@ export interface ChapterMutationBoundaryPort {
     chapterId: string;
   }): Promise<
     | { outcome: "deletion-requested"; deletionId: string }
+    | { outcome: "invalid-transition" }
     | ChapterMutationFailure
   >;
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
-import { eq, inArray } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
 import type {
@@ -14,6 +14,7 @@ import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/in
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
+  chapterProcessingAttempts,
   chapters,
   images,
   series,
@@ -138,6 +139,41 @@ describe("M4-B processing integration", () => {
     await database.db.delete(auditLogs).where(eq(auditLogs.actorId, actorId));
   });
 
+  it("reuses the same durable attempt for a re-delivered job invocation", async () => {
+    const fixture = await createFixture();
+    const repository = new DrizzleProcessingRepository(database.db);
+    const invocation = {
+      chapterId: fixture.chapterId,
+      uploadId: fixture.uploadId,
+      jobId: `chapter-processing-${fixture.chapterId}-${fixture.uploadId}`,
+      jobAttempt: 1,
+    };
+    const claimed = await repository.claimChapter(invocation);
+    expect(claimed.outcome).toBe("claimed");
+    const resumed = await repository.claimChapter(invocation);
+    expect(resumed.outcome).toBe("resumed");
+    if (!("attempt" in resumed)) throw new Error("expected-processing-attempt");
+    await repository.markFailed(
+      fixture.chapterId,
+      fixture.uploadId,
+      resumed.attempt.id,
+      {
+        terminal: false,
+        errorCode: "PROCESSING_UNKNOWN",
+        errorMessage: "temporary",
+      },
+      userId,
+    );
+    const finished = await repository.claimChapter(invocation);
+    expect(finished.outcome).toBe("finished");
+    const attempts = await database.db
+      .select()
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]?.status).toBe("retryable_failed");
+  });
+
   it("processes uploaded to ready and persists image metadata", async () => {
     const fixture = await createFixture();
     const storage = new FilesystemStorage(storageRoot);
@@ -169,6 +205,16 @@ describe("M4-B processing integration", () => {
       .from(images)
       .where(eq(images.chapterId, fixture.chapterId));
     expect(chapter?.status).toBe("ready");
+    const [attempt] = await database.db
+      .select()
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId));
+    expect(attempt).toMatchObject({
+      attemptNumber: 1,
+      status: "succeeded",
+      errorCode: null,
+    });
+    expect(attempt?.finishedAt).toBeInstanceOf(Date);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       filename: "01.jpg",
@@ -213,6 +259,15 @@ describe("M4-B processing integration", () => {
       .from(chapters)
       .where(eq(chapters.id, fixture.chapterId));
     expect(afterTransientFailure?.status).toBe("uploaded");
+    const [retryableAttempt] = await database.db
+      .select()
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId));
+    expect(retryableAttempt).toMatchObject({
+      status: "retryable_failed",
+      errorCode: "PROCESSING_UNKNOWN",
+      errorMessage: "transient",
+    });
     await service.process(input);
     const rows = await database.db
       .select()
@@ -220,6 +275,132 @@ describe("M4-B processing integration", () => {
       .where(eq(images.chapterId, fixture.chapterId));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.sortOrder).toBe(1);
+    const attemptRows = await database.db
+      .select()
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId))
+      .orderBy(asc(chapterProcessingAttempts.attemptNumber));
+    expect(
+      attemptRows.map(({ attemptNumber, status }) => ({
+        attemptNumber,
+        status,
+      })),
+    ).toEqual([
+      { attemptNumber: 1, status: "retryable_failed" },
+      { attemptNumber: 2, status: "succeeded" },
+    ]);
+  });
+
+  it("persists terminal provenance for a non-retryable ZIP failure", async () => {
+    const fixture = await createFixture();
+    const storage = new FilesystemStorage(storageRoot);
+    await storage.put({
+      key: fixture.storageKey,
+      body: Readable.from([Buffer.from("zip")]),
+      contentType: "application/zip",
+      sizeBytes: 3,
+    });
+    const repository = new DrizzleProcessingRepository(database.db);
+    const service = new ChapterProcessingService(
+      repository,
+      storage,
+      extractorFor(async () => {
+        throw new Error("invalid-zip-layout");
+      }),
+      audit,
+    );
+    await expect(
+      service.process({
+        chapterId: fixture.chapterId,
+        seriesId,
+        uploadId: fixture.uploadId,
+        sourceStorageKey: fixture.storageKey,
+      }),
+    ).rejects.toThrow("invalid-zip-layout");
+    const [chapter] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, fixture.chapterId));
+    const [attempt] = await database.db
+      .select()
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId));
+    expect(chapter?.status).toBe("failed");
+    expect(attempt).toMatchObject({
+      status: "terminal_failed",
+      errorCode: "ZIP_INVALID",
+      errorMessage: "invalid-zip-layout",
+    });
+  });
+
+  it("preserves previously published media when a new attempt fails", async () => {
+    const fixture = await createFixture();
+    const storage = new FilesystemStorage(storageRoot);
+    await storage.put({
+      key: fixture.storageKey,
+      body: Readable.from([Buffer.from("zip")]),
+      contentType: "application/zip",
+      sizeBytes: 3,
+    });
+    const repository = new DrizzleProcessingRepository(database.db);
+    await new ChapterProcessingService(
+      repository,
+      storage,
+      extractorFor(async () => [image]),
+      audit,
+    ).process({
+      chapterId: fixture.chapterId,
+      seriesId,
+      uploadId: fixture.uploadId,
+      sourceStorageKey: fixture.storageKey,
+    });
+    const publishedKey = `Media/m4b-${seriesId}/${chapterIds.indexOf(fixture.chapterId) + 1}/01.jpg`;
+
+    const retryUploadId = randomUUID();
+    const retrySourceKey = `uploads/${seriesId}/${fixture.chapterId}/${retryUploadId}.zip`;
+    uploadIds.push(retryUploadId);
+    await database.db
+      .update(chapters)
+      .set({ status: "uploaded" })
+      .where(eq(chapters.id, fixture.chapterId));
+    await database.db.insert(uploads).values({
+      id: retryUploadId,
+      chapterId: fixture.chapterId,
+      storageKey: retrySourceKey,
+      originalFilename: "retry.zip",
+      contentType: "application/zip",
+      sizeBytes: 3,
+      createdBy: userId,
+      status: "uploaded",
+    });
+    await storage.put({
+      key: retrySourceKey,
+      body: Readable.from([Buffer.from("zip")]),
+      contentType: "application/zip",
+      sizeBytes: 3,
+    });
+    await expect(
+      new ChapterProcessingService(
+        repository,
+        storage,
+        extractorFor(async () => {
+          throw new Error("temporary");
+        }),
+        audit,
+      ).process({
+        chapterId: fixture.chapterId,
+        seriesId,
+        uploadId: retryUploadId,
+        sourceStorageKey: retrySourceKey,
+      }),
+    ).rejects.toThrow("temporary");
+    const rows = await database.db
+      .select()
+      .from(images)
+      .where(eq(images.chapterId, fixture.chapterId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.storageKey).toBe(publishedKey);
+    await expect(storage.exists(publishedKey)).resolves.toBe(true);
   });
 
   it("allows only one concurrent processor to claim a Chapter", async () => {

@@ -2,9 +2,11 @@ import { randomUUID } from "node:crypto";
 import { sanitizeAuditMetadata } from "@nodeprox/types";
 import { and, eq, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
+import { transitionChapterState } from "../../../../../../../database/chapter-state-transition.js";
 import {
   auditLogs,
   chapterImportItems,
+  chapterProcessingAttempts,
   chapters,
   domainEventOutbox,
   images,
@@ -14,6 +16,7 @@ import {
 } from "../../../../../../../database/schema/index.js";
 import type {
   ImageRecordInput,
+  ProcessingAttempt,
   ProcessingAuditPort,
   ProcessingRepositoryPort,
 } from "../../../application/ports.js";
@@ -41,33 +44,115 @@ export class DrizzleProcessingRepository
       .limit(1);
     return row ?? null;
   }
-  async claimChapter(chapterId: string, uploadId: string): Promise<boolean> {
+  async claimChapter(
+    input: Parameters<ProcessingRepositoryPort["claimChapter"]>[0],
+  ): ReturnType<ProcessingRepositoryPort["claimChapter"]> {
     return this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .update(chapters)
-        .set({ status: "processing", updatedAt: new Date() })
-        .where(
-          and(
-            eq(chapters.id, chapterId),
-            sql`${chapters.status} in ('uploaded', 'failed')`,
-          ),
-        )
-        .returning({ id: chapters.id });
-      if (!row) return false;
+      const [chapter] = await tx
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, input.chapterId))
+        .limit(1)
+        .for("update");
+      if (!chapter) return { outcome: "not-found" as const };
+
+      if (input.jobId !== undefined && input.jobAttempt !== undefined) {
+        const [existing] = await tx
+          .select()
+          .from(chapterProcessingAttempts)
+          .where(
+            and(
+              eq(chapterProcessingAttempts.jobId, input.jobId),
+              eq(chapterProcessingAttempts.jobAttempt, input.jobAttempt),
+            ),
+          )
+          .limit(1);
+        if (existing)
+          return existing.status === "processing"
+            ? { outcome: "resumed" as const, attempt: toAttempt(existing) }
+            : { outcome: "finished" as const, attempt: toAttempt(existing) };
+      }
+
+      const transition =
+        chapter.status === "failed" ? "retry-processing" : "start-processing";
+      const stateResult = await transitionChapterState(tx, {
+        chapterId: input.chapterId,
+        transition,
+        expectedStates: [chapter.status],
+      });
+      if (!stateResult.transitioned)
+        return {
+          outcome: stateResult.reason,
+          ...(stateResult.currentState
+            ? { currentState: stateResult.currentState }
+            : {}),
+        };
+
+      const [attemptNumberRow] = await tx
+        .select({
+          nextAttemptNumber:
+            sql<number>`coalesce(max(${chapterProcessingAttempts.attemptNumber}), 0) + 1`.mapWith(
+              Number,
+            ),
+        })
+        .from(chapterProcessingAttempts)
+        .where(eq(chapterProcessingAttempts.chapterId, input.chapterId));
+      if (!attemptNumberRow) throw new Error("chapter-attempt-number-failed");
+      const { nextAttemptNumber } = attemptNumberRow;
+
+      const [attempt] = await tx
+        .insert(chapterProcessingAttempts)
+        .values({
+          chapterId: input.chapterId,
+          uploadId: input.uploadId,
+          ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
+          ...(input.jobAttempt !== undefined
+            ? { jobAttempt: input.jobAttempt }
+            : {}),
+          attemptNumber: nextAttemptNumber,
+        })
+        .returning();
+      if (!attempt) throw new Error("chapter-attempt-create-failed");
       await tx
         .update(chapterImportItems)
         .set({ status: "processing", errorCode: null, updatedAt: new Date() })
-        .where(eq(chapterImportItems.uploadId, uploadId));
-      return true;
+        .where(eq(chapterImportItems.uploadId, input.uploadId));
+      return { outcome: "claimed" as const, attempt: toAttempt(attempt) };
     });
   }
   async replaceImagesAndMarkReady(
     chapterId: string,
     uploadId: string,
+    attemptId: string,
     requestedByUserId: string,
     records: ImageRecordInput[],
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
+      const [attempt] = await tx
+        .select()
+        .from(chapterProcessingAttempts)
+        .where(eq(chapterProcessingAttempts.id, attemptId))
+        .limit(1)
+        .for("update");
+      if (!attempt || attempt.chapterId !== chapterId)
+        throw new Error("chapter-attempt-transition-conflict");
+      if (attempt.status === "succeeded") return;
+      if (attempt.status !== "processing")
+        throw new Error("chapter-attempt-transition-conflict");
+      const [currentChapter] = await tx
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, chapterId))
+        .limit(1)
+        .for("update");
+      if (!currentChapter) throw new Error("chapter-ready-transition-conflict");
+      const stateResult = await transitionChapterState(tx, {
+        chapterId,
+        transition: "processing-succeeded",
+        expectedStates: [currentChapter.status],
+      });
+      if (!stateResult.transitioned)
+        throw new Error("chapter-ready-transition-conflict");
       await tx.delete(images).where(eq(images.chapterId, chapterId));
       const prepared = records.map((record) => ({
         imageId: randomUUID(),
@@ -102,14 +187,18 @@ export class DrizzleProcessingRepository
           checksum: record.checksum,
         })),
       );
-      const [chapter] = await tx
-        .update(chapters)
-        .set({ status: "ready", updatedAt: new Date() })
+      const [finishedAttempt] = await tx
+        .update(chapterProcessingAttempts)
+        .set({ status: "succeeded", finishedAt: new Date() })
         .where(
-          and(eq(chapters.id, chapterId), eq(chapters.status, "processing")),
+          and(
+            eq(chapterProcessingAttempts.id, attemptId),
+            eq(chapterProcessingAttempts.status, "processing"),
+          ),
         )
-        .returning({ id: chapters.id });
-      if (!chapter) throw new Error("chapter-ready-transition-conflict");
+        .returning({ id: chapterProcessingAttempts.id });
+      if (!finishedAttempt)
+        throw new Error("chapter-attempt-transition-conflict");
       await tx
         .update(chapterImportItems)
         .set({ status: "ready", errorCode: null, updatedAt: new Date() })
@@ -127,34 +216,63 @@ export class DrizzleProcessingRepository
       });
     });
   }
-  async deleteImages(chapterId: string): Promise<void> {
-    await this.db.delete(images).where(eq(images.chapterId, chapterId));
-  }
   async markFailed(
     chapterId: string,
     uploadId: string,
-    terminal: boolean,
+    attemptId: string,
+    failure: { terminal: boolean; errorCode: string; errorMessage: string },
     requestedByUserId: string,
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
+      const [attempt] = await tx
+        .select()
+        .from(chapterProcessingAttempts)
+        .where(eq(chapterProcessingAttempts.id, attemptId))
+        .limit(1)
+        .for("update");
+      if (!attempt || attempt.chapterId !== chapterId)
+        throw new Error("chapter-attempt-transition-conflict");
+      if (attempt.status !== "processing") return;
+      const [chapter] = await tx
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, chapterId))
+        .limit(1)
+        .for("update");
+      if (!chapter) throw new Error("chapter-attempt-transition-conflict");
+      const transition = failure.terminal
+        ? "processing-failed"
+        : "processing-retry";
+      const stateResult = await transitionChapterState(tx, {
+        chapterId,
+        transition,
+        expectedStates: [chapter.status],
+      });
+      if (!stateResult.transitioned)
+        throw new Error("chapter-attempt-transition-conflict");
       await tx
-        .update(chapters)
+        .update(chapterProcessingAttempts)
         .set({
-          // A retryable BullMQ failure has not reached the terminal Chapter
-          // lifecycle: the uploaded ZIP remains queued for the next attempt.
-          status: terminal ? "failed" : "uploaded",
-          updatedAt: new Date(),
+          status: failure.terminal ? "terminal_failed" : "retryable_failed",
+          errorCode: failure.errorCode,
+          errorMessage: failure.errorMessage,
+          finishedAt: new Date(),
         })
-        .where(eq(chapters.id, chapterId));
+        .where(
+          and(
+            eq(chapterProcessingAttempts.id, attemptId),
+            eq(chapterProcessingAttempts.status, "processing"),
+          ),
+        );
       await tx
         .update(chapterImportItems)
         .set({
-          status: terminal ? "failed" : "uploaded",
-          errorCode: terminal ? "processing-failed" : null,
+          status: failure.terminal ? "failed" : "uploaded",
+          errorCode: failure.terminal ? failure.errorCode : null,
           updatedAt: new Date(),
         })
         .where(eq(chapterImportItems.uploadId, uploadId));
-      if (terminal)
+      if (failure.terminal)
         await tx.insert(domainEventOutbox).values({
           eventType: "upload.failed",
           aggregateType: "chapter_upload",
@@ -164,7 +282,7 @@ export class DrizzleProcessingRepository
             targetUserId: requestedByUserId,
             chapterId,
             operationKind: "chapter_import",
-            errorCode: "processing-failed",
+            errorCode: failure.errorCode,
           },
         });
     });
@@ -190,4 +308,22 @@ export class DrizzleProcessingRepository
       metadata: sanitizeAuditMetadata(input.metadata),
     });
   }
+}
+
+function toAttempt(
+  row: typeof chapterProcessingAttempts.$inferSelect,
+): ProcessingAttempt {
+  return {
+    id: row.id,
+    chapterId: row.chapterId,
+    uploadId: row.uploadId,
+    jobId: row.jobId,
+    jobAttempt: row.jobAttempt,
+    attemptNumber: row.attemptNumber,
+    status: row.status,
+    errorCode: row.errorCode,
+    errorMessage: row.errorMessage,
+    startedAt: row.startedAt,
+    finishedAt: row.finishedAt,
+  };
 }
