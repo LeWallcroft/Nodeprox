@@ -5,10 +5,7 @@ import {
   loadProcessingConfig,
   loadStorageConfig,
 } from "@nodeprox/config";
-import {
-  B2Storage,
-  FilesystemStorage,
-} from "../packages/storage/src/adapters.js";
+import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
 import { createDatabase } from "../database/client.js";
 import { IntegrityReconciliationService } from "../apps/api/src/modules/reconciliation/application/integrity-reconciliation.service.js";
 import { BullMQReconciliationQueue } from "../apps/api/src/modules/reconciliation/infrastructure/bullmq-reconciliation.queue.js";

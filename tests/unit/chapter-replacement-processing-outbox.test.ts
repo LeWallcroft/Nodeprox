@@ -6,7 +6,7 @@ import { replacementProcessingJobId } from "../../apps/api/src/modules/processin
 import type {
   ChapterReplacementQueuePort,
   ProcessingQueuePort,
-} from "../../packages/types/src/index.js";
+} from "@nodeprox/types";
 
 const initialOutbox: ProcessingOutboxPort = {
   findPending: vi.fn().mockResolvedValue([]),

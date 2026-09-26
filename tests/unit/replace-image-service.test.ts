@@ -5,7 +5,7 @@ import type {
   MediaReplacementTransactionPort,
 } from "../../apps/api/src/modules/images/application/media-replacement.ports.js";
 import { ReplaceImageService } from "../../apps/api/src/modules/images/application/services/replace-image.service.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 
 const context = {
   userId: "11111111-1111-4111-8111-111111111111",

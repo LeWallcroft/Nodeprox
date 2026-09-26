@@ -12,7 +12,7 @@ import {
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
-import type { MediaWarning } from "../../packages/types/src/index.js";
+import type { MediaWarning } from "@nodeprox/types";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 import { chapters } from "./chapters.js";
 export const images = pgTable(

@@ -2,7 +2,7 @@ import "dotenv/config";
 import type {
   UploadTransferPort,
   VerifiedUploadedObject,
-} from "../packages/storage/src/port.js";
+} from "@nodeprox/storage/port";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
@@ -21,7 +21,7 @@ import { buildApp } from "../apps/api/src/app.js";
 import { BullMQProcessingQueue } from "../apps/api/src/modules/processing/infrastructure/queue/bullmq.processing.queue.js";
 import { ProcessingOutboxDispatcher } from "../apps/api/src/modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { DrizzleUploadRepository } from "../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
-import { UploadTransferObjectNotFoundError } from "../packages/storage/src/port.js";
+import { UploadTransferObjectNotFoundError } from "@nodeprox/storage/port";
 import { DrizzleChapterDeletionOutboxRepository } from "../apps/api/src/modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
 
 const env = { ...process.env, NODE_ENV: "test", API_PORT: "3101" };

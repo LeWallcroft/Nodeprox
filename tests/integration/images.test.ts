@@ -4,8 +4,8 @@ import { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it, inject } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
-import { FilesystemStorage } from "../../packages/storage/src/adapters.js";
-import { loadConfig } from "../../packages/config/src/index.js";
+import { FilesystemStorage } from "@nodeprox/storage";
+import { loadConfig } from "@nodeprox/config";
 import { PublicMediaUrl } from "../../apps/api/src/modules/images/domain/public-media-url.js";
 import { createDatabase } from "../../database/client.js";
 import {

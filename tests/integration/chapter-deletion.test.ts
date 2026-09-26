@@ -15,7 +15,7 @@ import {
   uploads,
   users,
 } from "../../database/schema/index.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const infrastructure = inject("infrastructure");

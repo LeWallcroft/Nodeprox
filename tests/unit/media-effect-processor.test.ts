@@ -6,7 +6,7 @@ import {
   type ClaimedMediaEffect,
   type MediaEffectRepositoryPort,
 } from "../../apps/worker/src/media-effects/application/ports.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 
 const effect: ClaimedMediaEffect = {
   id: "11111111-1111-4111-8111-111111111111",

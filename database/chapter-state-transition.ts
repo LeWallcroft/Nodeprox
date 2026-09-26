@@ -3,7 +3,7 @@ import {
   evaluateChapterTransition,
   type TransitionChapterStateInput,
   type TransitionChapterStateResult,
-} from "../packages/types/src/chapter-state.js";
+} from "@nodeprox/types";
 import type { NodeProxTransaction } from "./client.js";
 import { chapters } from "./schema/index.js";
 

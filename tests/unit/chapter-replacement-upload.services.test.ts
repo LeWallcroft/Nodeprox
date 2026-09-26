@@ -14,7 +14,7 @@ import type { ChapterImageAuthorizationPort } from "../../apps/api/src/modules/i
 import type {
   UploadTransferGrant,
   UploadTransferPort,
-} from "../../packages/storage/src/port.js";
+} from "@nodeprox/storage/port";
 
 const chapterId = "11111111-1111-4111-8111-111111111111";
 const userId = "22222222-2222-4222-8222-222222222222";

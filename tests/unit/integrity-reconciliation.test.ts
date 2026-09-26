@@ -7,7 +7,7 @@ import {
   type ReconciliationBatch,
   type ReconciliationQueuePort,
 } from "../../apps/api/src/modules/reconciliation/application/integrity-reconciliation.service.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 
 const old = new Date("2020-01-01T00:00:00.000Z");
 const now = new Date("2020-01-02T00:00:00.000Z");

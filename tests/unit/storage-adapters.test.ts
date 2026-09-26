@@ -2,14 +2,16 @@ import { Readable } from "node:stream";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
-import type { StoragePort } from "../../apps/api/src/modules/uploads/application/ports/storage.ports.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 import {
   UploadTransferObjectNotFoundError,
   UploadTransferProviderError,
-} from "../../packages/storage/src/port.js";
-import { B2Storage } from "../../apps/api/src/modules/uploads/infrastructure/storage/b2.storage.js";
-import { FilesystemStorage } from "../../apps/api/src/modules/uploads/infrastructure/storage/filesystem.storage.js";
-import { B2UploadTransfer } from "../../packages/storage/src/adapters.js";
+} from "@nodeprox/storage/port";
+import {
+  B2Storage,
+  B2UploadTransfer,
+  FilesystemStorage,
+} from "@nodeprox/storage";
 
 const b2Config = {
   B2_ENDPOINT: "https://s3.us-west-004.backblazeb2.com",
@@ -20,6 +22,18 @@ const b2Config = {
 };
 
 describe("B2Storage contract", () => {
+  it("treats missing head, exists and delete as safe without changing put semantics", async () => {
+    const adapter = new B2Storage(b2Config);
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce({ $metadata: { httpStatusCode: 404 } })
+      .mockRejectedValueOnce({ $metadata: { httpStatusCode: 404 } })
+      .mockResolvedValueOnce({});
+    Object.defineProperty(adapter, "client", { value: { send } });
+    await expect(adapter.head("missing.zip")).resolves.toBeNull();
+    await expect(adapter.exists("missing.zip")).resolves.toBe(false);
+    await expect(adapter.delete("missing.zip")).resolves.toBeUndefined();
+  });
   it("rejects a declared zero-sized object before contacting B2", async () => {
     const adapter: StoragePort = new B2Storage(b2Config);
     const send = vi.fn();
@@ -132,6 +146,18 @@ describe("B2Storage contract", () => {
 });
 
 describe("FilesystemStorage contract", () => {
+  it("returns null or false for missing objects and permits repeated deletes", async () => {
+    const root = await mkdtemp(`${tmpdir()}\\nodeprox-storage-test-`);
+    try {
+      const adapter = new FilesystemStorage(root);
+      await expect(adapter.head("missing.zip")).resolves.toBeNull();
+      await expect(adapter.exists("missing.zip")).resolves.toBe(false);
+      await expect(adapter.delete("missing.zip")).resolves.toBeUndefined();
+      await expect(adapter.delete("missing.zip")).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
   it("normalizes an existing object and leaves its bytes unchanged", async () => {
     const root = await mkdtemp(`${tmpdir()}\\nodeprox-storage-test-`);
     try {

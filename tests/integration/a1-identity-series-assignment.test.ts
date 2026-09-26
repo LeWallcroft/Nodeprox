@@ -17,7 +17,7 @@ import {
 import {
   UploadTransferObjectNotFoundError,
   type UploadTransferPort,
-} from "../../packages/storage/src/port.js";
+} from "@nodeprox/storage/port";
 import {
   FakeDiscordSeriesChannelGateway,
   withM2DSeriesFixtures,

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProcessingOutboxDispatcher } from "../../apps/api/src/modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import type { ProcessingOutboxPort } from "../../apps/api/src/modules/processing/application/ports.js";
-import type { ProcessingQueuePort } from "../../packages/types/src/index.js";
+import type { ProcessingQueuePort } from "@nodeprox/types";
 
 const entry = {
   id: "outbox-1",

@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 import { ImageQueryService } from "../../apps/api/src/modules/images/application/services/image-query.service.js";
 
 const image = {

@@ -11,7 +11,6 @@ export {
 } from "./chapter-state.js";
 export type {
   ChapterState,
-  ChapterStateTransitionRepository,
   ChapterTransition,
   ChapterTransitionDecision,
   TransitionChapterStateInput,

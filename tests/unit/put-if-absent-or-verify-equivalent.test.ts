@@ -5,7 +5,7 @@ import { putIfAbsentOrVerifyEquivalent } from "../../apps/worker/src/processing/
 import {
   StorageObjectAlreadyExistsError,
   type StoragePort,
-} from "../../packages/storage/src/port.js";
+} from "@nodeprox/storage/port";
 
 function setup() {
   let stored: Buffer | null = null;

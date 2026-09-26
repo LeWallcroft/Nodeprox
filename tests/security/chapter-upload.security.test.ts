@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FilesystemStorage } from "../../apps/api/src/modules/uploads/infrastructure/storage/filesystem.storage.js";
+import { FilesystemStorage } from "@nodeprox/storage";
 
 describe("chapter upload storage security", () => {
   it("rejects path traversal keys in the development adapter", async () => {

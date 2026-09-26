@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { ChapterDeletionService } from "../../apps/worker/src/deletion/application/chapter-deletion.service.js";
 import type { ChapterDeletionRepositoryPort } from "../../apps/worker/src/deletion/application/ports.js";
-import type { StoragePort } from "../../packages/storage/src/port.js";
+import type { StoragePort } from "@nodeprox/storage/port";
 
 const input = {
   deletionId: "11111111-1111-4111-8111-111111111111",
