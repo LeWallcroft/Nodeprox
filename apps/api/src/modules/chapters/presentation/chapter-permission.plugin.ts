@@ -13,6 +13,7 @@ import {
 } from "../application/services/chapter-permission.service.js";
 import { DrizzleChapterRepository } from "../infrastructure/persistence/drizzle/chapter.repository.js";
 import type { Permission } from "../../authorization/domain/permissions.js";
+import { PinoAuthorizationFailureReporter } from "../../../observability/pino-authorization-failure-reporter.js";
 
 const paramsSchema = z.object({ chapterId: z.uuid() }).strict();
 const grantBodySchema = z
@@ -114,6 +115,7 @@ export function registerChapterPermissionPlugin(
     repository,
     repository,
     repository,
+    new PinoAuthorizationFailureReporter(app.log),
   );
   const session = requireSession(
     authentication.service,

@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AuthorizationService } from "../../apps/api/src/modules/authorization/application/services/authorization.service.js";
 import { DefaultAuthorizationPolicy } from "../../apps/api/src/modules/authorization/domain/policies/authorization.policy.js";
 import { PERMISSIONS } from "../../apps/api/src/modules/authorization/domain/permissions.js";
 import type { AuthorizationRoleRepository } from "../../apps/api/src/modules/authorization/application/ports/authorization.ports.js";
+import type { AuthorizationPolicy } from "../../apps/api/src/modules/authorization/domain/policies/authorization.policy.js";
 
 class FakeRoles implements AuthorizationRoleRepository {
   constructor(private readonly role: string | null) {}
@@ -86,7 +87,112 @@ describe("M2-A authorization policy", () => {
     const policy = serviceFor(roles);
     await expect(
       policy.authorize(context, PERMISSIONS.SERIES_READ),
-    ).resolves.toMatchObject({ allowed: false, reason: "policy-error" });
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "role-lookup-failed",
+    });
+  });
+
+  it("classifies resource and policy exceptions independently", async () => {
+    const reporter = { report: vi.fn() };
+    const resourceFailure = new AuthorizationService(
+      new DefaultAuthorizationPolicy(),
+      new FakeRoles("gestor"),
+      { append: async () => {} },
+      { getHelperCooldownDays: async () => 7 },
+      {
+        evaluate: async () => {
+          throw new Error("resource outage");
+        },
+      },
+      reporter,
+    );
+    await expect(
+      resourceFailure.authorize(context, PERMISSIONS.SERIES_EDIT, {
+        type: "series",
+        id: "s",
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "resource-evaluation-failed",
+    });
+    const throwingPolicy: AuthorizationPolicy = {
+      evaluate: () => {
+        throw new Error("policy bug");
+      },
+    };
+    const policyFailure = new AuthorizationService(
+      throwingPolicy,
+      new FakeRoles("gestor"),
+      { append: async () => {} },
+      { getHelperCooldownDays: async () => 7 },
+      undefined,
+      reporter,
+    );
+    await expect(
+      policyFailure.authorize(context, PERMISSIONS.SERIES_EDIT),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "policy-evaluation-failed",
+    });
+    expect(reporter.report).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports getActorRole failures and survives a throwing reporter", async () => {
+    const roles: AuthorizationRoleRepository = {
+      findRoleByUserId: async () => {
+        throw new Error("DB down");
+      },
+    };
+    const reporter = {
+      report: vi.fn(() => {
+        throw new Error("logger down");
+      }),
+    };
+    const service = new AuthorizationService(
+      new DefaultAuthorizationPolicy(),
+      roles,
+      { append: async () => {} },
+      { getHelperCooldownDays: async () => 7 },
+      undefined,
+      reporter,
+    );
+    await expect(service.getActorRole(context)).resolves.toBeNull();
+    await expect(
+      service.authorize(context, PERMISSIONS.SERIES_READ),
+    ).resolves.toMatchObject({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "role-lookup-failed",
+    });
+    expect(reporter.report).toHaveBeenCalledTimes(2);
+  });
+
+  it("classifies cooldown read failure separately", async () => {
+    const reporter = { report: vi.fn() };
+    const service = new AuthorizationService(
+      new DefaultAuthorizationPolicy(),
+      new FakeRoles("uploader"),
+      { append: async () => {} },
+      {
+        getHelperCooldownDays: async () => {
+          throw new Error("settings down");
+        },
+      },
+      undefined,
+      reporter,
+    );
+    await expect(service.getHelperCooldownDecision()).resolves.toEqual({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "helper-cooldown-read-failed",
+    });
+    expect(reporter.report).toHaveBeenCalledWith(
+      expect.objectContaining({ code: "helper-cooldown-read-failed" }),
+    );
   });
 
   it.each([
@@ -105,7 +211,8 @@ describe("M2-A authorization policy", () => {
     );
     await expect(service.getHelperCooldownDecision()).resolves.toEqual({
       allowed: false,
-      reason: "policy-error",
+      reason: "authorization-unavailable",
+      failureCode: "helper-cooldown-invalid",
     });
   });
 });

@@ -16,8 +16,7 @@ export type AuthorizationDenyReason =
   | "unknown-role"
   | "unknown-permission"
   | "permission-denied"
-  | "resource-context-unavailable"
-  | "policy-error";
+  | "resource-context-unavailable";
 
 export type AuthorizationDecision =
   | { allowed: true; role: Role }

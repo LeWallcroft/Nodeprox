@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DefaultAuthorizationPolicy } from "../../apps/api/src/modules/authorization/domain/policies/authorization.policy.js";
 import { AuthorizationService } from "../../apps/api/src/modules/authorization/application/services/authorization.service.js";
 import type {
@@ -30,12 +30,20 @@ function serviceFor(
     users?: ChapterUserPort;
     permissions?: ChapterPermissionRepositoryPort;
     roles?: AuthorizationRoleRepository;
+    failures?: { report: (input: { code: string; operation: string }) => void };
+    config?: { getHelperCooldownDays: () => Promise<number> };
+    authorizationFailures?: {
+      report: (input: { code: string; operation: string }) => void;
+    };
+    audit?: AuthorizationAuditRepository;
   } = {},
 ) {
   const roles: AuthorizationRoleRepository = overrides.roles ?? {
     findRoleByUserId: async () => role,
   };
-  const audit: AuthorizationAuditRepository = { append: async () => undefined };
+  const audit: AuthorizationAuditRepository = overrides.audit ?? {
+    append: async () => undefined,
+  };
   const chapters: ChapterRepositoryPort = {
     findById: async () => chapter,
     isAssigned: async (_seriesId, userId) => userId === "owner",
@@ -54,7 +62,9 @@ function serviceFor(
     new DefaultAuthorizationPolicy(),
     roles,
     audit,
-    { getHelperCooldownDays: async () => cooldown },
+    overrides.config ?? { getHelperCooldownDays: async () => cooldown },
+    undefined,
+    overrides.authorizationFailures,
   );
   return new ChapterPermissionService(
     authorization,
@@ -62,6 +72,7 @@ function serviceFor(
     overrides.users ?? users,
     overrides.permissions ?? permissions,
     audit,
+    overrides.failures,
   );
 }
 
@@ -179,7 +190,7 @@ describe("chapter permission service", () => {
         helperUserId: "helper",
         permissions: ["chapters.edit"],
       }),
-    ).rejects.toThrow("chapter repository unavailable");
+    ).resolves.toMatchObject({ denied: true });
 
     let userLookupCompleted = false;
     await expect(
@@ -252,7 +263,7 @@ describe("chapter permission service", () => {
         chapterId: "chapter",
         helperUserId: "helper",
       }),
-    ).rejects.toThrow("chapter repository unavailable");
+    ).resolves.toMatchObject({ denied: true });
 
     await expect(
       serviceFor("uploader", false, 7, {
@@ -267,5 +278,143 @@ describe("chapter permission service", () => {
         helperUserId: "helper",
       }),
     ).resolves.toMatchObject({ denied: true });
+  });
+
+  it("classifies chapter, owner, assignment and helper lookup failures", async () => {
+    const reporter = { report: vi.fn() };
+    const failing = (message: string) => {
+      throw new Error(message);
+    };
+    const cases = [
+      {
+        service: serviceFor("uploader", false, 7, {
+          chapters: { findById: async () => failing("read") },
+          failures: reporter,
+        }),
+        code: "chapter-read-failed",
+        permission: "chapters.edit",
+      },
+      {
+        service: serviceFor("gestor", false, 7, {
+          chapters: {
+            findById: async () => chapter,
+            isSeriesOwner: async () => failing("owner"),
+          },
+          failures: reporter,
+        }),
+        code: "series-owner-evaluation-failed",
+        permission: "chapters.edit",
+      },
+      {
+        service: serviceFor("uploader", false, 7, {
+          chapters: {
+            findById: async () => chapter,
+            isAssigned: async () => failing("assignment"),
+          },
+          failures: reporter,
+        }),
+        code: "series-assignment-evaluation-failed",
+        permission: "chapters.edit",
+      },
+      {
+        service: serviceFor("uploader", false, 7, {
+          chapters: { findById: async () => chapter },
+          permissions: {
+            grant: async () => ({ outcome: "granted", count: 1 }),
+            revokeIfAuthorized: async () => ({ outcome: "revoked", count: 1 }),
+            hasActivePermission: async () => failing("helper"),
+            hasAnyActivePermission: async () => false,
+            listActive: async () => [],
+            listActiveWithUsers: async () => [],
+            listEligibleCandidates: async () => [],
+          },
+          failures: reporter,
+        }),
+        code: "helper-permission-evaluation-failed",
+        permission: "chapters.edit",
+      },
+    ];
+    for (const item of cases) {
+      await expect(
+        item.service.check({
+          context,
+          chapterId: "chapter",
+          permission: item.permission,
+        }),
+      ).resolves.toEqual({
+        allowed: false,
+        reason: "authorization-unavailable",
+        failureCode: item.code,
+      });
+    }
+    expect(reporter.report).toHaveBeenCalledTimes(4);
+  });
+
+  it("preserves upstream technical failure and never uses helper fallback", async () => {
+    const service = serviceFor("uploader", true, 7, {
+      roles: {
+        findRoleByUserId: async () => {
+          throw new Error("roles down");
+        },
+      },
+    });
+    await expect(
+      service.check({
+        context,
+        chapterId: "chapter",
+        permission: "chapters.read",
+      }),
+    ).resolves.toEqual({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "role-lookup-failed",
+    });
+    await expect(
+      service.canReadContext(context, "chapter"),
+    ).resolves.toMatchObject({
+      allowed: false,
+      reason: "authorization-unavailable",
+      failureCode: "role-lookup-failed",
+    });
+  });
+
+  it.each([
+    [
+      "read failure",
+      {
+        getHelperCooldownDays: async () => {
+          throw new Error("settings unavailable");
+        },
+      },
+      "helper-cooldown-read-failed",
+    ],
+    [
+      "invalid value",
+      { getHelperCooldownDays: async () => -1 },
+      "helper-cooldown-invalid",
+    ],
+  ])("denies grant and revoke on cooldown %s", async (_name, config, code) => {
+    const reporter = { report: vi.fn() };
+    const audit = { append: vi.fn(async () => undefined) };
+    const service = serviceFor("uploader", false, 7, {
+      config,
+      authorizationFailures: reporter,
+      audit,
+    });
+    await expect(
+      service.grant({
+        context,
+        chapterId: "chapter",
+        helperUserId: "helper",
+        permissions: ["chapters.edit"],
+      }),
+    ).resolves.toEqual({ denied: true });
+    await expect(
+      service.revoke({ context, chapterId: "chapter", helperUserId: "helper" }),
+    ).resolves.toEqual({ denied: true });
+    expect(reporter.report).toHaveBeenCalledWith(
+      expect.objectContaining({ code }),
+    );
+    expect(audit.append).not.toHaveBeenCalled();
   });
 });

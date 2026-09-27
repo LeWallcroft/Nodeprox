@@ -10,6 +10,7 @@ import { DrizzleAuthorizationRepository } from "../infrastructure/persistence/dr
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
+import { PinoAuthorizationFailureReporter } from "../../../observability/pino-authorization-failure-reporter.js";
 
 const unauthorized = new AppError({
   code: "authentication-required",
@@ -38,6 +39,8 @@ export function registerAuthorization(
     repository,
     repository,
     repository,
+    undefined,
+    new PinoAuthorizationFailureReporter(app.log),
   );
 
   app.get(
