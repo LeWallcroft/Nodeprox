@@ -82,12 +82,14 @@ Set `ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` to unique, secret val
 
 `pnpm db:seed:auth` is a development/test helper and must not be run in production.
 
-## I–J. Start API, Worker, Web, and reverse proxy
+## I–J. Start API, Worker, Discord bot, Web, and reverse proxy
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d api worker web reverse-proxy
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d api worker discord-bot web reverse-proxy
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
+
+The `ps` output must include `discord-bot` alongside API, Worker, Web, and reverse proxy. The bot is the production Discord integration; `apps/bot` is a legacy placeholder and is not a Compose service. Do not infer a bot HTTP health endpoint from this check.
 
 Caddy is the only public entrypoint. It terminates HTTPS for `app.nodeprox.org` and sends all paths, including `/api/*`, to Next.js Web. Next.js preserves the existing same-origin proxy boundary and forwards API calls internally to `api:3001`.
 
@@ -117,16 +119,18 @@ Before publishing traffic, perform this manual, non-destructive review:
 - Confirm Redis starts from its empty production volume. Compose imports no dump, fixture, or development cache. Keep AOF enabled for runtime queue durability after go-live.
 - Confirm the first ADMIN bootstrap command completed successfully and that the account can authenticate. Do not run `db:seed:auth` in production.
 - Confirm there are zero demo/test users beyond the intentionally bootstrapped administrator, and zero development Series/Chapters/Images.
-- Manually inventory the existing/shared Backblaze B2 bucket for test objects before directing production traffic. This repository provides no automatic B2 cleanup or deletion command.
+- Manually inventory the existing/shared Backblaze B2 bucket for test objects before directing production traffic. NodeProx has durable application-managed cleanup for supported asynchronous media workflows and [integrity reconciliation](../architecture/ASYNC_INTEGRITY.md); neither is a blanket bucket purge tool. Manual bucket cleanup remains a separately controlled operation.
 - Confirm B2 bucket CORS permits `https://app.nodeprox.org` and does not retain development origins that should no longer be authorized.
 
-Do not delete PostgreSQL, Redis, or B2 data as part of this check. Any cleanup needs an approved, explicitly scoped operational procedure.
+Do not mass-delete PostgreSQL, Redis, or B2 data as part of this pre-go-live check. Any manual cleanup needs an approved, explicitly scoped operational procedure.
+
+For diagnosis from a repository checkout with the required local tooling and environment, `pnpm integrity:reconcile` runs in dry-run mode by default; `--repair` performs mutations and requires review of the proposed scope. The production API/migration images are not documented as containing the repo-local TypeScript script and `tsx`, so this runbook intentionally gives no production-container reconciliation command.
 
 ## N. Rollback
 
 1. Keep the prior reviewed release tag or image available.
 2. Stop only the application-facing services for the failed release.
-3. check out/build the previous release, then run `docker compose ... up -d api worker web reverse-proxy`.
+3. Check out/build the previous release, then start `api worker discord-bot web reverse-proxy` with the reviewed Compose configuration.
 4. Validate `/api/health` and the UI.
 
 Do **not** automatically roll back database migrations. A database rollback requires a reviewed, explicit, and safe migration plan.
@@ -149,8 +153,11 @@ All services emit structured/stdout logs and Docker rotates JSON files at 10 MiB
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f api
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f worker
+docker compose -f docker-compose.prod.yml --env-file .env.production logs -f discord-bot
 docker compose -f docker-compose.prod.yml --env-file .env.production logs -f reverse-proxy
 ```
+
+Where available, `requestId` identifies the current HTTP request, `originRequestId` links durable async work to its originating request, and `jobId` identifies the BullMQ job. Use them with resource IDs to correlate API, Worker, and cleanup logs; historical or system work can lack an origin. This is operational correlation, not a promise of complete distributed tracing.
 
 ## Q. Update a release
 
@@ -160,7 +167,7 @@ git checkout <new-approved-release-tag-or-commit>
 docker compose -f docker-compose.prod.yml --env-file .env.production build
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d api worker web reverse-proxy
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d api worker discord-bot web reverse-proxy
 docker compose -f docker-compose.prod.yml --env-file .env.production ps
 ```
 

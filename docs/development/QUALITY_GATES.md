@@ -25,18 +25,15 @@ must provide Docker. E2E uses local PostgreSQL and Redis service containers,
 filesystem storage, and Playwright's own API/Web/Worker harness. The E2E
 backend applies the same migrations. No production service or secret is needed.
 
-## Branch protection rollout
+## Main branch ruleset
 
-The intended protected branch is `main`. Branch protection is **not activated
-by this document**. After the workflow is merged:
+The active GitHub ruleset for `main` requires a pull request and the
+`quality-gates` status check. Required branches must be up to date before
+merge. Non-fast-forward/force pushes and branch deletion are restricted; the
+bypass list is empty. These settings were verified against the active GitHub
+ruleset, not inferred from the workflow file.
 
-1. Let it run on `main` or on a PR and verify the exact check name
-   `quality-gates`.
-2. Configure a GitHub ruleset or branch-protection rule requiring a PR before
-   merge and requiring the `quality-gates` status check.
-3. Require branches to be up to date before merge where practical.
-4. Disable force pushes and branch deletion.
-
-Do not configure a required check before its first successful run: GitHub must
-recognize the check name. If a CI job fails, fix the cause rather than adding
-an allowance, skipping a suite, or marking it `continue-on-error`.
+The ruleset is operational GitHub configuration and can change outside this
+repository. Reverify it after administrative changes. If a CI job fails, fix
+the cause rather than adding an allowance, skipping a suite, or marking it
+`continue-on-error`.

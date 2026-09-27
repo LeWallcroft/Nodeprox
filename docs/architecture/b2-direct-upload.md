@@ -6,7 +6,9 @@ The normative ZIP path is:
 2. The API authenticates the session, evaluates contextual `images.upload`, creates the server-side key and returns a short-lived object-scoped signed `PUT` URL.
 3. The browser sends the ZIP directly to the Backblaze S3-compatible endpoint. The ZIP does not pass through Next.js, Fastify or Cloudflare CDN.
 4. The browser calls `POST /chapters/:chapterId/uploads/:uploadId/complete`.
-5. The API uses `HEAD` against the server-side key and checks real size and Content-Type before atomically changing the upload and Chapter to `uploaded`.
+5. The API uses `HEAD` against the server-side key and checks real size and Content-Type before atomically changing the upload and Chapter to `uploaded` and recording its processing intent.
+
+After finalization, the [durable async integrity flow](ASYNC_INTEGRITY.md) dispatches processing, records results, and handles supported cleanup and reconciliation. The direct-upload grant is only the transfer boundary, not the entire media lifecycle.
 
 ## Finalization authorization and serialization
 
@@ -24,9 +26,9 @@ All transaction-aware authorization boundaries use the same global order. Rows t
 
 This order is shared by upload finalization, Chapter update/delete, Series update/delete, reassignment and helper revocation. Assignment/reassignment, Identity updates and helper revocation contend on the same authority rows without a `Series → Chapter` / `Chapter → Series` inversion. If revocation or reassignment commits first, the stale operation returns `403`. If the mutation acquires the authority locks and commits first, it is valid and revocation applies to later operations. Lifecycle races return `409`.
 
-A verified B2 object whose finalization is denied remains temporary. It must not be marked uploaded to preserve it. The user can abort only through a claim authorized with current authority; after that claim, provider deletion is internal cleanup. The stale-upload sweep and bucket lifecycle cleanup run with system authority and remain available after the original user's authority is revoked.
+A verified B2 object whose finalization is denied remains temporary. It must not be marked uploaded to preserve it. The user can abort only through a claim authorized with current authority; after that claim, provider deletion is internal cleanup. The application stale-upload sweep runs with system authority after the original user's authority is revoked. A bucket lifecycle rule is a separate provider-side defense in depth.
 
-`abort` and the stale-upload sweep remove incomplete objects. `UPLOAD_PENDING_TTL_SECONDS` defaults to 86400 seconds. Backblaze should additionally have a lifecycle rule for the temporary `uploads/` prefix as defense in depth.
+`abort` and the stale-upload sweep remove incomplete objects; they are not the sole cleanup mechanisms for completed processing or replacement. Durable cleanup and reconciliation for supported async workflows are described in [async integrity](ASYNC_INTEGRITY.md). `UPLOAD_PENDING_TTL_SECONDS` defaults to 86400 seconds. Backblaze should additionally have a lifecycle rule for the temporary `uploads/` prefix as defense in depth.
 
 ## Credentials
 
