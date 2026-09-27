@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { chapters } from "./chapters.js";
 import { uploads } from "./uploads.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const chapterProcessingAttemptStatusEnum = pgEnum(
   "chapter_processing_attempt_status",
@@ -29,6 +30,9 @@ export const chapterProcessingAttempts = pgTable(
     uploadId: uuid("upload_id").references(() => uploads.id, {
       onDelete: "set null",
     }),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     jobId: varchar("job_id", { length: 255 }),
     jobAttempt: integer("job_attempt"),
     attemptNumber: integer("attempt_number").notNull(),

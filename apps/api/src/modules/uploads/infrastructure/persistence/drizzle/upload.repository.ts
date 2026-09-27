@@ -31,6 +31,7 @@ const toRecord = (row: typeof uploads.$inferSelect): UploadRecord => ({
   id: row.id,
   chapterId: row.chapterId,
   storageKey: row.storageKey,
+  storageProfileId: row.storageProfileId,
   originalFilename: row.originalFilename,
   contentType: row.contentType,
   sizeBytes: row.sizeBytes,
@@ -55,6 +56,7 @@ export class DrizzleUploadRepository
     id: string;
     chapterId: string;
     storageKey: string;
+    storageProfileId: string;
     originalFilename: string;
     contentType: string;
     sizeBytes: number;
@@ -152,6 +154,7 @@ export class DrizzleUploadRepository
           chapterId: completed.chapterId,
           seriesId: chapter.seriesId,
           storageKey: completed.storageKey,
+          storageProfileId: completed.storageProfileId,
           ...(input.originRequestId
             ? { originRequestId: input.originRequestId }
             : {}),

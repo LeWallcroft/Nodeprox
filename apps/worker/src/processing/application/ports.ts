@@ -9,11 +9,13 @@ export type ProcessingUpload = {
   chapterPublicKey: string;
   createdBy: string;
   storageKey: string;
+  storageProfileId: string;
   status: string;
   chapterStatus: string;
 };
 export type ImageRecordInput = Omit<ValidatedImage, "tempPath"> & {
   storageKey: string;
+  storageProfileId: string;
 };
 export type ProcessingAttemptStatus =
   | "processing"
@@ -24,6 +26,7 @@ export type ProcessingAttempt = {
   id: string;
   chapterId: string;
   uploadId: string | null;
+  storageProfileId: string;
   jobId: string | null;
   jobAttempt: number | null;
   attemptNumber: number;

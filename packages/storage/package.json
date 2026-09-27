@@ -21,6 +21,11 @@
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js",
       "default": "./dist/adapters.js"
+    },
+    "./profile-execution": {
+      "types": "./dist/profile-execution.d.ts",
+      "import": "./dist/profile-execution.js",
+      "default": "./dist/profile-execution.js"
     }
   },
   "scripts": {

@@ -10,6 +10,10 @@ import type {
 } from "../../apps/worker/src/processing/chapter-replacements/application/ports.js";
 import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
 import type { StoragePort, StoredObject } from "@nodeprox/storage/port";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const replacementId = "33333333-3333-4333-8333-333333333333";
 const chapterId = "11111111-1111-4111-8111-111111111111";
@@ -61,6 +65,7 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
         chapterId,
         requestedByUserId: "user",
         sourceStorageKey: `chapter-replacements/${chapterId}/${replacementId}/source.zip`,
+        storageProfileId: legacyStorageProfileId,
         seriesSlug: "one-piece",
         chapterPublicKey: "chapter-1",
         status: "processing" as const,
@@ -183,7 +188,7 @@ function harness(count = 3) {
   };
   const service = new ChapterReplacementProcessingService(
     repository,
-    storage,
+    legacyStorageExecution(storage),
     extractor,
   );
   const input = { replacementId, chapterId };

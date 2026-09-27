@@ -28,6 +28,7 @@ function operation(
     chapterId: "chapter",
     requestedByUserId: "actor",
     candidateZipStorageKey: "replacement.zip",
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     originalFilename: "chapter.zip",
     contentType: "application/zip",
     sizeBytes: 100,

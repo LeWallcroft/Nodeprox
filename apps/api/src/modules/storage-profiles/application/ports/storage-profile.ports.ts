@@ -1,9 +1,7 @@
+import type { SecretCipherPort } from "@nodeprox/storage/profile-execution";
 import type { StorageProfile } from "../../domain/storage-profile.js";
 
-export interface SecretCipherPort {
-  encrypt(plaintext: string): string;
-  decrypt(ciphertext: string): string;
-}
+export type { SecretCipherPort };
 
 export interface StorageProfileRepository {
   list(): Promise<StorageProfile[]>;

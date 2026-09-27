@@ -14,6 +14,10 @@ import {
   UploadTransferObjectNotFoundError,
   type UploadTransferPort,
 } from "../../packages/storage/dist/port.js";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const context = { userId: "user-1" } as never;
 const queuedAt = new Date("2026-09-03T23:30:00.000Z");
@@ -23,6 +27,7 @@ const operation: ImageReplacementOperation = {
   chapterId: "chapter-1",
   requestedByUserId: "user-1",
   candidateStorageKey: "Media/series/1/opaque.jpg",
+  storageProfileId: legacyStorageProfileId,
   originalFilename: "page.jpg",
   contentType: "image/jpeg",
   sizeBytes: 20,
@@ -75,7 +80,10 @@ function subject(input?: {
   };
   const service = new CompleteImageReplacementService(
     operations,
-    transfer,
+    legacyStorageExecution(
+      { put: vi.fn(), get: vi.fn(), exists: vi.fn(), delete: vi.fn() },
+      transfer,
+    ),
     authorization,
     () => queuedAt,
   );

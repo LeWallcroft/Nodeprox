@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  legacyActiveProfile,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
+import {
   ImageReplacementPrepareDeniedError,
   ImageReplacementPrepareInvalidError,
   ImageReplacementPrepareNotFoundError,
@@ -11,6 +15,7 @@ const image = {
   chapterId: "chapter-1",
   filename: "00.jpg",
   storageKey: "Media/series/1/00.jpg",
+  storageProfileId: legacyStorageProfileId,
   extension: "jpg",
   contentType: "image/jpeg",
   sizeBytes: 1,
@@ -68,6 +73,7 @@ function subject(options?: {
       withLockedImage: vi.fn(),
       enqueueOrphanCleanup: vi.fn(),
     },
+    legacyActiveProfile,
     options?.max ?? 100,
   );
   return { service, create };

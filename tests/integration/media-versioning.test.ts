@@ -99,6 +99,35 @@ afterAll(async () => {
 });
 
 describe("CASE-V1-MEDIA-01 persistence", () => {
+  it("pins historical images and their current versions to legacy without pinning Chapters", async () => {
+    const [row] = await database.sql<
+      {
+        image_profile: string;
+        version_profile: string;
+      }[]
+    >`
+      select images.storage_profile_id as image_profile,
+             versions.storage_profile_id as version_profile
+      from images
+      join image_versions versions on versions.id = images.current_version_id
+      where images.id = ${imageId}
+    `;
+    expect(row).toEqual({
+      image_profile: "00000000-0000-4000-8000-000000000001",
+      version_profile: "00000000-0000-4000-8000-000000000001",
+    });
+    const chapterProfileColumn = await database.sql`
+      select column_name from information_schema.columns
+      where table_schema = 'public' and table_name = 'chapters'
+        and column_name = 'storage_profile_id'
+    `;
+    expect(chapterProfileColumn).toHaveLength(0);
+    await expect(database.sql`
+      delete from storage_profiles
+      where id = '00000000-0000-4000-8000-000000000001'
+    `).rejects.toMatchObject({ code: "23503" });
+  });
+
   it("persists durable replacement operations with CAS and immutable completion", async () => {
     const repository = new DrizzleImageReplacementOperationRepository(
       database.db,
@@ -116,6 +145,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
       chapterId,
       requestedByUserId: userId,
       candidateStorageKey: `replacement/${operationId}`,
+      storageProfileId: "00000000-0000-4000-8000-000000000001",
       originalFilename: "replacement.jpg",
       contentType: "image/jpeg",
       sizeBytes: 123,
@@ -197,10 +227,11 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     await expect(
       database.sql`
         insert into image_versions (
-          image_id, version, physical_filename, storage_key, extension,
+          image_id, version, physical_filename, storage_key, storage_profile_id, extension,
           content_type, size_bytes, checksum
         ) values (
           ${imageId}, 0, 'invalid.jpg', 'Media/media-series/1/invalid.jpg',
+          '00000000-0000-4000-8000-000000000001',
           'jpg', 'image/jpeg', 1, 'invalid'
         )
       `,
@@ -208,10 +239,11 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     await expect(
       database.sql`
         insert into image_versions (
-          image_id, version, physical_filename, storage_key, extension,
+          image_id, version, physical_filename, storage_key, storage_profile_id, extension,
           content_type, size_bytes, checksum
         ) values (
           ${imageId}, 1, 'duplicate.jpg', 'Media/media-series/1/duplicate.jpg',
+          '00000000-0000-4000-8000-000000000001',
           'jpg', 'image/jpeg', 1, 'duplicate'
         )
       `,
@@ -229,6 +261,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
           actorId: userId,
           oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
           next: {
+            storageProfileId: "00000000-0000-4000-8000-000000000001",
             version,
             physicalFilename: filename,
             storageKey: `Media/media-series/1/${filename}`,
@@ -306,12 +339,12 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     await expect(
       database.sql`
         insert into media_effect_outbox (
-          replacement_operation_id, effect_type, image_id, target
+          replacement_operation_id, effect_type, image_id, target, storage_profile_id
         ) values (
           ${existingEffect.replacement_operation_id},
           ${existingEffect.effect_type}::media_effect_type,
           ${imageId},
-          ${existingEffect.target}
+          ${existingEffect.target}, '00000000-0000-4000-8000-000000000001'
         )
       `,
     ).rejects.toMatchObject({ code: "23505" });
@@ -330,6 +363,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
       chapterId,
       requestedByUserId: userId,
       candidateStorageKey: `Media/media-series/1/${operationId}.jpg`,
+      storageProfileId: "00000000-0000-4000-8000-000000000001",
       originalFilename: "replacement.jpg",
       contentType: "image/jpeg",
       sizeBytes: 400,
@@ -351,6 +385,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
           actorId: userId,
           oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
           next: {
+            storageProfileId: "00000000-0000-4000-8000-000000000001",
             version,
             physicalFilename: `${operationId}.jpg`,
             storageKey: `Media/media-series/1/${operationId}.jpg`,
@@ -429,6 +464,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
           actorId: userId,
           oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
           next: {
+            storageProfileId: "00000000-0000-4000-8000-000000000001",
             version,
             physicalFilename: filename,
             storageKey: `Media/media-series/1/${filename}`,
@@ -478,6 +514,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
       chapterId,
       requestedByUserId: userId,
       candidateStorageKey: `Media/media-series/1/${operationId}.jpg`,
+      storageProfileId: "00000000-0000-4000-8000-000000000001",
       originalFilename: "rollback.jpg",
       contentType: "image/jpeg",
       sizeBytes: 500,
@@ -502,6 +539,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
           actorId: userId,
           oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
           next: {
+            storageProfileId: "00000000-0000-4000-8000-000000000001",
             version,
             physicalFilename: `${operationId}.jpg`,
             storageKey: `Media/media-series/1/${operationId}.jpg`,
@@ -554,6 +592,7 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
         actorId: userId,
         oldPublicUrl: `https://media.nodeprox.org/media-series/1/${transaction.image.current.physicalFilename}`,
         next: {
+          storageProfileId: "00000000-0000-4000-8000-000000000001",
           version,
           physicalFilename: filename,
           storageKey: `Media/media-series/1/${filename}`,
@@ -593,10 +632,11 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
     `;
     await database.sql`
       insert into image_versions (
-        image_id, version, physical_filename, storage_key, extension,
+        image_id, version, physical_filename, storage_key, storage_profile_id, extension,
         content_type, size_bytes, checksum
       ) values (
         ${imageId}, 100, 'orphan.jpg', 'Media/media-series/1/orphan.jpg',
+        '00000000-0000-4000-8000-000000000001',
         'jpg', 'image/jpeg', 1000, 'orphan'
       )
     `;

@@ -168,6 +168,7 @@ async function makeReady(input: {
     operationId: input.replacementId,
     sortOrder: 1,
     candidateStorageKey: `Media/${input.slug}/${input.publicKey}/${physicalFilename}`,
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     physicalFilename,
     originalFilename: "page-1.jpg",
     contentType: "image/jpeg",

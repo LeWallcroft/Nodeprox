@@ -9,6 +9,7 @@ export type UploadRecord = {
   id: string;
   chapterId: string;
   storageKey: string;
+  storageProfileId: string;
   originalFilename: string;
   contentType: string;
   sizeBytes: number;

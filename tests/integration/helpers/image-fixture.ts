@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { NodeProxDatabase } from "../../../database/client.js";
 import { images, imageVersions } from "../../../database/schema/index.js";
+import { legacyStorageProfileId } from "../../helpers/storage-execution.js";
 
 export type InitialImageFixture = {
   id?: string;
   chapterId: string;
   filename: string;
   storageKey: string;
+  storageProfileId?: string;
   extension: string;
   contentType: string;
   sizeBytes: number;
@@ -21,6 +23,7 @@ export async function insertImagesWithInitialVersions(
   await db.transaction(async (tx) => {
     const prepared = fixtures.map((fixture) => ({
       ...fixture,
+      storageProfileId: fixture.storageProfileId ?? legacyStorageProfileId,
       id: fixture.id ?? randomUUID(),
       versionId: randomUUID(),
     }));
@@ -37,6 +40,7 @@ export async function insertImagesWithInitialVersions(
         version: 1,
         physicalFilename: fixture.filename,
         storageKey: fixture.storageKey,
+        storageProfileId: fixture.storageProfileId,
         extension: fixture.extension,
         contentType: fixture.contentType,
         sizeBytes: fixture.sizeBytes,

@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 import { images, imageVersions } from "./images.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const chapterReplacementItems = pgTable(
   "chapter_replacement_items",
@@ -24,6 +25,9 @@ export const chapterReplacementItems = pgTable(
       }),
     sortOrder: integer("sort_order").notNull(),
     candidateStorageKey: text("candidate_storage_key").notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     physicalFilename: text("physical_filename").notNull(),
     originalFilename: text("original_filename").notNull(),
     contentType: text("content_type").notNull(),

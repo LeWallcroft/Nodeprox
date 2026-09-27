@@ -1,4 +1,4 @@
-import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type {
   CdnInvalidationPort,
   ClaimedMediaEffect,
@@ -19,7 +19,7 @@ export class MediaEffectProcessor {
   constructor(
     private readonly repository: MediaEffectRepositoryPort,
     private readonly cdn: CdnInvalidationPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly logger: MediaEffectLogger,
     private readonly now: () => Date = () => new Date(),
     private readonly maxAttempts = 5,
@@ -63,6 +63,7 @@ export class MediaEffectProcessor {
         if (
           await this.repository.isCurrentStorageKey(
             effect.imageId,
+            effect.storageProfileId,
             effect.target,
           )
         ) {
@@ -73,7 +74,10 @@ export class MediaEffectProcessor {
           this.logger.error(context, "Media cleanup target is current");
           return;
         }
-        await this.storage.delete(effect.target);
+        const storage = await this.storageExecution.storageFor(
+          effect.storageProfileId,
+        );
+        await storage.delete(effect.target);
       }
       await this.repository.markCompleted(effect.id);
       this.logger.info(context, "Media infrastructure effect completed");

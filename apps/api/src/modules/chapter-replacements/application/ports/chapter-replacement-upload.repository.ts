@@ -14,6 +14,7 @@ export interface ChapterReplacementUploadRepository {
     chapterId: string;
     requestedByUserId: string;
     candidateZipStorageKey: string;
+    storageProfileId: string;
     originalFilename: string;
     contentType: string;
     sizeBytes: number;

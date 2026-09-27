@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
 import {
   UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
   UploadTransferProviderError,
   type VerifiedUploadedObject,
 } from "@nodeprox/storage/port";
+import type {
+  ActiveStorageProfilePort,
+  StorageExecutionResolver,
+} from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import type { ChapterPermissionService } from "../../../chapters/application/services/chapter-permission.service.js";
 import { validateUploadMetadata } from "../../domain/upload.policy.js";
@@ -25,7 +28,8 @@ export class ChapterUploadService {
     private readonly permissions: ChapterPermissionService,
     private readonly uploads: UploadRepositoryPort,
     private readonly lifecycle: UploadLifecycleBoundaryPort,
-    private readonly transfer: UploadTransferPort,
+    private readonly storageExecution: StorageExecutionResolver,
+    private readonly activeProfile: ActiveStorageProfilePort,
     private readonly audit: UploadAuditPort,
     private readonly maxSizeBytes: number,
   ) {}
@@ -47,10 +51,13 @@ export class ChapterUploadService {
     });
     const uploadId = randomUUID();
     const storageKey = `uploads/${decision.seriesId}/${input.chapterId}/${uploadId}.zip`;
+    const storageProfileId =
+      await this.activeProfile.getActiveStorageProfileId();
     const pending = await this.uploads.createPending({
       id: uploadId,
       chapterId: input.chapterId,
       storageKey,
+      storageProfileId,
       originalFilename: metadata.filename,
       contentType: metadata.contentType,
       sizeBytes: input.sizeBytes,
@@ -59,7 +66,9 @@ export class ChapterUploadService {
     if (!pending) throw new UploadConflictError();
 
     try {
-      const grant = await this.transfer.initiate({
+      const transfer =
+        await this.storageExecution.uploadTransferFor(storageProfileId);
+      const grant = await transfer.initiate({
         key: storageKey,
         contentType: metadata.contentType,
         sizeBytes: input.sizeBytes,
@@ -110,7 +119,10 @@ export class ChapterUploadService {
 
     let verified: VerifiedUploadedObject;
     try {
-      verified = await this.transfer.verify({ key: upload.storageKey });
+      const transfer = await this.storageExecution.uploadTransferFor(
+        upload.storageProfileId,
+      );
+      verified = await transfer.verify({ key: upload.storageKey });
     } catch (error) {
       await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
       if (error instanceof UploadTransferObjectNotFoundError) {
@@ -192,7 +204,10 @@ export class ChapterUploadService {
     if (claim.outcome === "conflict") throw new UploadConflictError();
     const upload = claim.upload;
     try {
-      await this.transfer.abort({ key: upload.storageKey });
+      const transfer = await this.storageExecution.uploadTransferFor(
+        upload.storageProfileId,
+      );
+      await transfer.abort({ key: upload.storageKey });
     } catch (error) {
       await this.uploads.releaseAbort(upload.id).catch(() => undefined);
       if (error instanceof UploadTransferProviderError)
@@ -220,7 +235,10 @@ export class ChapterUploadService {
       );
       if (!upload) continue;
       try {
-        await this.transfer.abort({ key: upload.storageKey });
+        const transfer = await this.storageExecution.uploadTransferFor(
+          upload.storageProfileId,
+        );
+        await transfer.abort({ key: upload.storageKey });
         if (!(await this.uploads.removeAborting(upload.id))) continue;
         cleaned += 1;
         await this.safeAudit(

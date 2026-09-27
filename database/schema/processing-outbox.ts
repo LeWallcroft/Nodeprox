@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { chapters } from "./chapters.js";
 import { uploads } from "./uploads.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const processingOutboxStatusEnum = pgEnum("processing_outbox_status", [
   "pending",
@@ -28,6 +29,9 @@ export const processingOutbox = pgTable(
       .references(() => chapters.id, { onDelete: "cascade" }),
     seriesId: uuid("series_id").notNull(),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     originRequestId: varchar("origin_request_id", { length: 128 }),
     status: processingOutboxStatusEnum("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),

@@ -38,6 +38,9 @@ export function createApiRuntime(input: {
   const { dependencies, config, processing, domainEvents, logger } = input;
   const database = dependencies.database;
   if (!database) throw new Error("api-database-required");
+  const storageExecution = dependencies.storageExecution;
+  if (!storageExecution)
+    throw new Error("api-storage-profile-runtime-required");
   const queue = new BullMQProcessingQueue(
     config.REDIS_URL,
     processing.PROCESSING_QUEUE_NAME,
@@ -64,7 +67,7 @@ export function createApiRuntime(input: {
       ),
       new ImageReplacementReadyHandler(
         new DrizzleImageReplacementOperationRepository(database),
-        dependencies.uploadTransfer,
+        storageExecution,
         new ActivateImageCandidateService(
           new DrizzleMediaReplacementRepository(database),
           config.PUBLIC_MEDIA_ORIGIN,

@@ -7,12 +7,15 @@ import {
   type MediaEffectRepositoryPort,
 } from "../../apps/worker/src/media-effects/application/ports.js";
 import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
+import { legacyStorageProfileId } from "../helpers/storage-execution.js";
 
 const effect: ClaimedMediaEffect = {
   id: "11111111-1111-4111-8111-111111111111",
   effectType: "storage_delete",
   imageId: "22222222-2222-4222-8222-222222222222",
   target: "Media/raven/1/00.jpg",
+  storageProfileId: legacyStorageProfileId,
   attempts: 1,
 };
 
@@ -33,8 +36,18 @@ function repository(
   };
 }
 
-function storage(remove = vi.fn(async () => undefined)): StoragePort {
-  return {
+function storage(
+  remove = vi.fn(async () => undefined),
+): StoragePort & StorageExecutionResolver {
+  const storagePort: StoragePort & StorageExecutionResolver = {
+    storageFor: async (profileId) => {
+      if (profileId !== legacyStorageProfileId)
+        throw new Error("unexpected-profile");
+      return storagePort;
+    },
+    uploadTransferFor: async () => {
+      throw new Error("unexpected-transfer");
+    },
     put: vi.fn(async (input) => ({
       key: input.key,
       sizeBytes: input.sizeBytes,
@@ -44,6 +57,7 @@ function storage(remove = vi.fn(async () => undefined)): StoragePort {
     exists: vi.fn(async () => false),
     delete: remove,
   };
+  return storagePort;
 }
 
 const logger = () => ({
@@ -64,6 +78,7 @@ describe("MediaEffectProcessor", () => {
     ).runOnce();
     expect(repo.isCurrentStorageKey).toHaveBeenCalledWith(
       effect.imageId,
+      effect.storageProfileId,
       effect.target,
     );
     expect(remove).toHaveBeenCalledWith(effect.target);

@@ -3,6 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ChapterDeletionService } from "../../apps/worker/src/deletion/application/chapter-deletion.service.js";
 import type { ChapterDeletionRepositoryPort } from "../../apps/worker/src/deletion/application/ports.js";
 import type { StoragePort } from "@nodeprox/storage/port";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const input = {
   deletionId: "11111111-1111-4111-8111-111111111111",
@@ -14,11 +18,14 @@ function repository(): ChapterDeletionRepositoryPort {
     load: vi.fn(async () => ({
       ...input,
       requestedBy: "33333333-3333-4333-8333-333333333333",
-      storageKeys: [
+      storageObjects: [
         "Media/prueba1/6/01.jpg",
         "Uploads/a/source.zip",
         "Media/prueba1/6/01.jpg",
-      ],
+      ].map((storageKey) => ({
+        storageProfileId: legacyStorageProfileId,
+        storageKey,
+      })),
     })),
     finalize: vi.fn(async () => undefined),
   };
@@ -38,10 +45,42 @@ function storage(remove: StoragePort["delete"]): StoragePort {
 }
 
 describe("ChapterDeletionService", () => {
+  it("deletes identical keys independently in two pinned profiles", async () => {
+    const profileB = "11111111-1111-4111-8111-111111111111";
+    const key = "Media/shared/1/01.webp";
+    const repo = repository();
+    vi.mocked(repo.load).mockResolvedValue({
+      ...input,
+      requestedBy: "actor",
+      storageObjects: [
+        { storageProfileId: legacyStorageProfileId, storageKey: key },
+        { storageProfileId: profileB, storageKey: key },
+      ],
+    });
+    const deleteA = vi.fn(async () => undefined);
+    const deleteB = vi.fn(async () => undefined);
+    const first = storage(deleteA);
+    const second = storage(deleteB);
+    const service = new ChapterDeletionService(repo, {
+      storageFor: async (id) =>
+        id === legacyStorageProfileId ? first : second,
+      uploadTransferFor: async () => {
+        throw new Error("unused");
+      },
+    });
+    await service.execute(input);
+    expect(deleteA).toHaveBeenCalledWith(key);
+    expect(deleteB).toHaveBeenCalledWith(key);
+    expect(repo.finalize).toHaveBeenCalledOnce();
+  });
+
   it("deletes each persisted key once and finalizes only afterwards", async () => {
     const repo = repository();
     const remove = vi.fn(async (_key: string) => undefined);
-    await new ChapterDeletionService(repo, storage(remove)).execute(input);
+    await new ChapterDeletionService(
+      repo,
+      legacyStorageExecution(storage(remove)),
+    ).execute(input);
     expect(remove.mock.calls.map(([key]) => key)).toEqual([
       "Media/prueba1/6/01.jpg",
       "Uploads/a/source.zip",
@@ -61,7 +100,10 @@ describe("ChapterDeletionService", () => {
         throw new Error("temporary-storage-error");
       }
     });
-    const service = new ChapterDeletionService(repo, storage(remove));
+    const service = new ChapterDeletionService(
+      repo,
+      legacyStorageExecution(storage(remove)),
+    );
     await expect(service.execute(input)).rejects.toThrow(
       "temporary-storage-error",
     );
@@ -75,7 +117,10 @@ describe("ChapterDeletionService", () => {
     vi.mocked(repo.load).mockResolvedValue(null);
     const remove = vi.fn(async (_key: string) => undefined);
     await expect(
-      new ChapterDeletionService(repo, storage(remove)).execute(input),
+      new ChapterDeletionService(
+        repo,
+        legacyStorageExecution(storage(remove)),
+      ).execute(input),
     ).resolves.toBeUndefined();
     expect(remove).not.toHaveBeenCalled();
     expect(repo.finalize).not.toHaveBeenCalled();

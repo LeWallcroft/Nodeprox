@@ -59,6 +59,7 @@ async function activateSingle(
     context: { userId: target.chapter.userId, sessionId: randomUUID() },
     imageId,
     candidateStorageKey: `Media/${target.chapter.seriesSlug}/${target.chapter.chapterPublicKey}/${filename}`,
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     contentType: "image/jpeg",
     sizeBytes: 777,
     checksum: `single-${operationId}`,

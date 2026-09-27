@@ -2,7 +2,7 @@ export type ChapterDeletionWork = {
   deletionId: string;
   chapterId: string;
   requestedBy: string;
-  storageKeys: readonly string[];
+  storageObjects: readonly { storageProfileId: string; storageKey: string }[];
 };
 
 export interface ChapterDeletionRepositoryPort {

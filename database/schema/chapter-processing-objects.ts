@@ -8,6 +8,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { chapterProcessingAttempts } from "./chapter-processing-attempts.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const chapterProcessingObjectStatusEnum = pgEnum(
   "chapter_processing_object_status",
@@ -22,6 +23,9 @@ export const chapterProcessingObjects = pgTable(
       .notNull()
       .references(() => chapterProcessingAttempts.id, { onDelete: "cascade" }),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     checksum: varchar("checksum", { length: 64 }).notNull(),
     status: chapterProcessingObjectStatusEnum("status")
       .notNull()
@@ -43,5 +47,6 @@ export const chapterProcessingObjects = pgTable(
       table.createdAt,
     ),
     index("chapter_processing_object_key_idx").on(table.storageKey),
+    index("chapter_processing_object_profile_idx").on(table.storageProfileId),
   ],
 );

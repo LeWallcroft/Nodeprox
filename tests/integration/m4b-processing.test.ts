@@ -19,11 +19,16 @@ import {
   chapterProcessingObjects,
   chapters,
   images,
+  imageVersions,
   series,
   uploads,
   users,
 } from "../../database/schema/index.js";
 import { FilesystemStorage } from "@nodeprox/storage";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -70,6 +75,7 @@ async function createFixture() {
   });
   await database.db.insert(uploads).values({
     id: uploadId,
+    storageProfileId: legacyStorageProfileId,
     chapterId,
     storageKey,
     originalFilename: "chapter.zip",
@@ -122,6 +128,7 @@ describe("M4-B processing integration", () => {
       .where(eq(chapters.id, chapterId));
     await database.db.insert(chapterProcessingAttempts).values({
       id: attemptId,
+      storageProfileId: legacyStorageProfileId,
       chapterId,
       uploadId,
       attemptNumber: 1,
@@ -130,6 +137,7 @@ describe("M4-B processing integration", () => {
     });
     await database.db.insert(chapterProcessingObjects).values({
       id: candidateId,
+      storageProfileId: legacyStorageProfileId,
       attemptId,
       storageKey,
       checksum: image.checksum,
@@ -144,6 +152,7 @@ describe("M4-B processing integration", () => {
     const candidate = {
       id: candidateId,
       chapterId,
+      storageProfileId: legacyStorageProfileId,
       uploadId,
       attemptId,
       storageKey,
@@ -258,7 +267,7 @@ describe("M4-B processing integration", () => {
     const repository = new DrizzleProcessingRepository(database.db);
     const service = new ChapterProcessingService(
       repository,
-      storage,
+      legacyStorageExecution(storage),
       extractorFor(async () => [image]),
       audit,
     );
@@ -285,15 +294,31 @@ describe("M4-B processing integration", () => {
       attemptNumber: 1,
       status: "succeeded",
       errorCode: null,
+      storageProfileId: legacyStorageProfileId,
     });
     expect(attempt?.finishedAt).toBeInstanceOf(Date);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       filename: "01.jpg",
+      storageProfileId: legacyStorageProfileId,
       storageKey: `Media/m4b-${seriesId}/${chapterIds.indexOf(fixture.chapterId) + 1}/01.jpg`,
       sortOrder: 1,
       contentType: "image/jpeg",
     });
+    const publishedImage = rows[0];
+    if (!publishedImage || !attempt)
+      throw new Error("missing-processing-lineage");
+    const [version] = await database.db
+      .select({ storageProfileId: imageVersions.storageProfileId })
+      .from(imageVersions)
+      .where(eq(imageVersions.id, publishedImage.currentVersionId));
+    expect(version?.storageProfileId).toBe(legacyStorageProfileId);
+    const candidates = await database.db
+      .select({ storageProfileId: chapterProcessingObjects.storageProfileId })
+      .from(chapterProcessingObjects)
+      .where(eq(chapterProcessingObjects.attemptId, attempt.id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]?.storageProfileId).toBe(legacyStorageProfileId);
     await expect(storage.exists(fixture.storageKey)).resolves.toBe(false);
   });
 
@@ -310,7 +335,7 @@ describe("M4-B processing integration", () => {
     let attempts = 0;
     const service = new ChapterProcessingService(
       repository,
-      storage,
+      legacyStorageExecution(storage),
       extractorFor(async () => {
         attempts += 1;
         if (attempts === 1) throw new Error("transient");
@@ -375,7 +400,7 @@ describe("M4-B processing integration", () => {
     const repository = new DrizzleProcessingRepository(database.db);
     const service = new ChapterProcessingService(
       repository,
-      storage,
+      legacyStorageExecution(storage),
       extractorFor(async () => {
         throw new Error("invalid-zip-layout");
       }),
@@ -417,7 +442,7 @@ describe("M4-B processing integration", () => {
     const repository = new DrizzleProcessingRepository(database.db);
     await new ChapterProcessingService(
       repository,
-      storage,
+      legacyStorageExecution(storage),
       extractorFor(async () => [image]),
       audit,
     ).process({
@@ -437,6 +462,7 @@ describe("M4-B processing integration", () => {
       .where(eq(chapters.id, fixture.chapterId));
     await database.db.insert(uploads).values({
       id: retryUploadId,
+      storageProfileId: legacyStorageProfileId,
       chapterId: fixture.chapterId,
       storageKey: retrySourceKey,
       originalFilename: "retry.zip",
@@ -454,7 +480,7 @@ describe("M4-B processing integration", () => {
     await expect(
       new ChapterProcessingService(
         repository,
-        storage,
+        legacyStorageExecution(storage),
         extractorFor(async () => {
           throw new Error("temporary");
         }),
@@ -490,7 +516,7 @@ describe("M4-B processing integration", () => {
     const repository = new DrizzleProcessingRepository(database.db);
     const service = new ChapterProcessingService(
       repository,
-      storage,
+      legacyStorageExecution(storage),
       extractorFor(async () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         return [image];

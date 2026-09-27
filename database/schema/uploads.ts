@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./authentication.js";
 import { chapters } from "./chapters.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const uploadStatusEnum = pgEnum("upload_status", [
   "pending",
@@ -29,6 +30,9 @@ export const uploads = pgTable(
       .notNull()
       .references(() => chapters.id, { onDelete: "cascade" }),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     originalFilename: varchar("original_filename", { length: 255 }).notNull(),
     contentType: varchar("content_type", { length: 128 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -51,5 +55,6 @@ export const uploads = pgTable(
       .on(table.chapterId)
       .where(sql`${table.status} <> 'uploaded'`),
     index("uploads_chapter_id_idx").on(table.chapterId),
+    index("uploads_storage_profile_id_idx").on(table.storageProfileId),
   ],
 );

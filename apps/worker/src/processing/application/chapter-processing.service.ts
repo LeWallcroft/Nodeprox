@@ -1,4 +1,4 @@
-import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { ProcessChapterInput } from "@nodeprox/types";
 import { buildPermanentImageStorageKey } from "../domain/image-policy.js";
 import type {
@@ -11,7 +11,7 @@ import { putIfAbsentOrVerifyEquivalent } from "./put-if-absent-or-verify-equival
 export class ChapterProcessingService {
   constructor(
     private readonly repository: ProcessingRepositoryPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly extractor: ZipExtractorPort,
     private readonly audit: ProcessingAuditPort,
   ) {}
@@ -29,8 +29,11 @@ export class ChapterProcessingService {
       upload.status !== "uploaded"
     )
       return;
+    const storage = await this.storageExecution.storageFor(
+      upload.storageProfileId,
+    );
     if (upload.chapterStatus === "ready") {
-      await this.storage.delete(input.sourceStorageKey).catch(() => undefined);
+      await storage.delete(input.sourceStorageKey).catch(() => undefined);
       return;
     }
     const claim = await this.repository.claimChapter({
@@ -43,7 +46,7 @@ export class ChapterProcessingService {
     const attempt = claim.attempt;
     const createdKeys: string[] = [];
     try {
-      const source = await this.storage.get(input.sourceStorageKey);
+      const source = await storage.get(input.sourceStorageKey);
       const images = await this.extractor.inspect(source);
       const records = [];
       for (const image of images) {
@@ -58,7 +61,7 @@ export class ChapterProcessingService {
           image.checksum,
         );
         const write = await putIfAbsentOrVerifyEquivalent({
-          storage: this.storage,
+          storage,
           key: storageKey,
           body: this.extractor.readImage(image),
           contentType: image.contentType,
@@ -77,7 +80,11 @@ export class ChapterProcessingService {
           throw new Error("storage-key-content-conflict");
         if (write.outcome === "existing-equivalent")
           await this.repository.markCandidate(attempt.id, storageKey, "reused");
-        records.push({ ...image, storageKey: write.key });
+        records.push({
+          ...image,
+          storageKey: write.key,
+          storageProfileId: upload.storageProfileId,
+        });
       }
       await this.repository.replaceImagesAndMarkReady(
         input.chapterId,
@@ -102,7 +109,7 @@ export class ChapterProcessingService {
         })
         .catch(() => undefined);
 
-      await this.storage.delete(input.sourceStorageKey).catch(async () => {
+      await storage.delete(input.sourceStorageKey).catch(async () => {
         await this.audit
           .append({
             actorId: upload.createdBy,
@@ -135,7 +142,7 @@ export class ChapterProcessingService {
       await Promise.all(
         createdKeys.map(async (key) => {
           try {
-            await this.storage.delete(key);
+            await storage.delete(key);
             await this.repository.markCandidate(attempt.id, key, "cleaned");
           } catch {
             // The durable cleanup_pending row is handled by reconciliation.
@@ -143,9 +150,7 @@ export class ChapterProcessingService {
         }),
       );
       if (terminal)
-        await this.storage
-          .delete(input.sourceStorageKey)
-          .catch(() => undefined);
+        await storage.delete(input.sourceStorageKey).catch(() => undefined);
       await this.audit
         .append({
           actorId: upload.createdBy,

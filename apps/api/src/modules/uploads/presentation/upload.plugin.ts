@@ -1,5 +1,8 @@
 import type { NodeProxStorageConfig } from "@nodeprox/config";
-import type { UploadTransferPort } from "@nodeprox/storage/port";
+import type {
+  ActiveStorageProfilePort,
+  StorageExecutionResolver,
+} from "@nodeprox/storage/profile-execution";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
@@ -149,14 +152,16 @@ export function registerUploadPlugin(
   authentication: { service: SessionService; cookies: SessionCookieAdapter },
   chapterPermissions: ChapterPermissionService,
   storageConfig: NodeProxStorageConfig,
-  transfer: UploadTransferPort,
+  storageExecution: StorageExecutionResolver,
+  activeProfile: ActiveStorageProfilePort,
 ) {
   const repository = new DrizzleUploadRepository(db);
   const service = new ChapterUploadService(
     chapterPermissions,
     repository,
     repository,
-    transfer,
+    storageExecution,
+    activeProfile,
     repository,
     storageConfig.uploadMaxSizeBytes,
   );

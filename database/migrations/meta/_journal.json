@@ -274,6 +274,13 @@
       "when": 1790539601416,
       "tag": "0038_loving_yellowjacket",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1790543025115,
+      "tag": "0039_closed_obadiah_stane",
+      "breakpoints": true
     }
   ]
 }

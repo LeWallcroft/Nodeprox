@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ActiveStorageProfilePort } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { createImageCandidateStorageKey } from "../../domain/image-candidate-storage-key.js";
 import type { MediaReplacementRepositoryPort } from "../media-replacement.ports.js";
@@ -26,6 +27,7 @@ export class PrepareImageReplacementService {
     private readonly authorization: ChapterImageAuthorizationPort,
     private readonly operations: ImageReplacementOperationRepository,
     private readonly media: MediaReplacementRepositoryPort,
+    private readonly activeProfile: ActiveStorageProfilePort,
     private readonly maxSizeBytes: number,
   ) {}
 
@@ -69,12 +71,15 @@ export class PrepareImageReplacementService {
       nextVersion: candidateContext.currentVersion + 1,
       contentType,
     });
+    const storageProfileId =
+      await this.activeProfile.getActiveStorageProfileId();
     const operation = await this.operations.create({
       id: replacementId,
       imageId: image.id,
       chapterId: input.chapterId,
       requestedByUserId: input.context.userId,
       candidateStorageKey,
+      storageProfileId,
       originalFilename: input.filename,
       contentType,
       sizeBytes: input.sizeBytes,
@@ -86,6 +91,7 @@ export class PrepareImageReplacementService {
       imageId: operation.imageId,
       chapterId: operation.chapterId,
       candidateStorageKey: operation.candidateStorageKey,
+      storageProfileId: operation.storageProfileId,
       contentType: operation.contentType,
       sizeBytes: operation.sizeBytes,
     };

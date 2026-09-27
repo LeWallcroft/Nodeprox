@@ -3,6 +3,7 @@ import {
   type UploadTransferPort,
   UploadTransferProviderError,
 } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import type { ImageReplacementOperationRepository } from "../image-replacement-operation.repository.js";
 import type { ChapterImageAuthorizationPort } from "../ports.js";
@@ -24,7 +25,7 @@ export type QueuedImageReplacementResult = {
 export class CompleteImageReplacementService {
   constructor(
     private readonly operations: ImageReplacementOperationRepository,
-    private readonly transfer: UploadTransferPort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly authorization: ChapterImageAuthorizationPort,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -58,7 +59,10 @@ export class CompleteImageReplacementService {
 
     let verified: Awaited<ReturnType<UploadTransferPort["verify"]>>;
     try {
-      verified = await this.transfer.verify({
+      const transfer = await this.storageExecution.uploadTransferFor(
+        operation.storageProfileId,
+      );
+      verified = await transfer.verify({
         key: operation.candidateStorageKey,
       });
     } catch (error) {

@@ -36,6 +36,7 @@ export class DrizzleMediaEffectRepository implements MediaEffectRepositoryPort {
                 effects.effect_type as "effectType",
                 effects.image_id as "imageId",
                 effects.target,
+                effects.storage_profile_id as "storageProfileId",
                 effects.attempts
     `);
     return [...rows].map((row) => ({
@@ -43,12 +44,14 @@ export class DrizzleMediaEffectRepository implements MediaEffectRepositoryPort {
       effectType: row.effectType as ClaimedMediaEffect["effectType"],
       imageId: String(row.imageId),
       target: String(row.target),
+      storageProfileId: String(row.storageProfileId),
       attempts: Number(row.attempts),
     }));
   }
 
   async isCurrentStorageKey(
     _imageId: string,
+    storageProfileId: string,
     storageKey: string,
   ): Promise<boolean> {
     const [row] = await this.db
@@ -56,7 +59,11 @@ export class DrizzleMediaEffectRepository implements MediaEffectRepositoryPort {
       .from(images)
       .innerJoin(imageVersions, eq(images.currentVersionId, imageVersions.id))
       .where(
-        and(eq(imageVersions.storageKey, storageKey), isNull(images.retiredAt)),
+        and(
+          eq(imageVersions.storageKey, storageKey),
+          eq(imageVersions.storageProfileId, storageProfileId),
+          isNull(images.retiredAt),
+        ),
       )
       .limit(1);
     return row?.storageKey === storageKey;

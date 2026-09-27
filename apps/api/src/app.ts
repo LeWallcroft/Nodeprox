@@ -65,6 +65,10 @@ export function buildApp(
   registerHealthController(app, new HealthService(new HealthRepository()));
   if (services.database) {
     const database = services.database;
+    const storageExecution = services.storageExecution;
+    const activeStorageProfile = services.activeStorageProfile;
+    if (!storageExecution || !activeStorageProfile)
+      throw new Error("api-storage-profile-runtime-required");
     const authentication = registerAuthentication(
       app,
       database,
@@ -141,7 +145,8 @@ export function buildApp(
       authentication,
       chapterPermissions,
       services.storageConfig,
-      services.uploadTransfer,
+      storageExecution,
+      activeStorageProfile,
     );
     registerUploadCenterPlugin(app, {
       service: services.createUploadCenterService(),
@@ -160,7 +165,7 @@ export function buildApp(
       imageQueryService: images.query,
       replacementPreparation: {
         service: images.prepare,
-        transfer: services.uploadTransfer,
+        storageExecution,
       },
       replacementCompletion: { service: images.complete },
       sessionGuard,

@@ -15,6 +15,7 @@ import {
 import type { MediaWarning } from "@nodeprox/types";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 import { chapters } from "./chapters.js";
+import { storageProfiles } from "./storage-profiles.js";
 export const images = pgTable(
   "images",
   {
@@ -24,6 +25,9 @@ export const images = pgTable(
       .references(() => chapters.id, { onDelete: "cascade" }),
     filename: varchar("filename", { length: 255 }).notNull(),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     extension: varchar("extension", { length: 10 }).notNull(),
     contentType: varchar("content_type", { length: 128 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -57,6 +61,7 @@ export const images = pgTable(
       table.filename,
     ),
     index("images_chapter_idx").on(table.chapterId),
+    index("images_storage_profile_id_idx").on(table.storageProfileId),
     index("images_chapter_sort_order_idx").on(table.chapterId, table.sortOrder),
     uniqueIndex("images_active_chapter_sort_order_unique")
       .on(table.chapterId, table.sortOrder)
@@ -79,6 +84,9 @@ export const imageVersions = pgTable(
     version: integer("version").notNull(),
     physicalFilename: varchar("physical_filename", { length: 255 }).notNull(),
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     extension: varchar("extension", { length: 10 }).notNull(),
     contentType: varchar("content_type", { length: 128 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),
@@ -97,6 +105,7 @@ export const imageVersions = pgTable(
     ),
     uniqueIndex("image_versions_storage_key_unique").on(table.storageKey),
     index("image_versions_image_idx").on(table.imageId),
+    index("image_versions_storage_profile_id_idx").on(table.storageProfileId),
     check("image_versions_version_positive", sql`${table.version} > 0`),
   ],
 );

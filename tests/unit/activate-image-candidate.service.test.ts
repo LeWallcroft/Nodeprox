@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { MediaReplacementTransactionPort } from "../../apps/api/src/modules/images/application/media-replacement.ports.js";
 import { ActivateImageCandidateService } from "../../apps/api/src/modules/images/application/services/activate-image-candidate.service.js";
 import { createImageCandidateStorageKey } from "../../apps/api/src/modules/images/domain/image-candidate-storage-key.js";
+import { legacyStorageProfileId } from "../helpers/storage-execution.js";
 
 function subject(version = 1) {
   const cutover = vi.fn(
@@ -23,6 +24,7 @@ function subject(version = 1) {
           logicalFilename: "00.jpg",
           current: {
             id: `version-${version}`,
+            storageProfileId: legacyStorageProfileId,
             version,
             physicalFilename: version === 1 ? "00.jpg" : `00_v${version}.jpg`,
             storageKey: `Media/series/1/${version === 1 ? "00.jpg" : `00_v${version}.jpg`}`,
@@ -64,6 +66,7 @@ describe("ActivateImageCandidateService", () => {
       context: { userId: "user-1" } as never,
       imageId: "image-1",
       candidateStorageKey,
+      storageProfileId: legacyStorageProfileId,
       contentType: "image/jpeg",
       sizeBytes: 20,
       checksum: "new",
@@ -100,6 +103,7 @@ describe("ActivateImageCandidateService", () => {
       context: { userId: "user-1" } as never,
       imageId: "image-1",
       candidateStorageKey,
+      storageProfileId: legacyStorageProfileId,
       contentType: "image/jpeg",
       sizeBytes: 20,
       checksum: "new",
@@ -124,6 +128,7 @@ describe("ActivateImageCandidateService", () => {
       context: { userId: "user-1" } as never,
       imageId: "image-1",
       candidateStorageKey: first.candidateStorageKey,
+      storageProfileId: legacyStorageProfileId,
       contentType: "image/jpeg",
       sizeBytes: 20,
       checksum: "new",
@@ -133,6 +138,7 @@ describe("ActivateImageCandidateService", () => {
       context: { userId: "user-1" } as never,
       imageId: "image-1",
       candidateStorageKey: second.candidateStorageKey,
+      storageProfileId: legacyStorageProfileId,
       contentType: "image/jpeg",
       sizeBytes: 20,
       checksum: "new",

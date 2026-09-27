@@ -3,12 +3,17 @@ import type { StorageCleanupRepositoryPort } from "../../apps/worker/src/storage
 import { StorageCleanupProcessor } from "../../apps/worker/src/storage-cleanup/application/storage-cleanup.processor.js";
 import { DrizzleStorageCleanupRepository } from "../../apps/worker/src/storage-cleanup/infrastructure/persistence/drizzle/storage-cleanup.repository.js";
 import type { StoragePort } from "@nodeprox/storage/port";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 function harness(safe: boolean, deleteFails = false, originRequestId?: string) {
   const effect = {
     id: "cleanup",
     replacementId: "replacement",
     storageKey: "artifact",
+    storageProfileId: legacyStorageProfileId,
     reason: "replacement_source_zip" as const,
     attempts: 1,
     ...(originRequestId ? { originRequestId } : {}),
@@ -33,7 +38,11 @@ function harness(safe: boolean, deleteFails = false, originRequestId?: string) {
     repository,
     storage,
     logger,
-    processor: new StorageCleanupProcessor(repository, storage, logger),
+    processor: new StorageCleanupProcessor(
+      repository,
+      legacyStorageExecution(storage),
+      logger,
+    ),
   };
 }
 
@@ -72,6 +81,7 @@ describe("CHR3 storage cleanup processor", () => {
           id: "new-cleanup",
           replacementId: "replacement",
           storageKey: "artifact",
+          storageProfileId: legacyStorageProfileId,
           reason: "replacement_source_zip",
           attempts: 1,
           originRequestId: "request-complete",
@@ -82,6 +92,7 @@ describe("CHR3 storage cleanup processor", () => {
           id: "legacy-cleanup",
           replacementId: "replacement",
           storageKey: "artifact",
+          storageProfileId: legacyStorageProfileId,
           reason: "replacement_source_zip",
           attempts: 1,
           originRequestId: null,
@@ -98,6 +109,7 @@ describe("CHR3 storage cleanup processor", () => {
         id: "legacy-cleanup",
         replacementId: "replacement",
         storageKey: "artifact",
+        storageProfileId: legacyStorageProfileId,
         reason: "replacement_source_zip",
         attempts: 1,
       },

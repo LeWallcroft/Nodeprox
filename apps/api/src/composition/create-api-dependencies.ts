@@ -10,6 +10,9 @@ import {
   B2Storage,
   B2UploadTransfer,
   FilesystemStorage,
+  StorageClientRegistry,
+  type ActiveStorageProfilePort,
+  type StorageExecutionResolver,
   type UploadTransferPort,
 } from "@nodeprox/storage";
 import type { FastifyBaseLogger } from "fastify";
@@ -17,6 +20,7 @@ import {
   createDatabase,
   type NodeProxDatabase,
 } from "../../../../database/client.js";
+import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
 import {
   BrevoTransactionalEmail,
   NoopTransactionalEmail,
@@ -63,6 +67,8 @@ export interface AppDependencies {
   secureCookie?: boolean;
   storage?: NodeProxStorageConfig;
   uploadTransfer?: UploadTransferPort;
+  storageExecution?: StorageExecutionResolver;
+  activeStorageProfile?: ActiveStorageProfilePort;
   publicMediaOrigin?: string;
   operationAuditWriter?: OperationAuditWriter;
   seriesChannelGateway?: DiscordSeriesChannelGateway;
@@ -100,6 +106,26 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
     storageConfig.provider === "b2"
       ? new B2Storage(storageConfig.b2)
       : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
+  const storageProfileConfig =
+    input.storageProfileConfig ?? loadStorageProfileConfig(environment);
+  const profileRuntime = database
+    ? new DrizzleStorageProfileRuntimeRepository(database)
+    : undefined;
+  const activeStorageProfile = input.activeStorageProfile ?? profileRuntime;
+  const storageExecution =
+    input.storageExecution ??
+    (profileRuntime
+      ? new StorageClientRegistry(
+          (id) => profileRuntime.loadRuntimeProfile(id),
+          { storage: imageStorage, transfer: uploadTransfer },
+          storageProfileConfig.STORAGE_PROFILE_MASTER_KEY,
+        )
+      : undefined);
+  const requireStorageRuntime = () => {
+    if (!storageExecution || !activeStorageProfile)
+      throw new Error("api-storage-profile-runtime-required");
+    return { storageExecution, activeStorageProfile };
+  };
   const publicMediaOrigin =
     input.publicMediaOrigin ?? DEFAULT_PUBLIC_MEDIA_ORIGIN;
   const seriesChannelGateway =
@@ -123,8 +149,9 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
 
   return {
     database,
-    storageProfileConfig:
-      input.storageProfileConfig ?? loadStorageProfileConfig(environment),
+    storageProfileConfig,
+    activeStorageProfile,
+    storageExecution,
     connection,
     secureCookie: input.secureCookie ?? false,
     storageConfig,
@@ -204,6 +231,8 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
       chapterPermissions: ChapterPermissionService,
     ) {
       if (!database) throw new Error("api-database-required");
+      const { storageExecution, activeStorageProfile } =
+        requireStorageRuntime();
       const processingRepository =
         new DrizzleChapterReplacementProcessingRepository(database);
       const operations = new DrizzleChapterReplacementRepository(database);
@@ -219,12 +248,13 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
         prepare: new PrepareChapterReplacementService(
           chapterPermissions,
           processingRepository,
-          uploadTransfer,
+          storageExecution,
+          activeStorageProfile,
           storageConfig.uploadMaxSizeBytes,
         ),
         completeUpload: new CompleteChapterReplacementUploadService(
           processingRepository,
-          uploadTransfer,
+          storageExecution,
           chapterPermissions,
         ),
         finalize: new FinalizeChapterReplacementService(
@@ -242,6 +272,8 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
     },
     createImageServices(chapterPermissions: ChapterPermissionService) {
       if (!database) throw new Error("api-database-required");
+      const { storageExecution, activeStorageProfile } =
+        requireStorageRuntime();
       const imageRepository = new DrizzleImageRepository(database);
       const imageReplacementOperations =
         new DrizzleImageReplacementOperationRepository(database);
@@ -249,18 +281,19 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
         query: new ImageQueryService(
           imageRepository,
           chapterPermissions,
-          imageStorage,
+          storageExecution,
         ),
         prepare: new PrepareImageReplacementService(
           imageRepository,
           chapterPermissions,
           imageReplacementOperations,
           new DrizzleMediaReplacementRepository(database),
+          activeStorageProfile,
           storageConfig.uploadMaxSizeBytes,
         ),
         complete: new CompleteImageReplacementService(
           imageReplacementOperations,
-          uploadTransfer,
+          storageExecution,
           chapterPermissions,
         ),
       };

@@ -14,6 +14,11 @@ import {
   UploadTransferObjectNotFoundError,
   type UploadTransferPort,
 } from "../../packages/storage/dist/port.js";
+import {
+  legacyActiveProfile,
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const permission = {
   check: vi.fn().mockResolvedValue({
@@ -27,6 +32,7 @@ const pending = {
   id: "upload-1",
   chapterId: "chapter-1",
   storageKey: "uploads/series-1/chapter-1/upload-1.zip",
+  storageProfileId: legacyStorageProfileId,
   originalFilename: "chapter.zip",
   contentType: "application/zip",
   sizeBytes: 4,
@@ -90,7 +96,11 @@ function setup() {
     permission,
     uploads,
     lifecycle,
-    transfer,
+    legacyStorageExecution(
+      { put: vi.fn(), get: vi.fn(), exists: vi.fn(), delete: vi.fn() },
+      transfer,
+    ),
+    legacyActiveProfile,
     audit,
     512,
   );
@@ -98,6 +108,58 @@ function setup() {
 }
 
 describe("chapter upload transfer lifecycle", () => {
+  it("uses the initiation profile after the active selector changes", async () => {
+    const deps = setup();
+    let activeProfileId = legacyStorageProfileId;
+    const wrongTransfer: UploadTransferPort = {
+      initiate: vi.fn(),
+      verify: vi.fn(),
+      abort: vi.fn(),
+    };
+    const service = new ChapterUploadService(
+      permission,
+      deps.uploads,
+      deps.lifecycle,
+      {
+        storageFor: async () => {
+          throw new Error("unused");
+        },
+        uploadTransferFor: async (profileId) =>
+          profileId === legacyStorageProfileId ? deps.transfer : wrongTransfer,
+      },
+      { getActiveStorageProfileId: async () => activeProfileId },
+      deps.audit,
+      512,
+    );
+    await service.initiate({
+      context,
+      chapterId: "chapter-1",
+      filename: "chapter.zip",
+      contentType: "application/zip",
+      sizeBytes: 4,
+    });
+    expect(deps.uploads.createPending).toHaveBeenCalledWith(
+      expect.objectContaining({ storageProfileId: legacyStorageProfileId }),
+    );
+    activeProfileId = "11111111-1111-4111-8111-111111111111";
+    await service.complete({
+      context,
+      chapterId: "chapter-1",
+      uploadId: "upload-1",
+    });
+    await service.abort({
+      context,
+      chapterId: "chapter-1",
+      uploadId: "upload-1",
+    });
+    vi.mocked(deps.uploads.findStalePending).mockResolvedValueOnce([pending]);
+    await service.cleanupStale(new Date(), 20);
+    expect(deps.transfer.verify).toHaveBeenCalledOnce();
+    expect(deps.transfer.abort).toHaveBeenCalledTimes(2);
+    expect(wrongTransfer.verify).not.toHaveBeenCalled();
+    expect(wrongTransfer.abort).not.toHaveBeenCalled();
+  });
+
   it("initiates pending state without marking the upload as uploaded", async () => {
     const { service, lifecycle, transfer, audit } = setup();
     await expect(

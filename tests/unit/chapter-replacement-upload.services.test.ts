@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  legacyActiveProfile,
+  legacyStorageExecution,
+} from "../helpers/storage-execution.js";
+import {
   ChapterReplacementUploadDeniedError,
   CompleteChapterReplacementUploadService,
 } from "../../apps/api/src/modules/chapter-replacements/application/complete-chapter-replacement-upload.service.js";
@@ -96,12 +100,19 @@ function harness() {
   const prepare = new PrepareChapterReplacementService(
     authorization,
     repository,
-    transfer,
+    legacyStorageExecution(
+      { put: vi.fn(), get: vi.fn(), exists: vi.fn(), delete: vi.fn() },
+      transfer,
+    ),
+    legacyActiveProfile,
     1024,
   );
   const complete = new CompleteChapterReplacementUploadService(
     repository,
-    transfer,
+    legacyStorageExecution(
+      { put: vi.fn(), get: vi.fn(), exists: vi.fn(), delete: vi.fn() },
+      transfer,
+    ),
     authorization,
   );
   return {

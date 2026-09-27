@@ -1,4 +1,4 @@
-import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type {
   StorageCleanupEffect,
   StorageCleanupRepositoryPort,
@@ -16,7 +16,7 @@ export class StorageCleanupProcessor {
 
   constructor(
     private readonly repository: StorageCleanupRepositoryPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly logger: StorageCleanupLogger,
     private readonly now: () => Date = () => new Date(),
     private readonly maxAttempts = 5,
@@ -62,7 +62,10 @@ export class StorageCleanupProcessor {
         this.logger.error(context, "Storage cleanup target is not safe");
         return;
       }
-      await this.storage.delete(effect.storageKey);
+      const storage = await this.storageExecution.storageFor(
+        effect.storageProfileId,
+      );
+      await storage.delete(effect.storageKey);
       await this.repository.markCompleted(effect.id);
       this.logger.info(context, "Storage cleanup completed");
     } catch {

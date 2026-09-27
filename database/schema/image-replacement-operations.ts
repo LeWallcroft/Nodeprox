@@ -14,6 +14,7 @@ import {
 import { users } from "./authentication.js";
 import { chapters } from "./chapters.js";
 import { images, imageVersions } from "./images.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const imageReplacementOperationStatusEnum = pgEnum(
   "image_replacement_operation_status",
@@ -36,6 +37,9 @@ export const imageReplacementOperations = pgTable(
     candidateStorageKey: varchar("candidate_storage_key", {
       length: 512,
     }).notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     originalFilename: varchar("original_filename", { length: 255 }).notNull(),
     contentType: varchar("content_type", { length: 128 }).notNull(),
     sizeBytes: integer("size_bytes").notNull(),

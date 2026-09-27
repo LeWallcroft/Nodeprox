@@ -34,20 +34,32 @@ export class DrizzleChapterDeletionRepository
       .limit(1);
     if (!request) return null;
     const imageRows = await this.db
-      .select({ key: images.storageKey })
+      .select({
+        storageKey: images.storageKey,
+        storageProfileId: images.storageProfileId,
+      })
       .from(images)
       .where(eq(images.chapterId, chapterId));
     const imageVersionRows = await this.db
-      .select({ key: imageVersions.storageKey })
+      .select({
+        storageKey: imageVersions.storageKey,
+        storageProfileId: imageVersions.storageProfileId,
+      })
       .from(imageVersions)
       .innerJoin(images, eq(images.id, imageVersions.imageId))
       .where(eq(images.chapterId, chapterId));
     const uploadRows = await this.db
-      .select({ key: uploads.storageKey })
+      .select({
+        storageKey: uploads.storageKey,
+        storageProfileId: uploads.storageProfileId,
+      })
       .from(uploads)
       .where(eq(uploads.chapterId, chapterId));
     const candidateRows = await this.db
-      .select({ key: chapterProcessingObjects.storageKey })
+      .select({
+        storageKey: chapterProcessingObjects.storageKey,
+        storageProfileId: chapterProcessingObjects.storageProfileId,
+      })
       .from(chapterProcessingObjects)
       .innerJoin(
         chapterProcessingAttempts,
@@ -59,15 +71,21 @@ export class DrizzleChapterDeletionRepository
       chapterId,
       requestedBy: request.requestedBy,
       originRequestId: request.originRequestId,
-      storageKeys: [
-        ...new Set(
+      storageObjects: [
+        ...new Map(
           [
             ...imageRows,
             ...imageVersionRows,
             ...uploadRows,
             ...candidateRows,
-          ].map((row) => row.key),
-        ),
+          ].map(
+            (row) =>
+              [
+                JSON.stringify([row.storageProfileId, row.storageKey]),
+                row,
+              ] as const,
+          ),
+        ).values(),
       ],
     };
   }

@@ -7,6 +7,10 @@ import type {
 import { ImageReplacementReadyHandler } from "../../apps/api/src/modules/images/application/services/image-replacement-ready.handler.js";
 import type { UploadTransferPort } from "../../packages/storage/dist/port.js";
 import { UploadTransferObjectNotFoundError } from "../../packages/storage/dist/port.js";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const now = new Date("2026-09-18T12:00:00.000Z");
 const targetUserId = randomUUID();
@@ -16,6 +20,7 @@ const operation: ImageReplacementOperation = {
   chapterId: randomUUID(),
   requestedByUserId: targetUserId,
   candidateStorageKey: "Media/series/chapter/replacement.jpg",
+  storageProfileId: legacyStorageProfileId,
   originalFilename: "replacement.jpg",
   contentType: "image/jpeg",
   sizeBytes: 20,
@@ -58,7 +63,10 @@ function subject(
   const activator = { execute: vi.fn(async () => undefined) };
   const handler = new ImageReplacementReadyHandler(
     operations,
-    transfer,
+    legacyStorageExecution(
+      { put: vi.fn(), get: vi.fn(), exists: vi.fn(), delete: vi.fn() },
+      transfer,
+    ),
     activator as never,
     () => now,
   );
@@ -99,6 +107,7 @@ describe("ImageReplacementReadyHandler", () => {
       },
       imageId: operation.imageId,
       candidateStorageKey: operation.candidateStorageKey,
+      storageProfileId: legacyStorageProfileId,
       contentType: operation.contentType,
       sizeBytes: operation.sizeBytes,
       checksum: "etag-1",

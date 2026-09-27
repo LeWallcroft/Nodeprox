@@ -3,6 +3,7 @@ export type ChapterReplacementItem = {
   operationId: string;
   sortOrder: number;
   candidateStorageKey: string;
+  storageProfileId: string;
   physicalFilename: string;
   originalFilename: string;
   contentType: string;

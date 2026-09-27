@@ -35,6 +35,7 @@ export class DrizzleProcessingRepository
         chapterPublicKey: chapters.publicKey,
         createdBy: uploads.createdBy,
         storageKey: uploads.storageKey,
+        storageProfileId: uploads.storageProfileId,
         status: uploads.status,
         chapterStatus: chapters.status,
       })
@@ -56,6 +57,12 @@ export class DrizzleProcessingRepository
         .limit(1)
         .for("update");
       if (!chapter) return { outcome: "not-found" as const };
+      const [upload] = await tx
+        .select({ storageProfileId: uploads.storageProfileId })
+        .from(uploads)
+        .where(eq(uploads.id, input.uploadId))
+        .limit(1);
+      if (!upload) return { outcome: "not-found" as const };
 
       if (input.jobId !== undefined && input.jobAttempt !== undefined) {
         const [existing] = await tx
@@ -106,6 +113,7 @@ export class DrizzleProcessingRepository
         .values({
           chapterId: input.chapterId,
           uploadId: input.uploadId,
+          storageProfileId: upload.storageProfileId,
           ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
           ...(input.jobAttempt !== undefined
             ? { jobAttempt: input.jobAttempt }
@@ -126,10 +134,17 @@ export class DrizzleProcessingRepository
     storageKey: string,
     checksum: string,
   ): Promise<void> {
+    const [attempt] = await this.db
+      .select({ storageProfileId: chapterProcessingAttempts.storageProfileId })
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.id, attemptId))
+      .limit(1);
+    if (!attempt) throw new Error("chapter-attempt-not-found");
     await this.db
       .insert(chapterProcessingObjects)
       .values({
         attemptId,
+        storageProfileId: attempt.storageProfileId,
         storageKey,
         checksum,
       })
@@ -200,6 +215,7 @@ export class DrizzleProcessingRepository
       const candidates = await tx
         .select({
           storageKey: chapterProcessingObjects.storageKey,
+          storageProfileId: chapterProcessingObjects.storageProfileId,
           status: chapterProcessingObjects.status,
         })
         .from(chapterProcessingObjects)
@@ -209,7 +225,9 @@ export class DrizzleProcessingRepository
         candidates.some(
           (candidate) =>
             !records.some(
-              (record) => record.storageKey === candidate.storageKey,
+              (record) =>
+                record.storageKey === candidate.storageKey &&
+                record.storageProfileId === candidate.storageProfileId,
             ) || !["created", "reused"].includes(candidate.status),
         )
       )
@@ -226,6 +244,7 @@ export class DrizzleProcessingRepository
           chapterId,
           filename: record.filename,
           storageKey: record.storageKey,
+          storageProfileId: record.storageProfileId,
           extension: record.extension,
           contentType: record.contentType,
           sizeBytes: record.sizeBytes,
@@ -242,6 +261,7 @@ export class DrizzleProcessingRepository
           version: 1,
           physicalFilename: record.filename,
           storageKey: record.storageKey,
+          storageProfileId: record.storageProfileId,
           extension: record.extension,
           contentType: record.contentType,
           sizeBytes: record.sizeBytes,
@@ -396,6 +416,7 @@ function toAttempt(
     id: row.id,
     chapterId: row.chapterId,
     uploadId: row.uploadId,
+    storageProfileId: row.storageProfileId,
     jobId: row.jobId,
     jobAttempt: row.jobAttempt,
     attemptNumber: row.attemptNumber,

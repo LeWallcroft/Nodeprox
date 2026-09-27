@@ -3,6 +3,7 @@ export type ChapterReplacementProcessingContext = {
   chapterId: string;
   requestedByUserId: string;
   sourceStorageKey: string;
+  storageProfileId: string;
   seriesSlug: string;
   chapterPublicKey: string;
   status: "processing";
@@ -18,6 +19,7 @@ export type ChapterReplacementManifestItem = {
   operationId: string;
   sortOrder: number;
   candidateStorageKey: string;
+  storageProfileId: string;
   physicalFilename: string;
   originalFilename: string;
   contentType: string;

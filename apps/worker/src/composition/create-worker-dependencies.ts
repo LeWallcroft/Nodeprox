@@ -4,11 +4,14 @@ import {
   loadMediaEffectsConfig,
   loadProcessingConfig,
   loadStorageConfig,
+  loadStorageProfileConfig,
 } from "@nodeprox/config";
 import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
+import { StorageClientRegistry } from "@nodeprox/storage/profile-execution";
 import { inArray } from "drizzle-orm";
 import pino from "pino";
 import { createDatabase } from "../../../../database/client.js";
+import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
 import { systemConfig } from "../../../../database/schema/index.js";
 import { ChapterDeletionService } from "../deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "../deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
@@ -40,6 +43,11 @@ export function createWorkerDependencies() {
         "REDIS_URL",
         "presignedUrl",
         "CLOUDFLARE_PURGE_API_TOKEN",
+        "STORAGE_PROFILE_MASTER_KEY",
+        "encryptedApplicationKey",
+        "b2ApplicationKey",
+        "CLOUDFLARE_PROVISIONING_API_TOKEN",
+        "CLOUDFLARE_CACHE_RULES_API_TOKEN",
       ],
       censor: "[REDACTED]",
     },
@@ -51,6 +59,14 @@ export function createWorkerDependencies() {
     storageConfig.provider === "b2"
       ? new B2Storage(storageConfig.b2)
       : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
+  const profileRuntime = new DrizzleStorageProfileRuntimeRepository(
+    database.db,
+  );
+  const storageExecution = new StorageClientRegistry(
+    (id) => profileRuntime.loadRuntimeProfile(id),
+    { storage, transfer: null },
+    loadStorageProfileConfig().STORAGE_PROFILE_MASTER_KEY,
+  );
   const mediaEffectsConfig = loadMediaEffectsConfig();
   const mediaEffects = mediaEffectsConfig
     ? new MediaEffectProcessor(
@@ -59,13 +75,13 @@ export function createWorkerDependencies() {
           mediaEffectsConfig.CLOUDFLARE_ZONE_ID,
           mediaEffectsConfig.CLOUDFLARE_PURGE_API_TOKEN,
         ),
-        storage,
+        storageExecution,
         logger,
       )
     : null;
   const storageCleanup = new StorageCleanupProcessor(
     new DrizzleStorageCleanupRepository(database.db),
-    storage,
+    storageExecution,
     logger,
   );
   const repository = new DrizzleProcessingRepository(database.db);
@@ -82,7 +98,7 @@ export function createWorkerDependencies() {
     replacementRepository,
     deletion: new ChapterDeletionService(
       new DrizzleChapterDeletionRepository(database.db),
-      storage,
+      storageExecution,
     ),
     mediaEffects,
     storageCleanup,
@@ -101,7 +117,7 @@ export function createWorkerDependencies() {
     createChapterProcessing(extractor: UnzipperExtractor) {
       return new ChapterProcessingService(
         repository,
-        storage,
+        storageExecution,
         extractor,
         repository,
       );
@@ -109,7 +125,7 @@ export function createWorkerDependencies() {
     createReplacementProcessing(extractor: UnzipperExtractor) {
       return new ChapterReplacementProcessingService(
         replacementRepository,
-        storage,
+        storageExecution,
         extractor,
       );
     },

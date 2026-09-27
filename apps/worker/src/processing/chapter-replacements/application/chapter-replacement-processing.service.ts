@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Readable } from "node:stream";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { StoragePort } from "@nodeprox/storage/port";
 import type { ProcessChapterReplacementInput } from "@nodeprox/types";
 import type { ZipExtractorPort } from "../../application/ports.js";
@@ -32,7 +33,7 @@ const terminalValidationCodes = new Set([
 export class ChapterReplacementProcessingService {
   constructor(
     private readonly repository: ChapterReplacementProcessingRepositoryPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly extractor: ZipExtractorPort,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -41,7 +42,10 @@ export class ChapterReplacementProcessingService {
     const claim = await this.repository.claimForProcessing(input);
     if (claim.outcome !== "process") return;
     try {
-      const source = await this.storage.get(claim.context.sourceStorageKey);
+      const storage = await this.storageExecution.storageFor(
+        claim.context.storageProfileId,
+      );
+      const source = await storage.get(claim.context.sourceStorageKey);
       const extracted = await this.inspectCandidate(source);
       const proposed = extracted.map((image) => planItem(claim.context, image));
       const manifest = await this.repository.createOrLoadManifest(
@@ -56,7 +60,9 @@ export class ChapterReplacementProcessingService {
           (candidate) => candidate.sortOrder === item.sortOrder,
         );
         if (!image) throw new Error("chapter-replacement-manifest-mismatch");
-        const stored = await this.storeOrRecover(item, image);
+        if (item.storageProfileId !== claim.context.storageProfileId)
+          throw new Error("chapter-replacement-profile-mismatch");
+        const stored = await this.storeOrRecover(storage, item, image);
         const acknowledged = await this.repository.markCandidateStored({
           replacementId: claim.context.replacementId,
           itemId: item.id,
@@ -89,12 +95,13 @@ export class ChapterReplacementProcessingService {
   }
 
   private async storeOrRecover(
+    storage: StoragePort,
     item: ChapterReplacementManifestItem,
     image: ValidatedImage,
   ): Promise<{ sizeBytes: number; etag?: string }> {
-    if (await this.storage.exists(item.candidateStorageKey)) {
+    if (await storage.exists(item.candidateStorageKey)) {
       const evidence = await checksumStream(
-        await this.storage.get(item.candidateStorageKey),
+        await storage.get(item.candidateStorageKey),
       );
       if (
         evidence.sizeBytes !== item.sizeBytes ||
@@ -103,7 +110,7 @@ export class ChapterReplacementProcessingService {
         throw new Error("candidate-storage-mismatch");
       return { sizeBytes: evidence.sizeBytes };
     }
-    const stored = await this.storage.put({
+    const stored = await storage.put({
       key: item.candidateStorageKey,
       body: this.extractor.readImage(image),
       contentType: item.contentType,
@@ -133,6 +140,7 @@ export class ChapterReplacementProcessingService {
 function planItem(
   context: {
     replacementId: string;
+    storageProfileId: string;
     seriesSlug: string;
     chapterPublicKey: string;
     activeImages: readonly {
@@ -157,6 +165,7 @@ function planItem(
   return {
     id: candidate.itemId,
     operationId: context.replacementId,
+    storageProfileId: context.storageProfileId,
     sortOrder: image.sortOrder,
     candidateStorageKey: candidate.storageKey,
     physicalFilename: candidate.physicalFilename,
@@ -178,6 +187,7 @@ function assertManifestMatches(
     if (
       !image ||
       item.sortOrder !== image.sortOrder ||
+      item.storageProfileId !== manifest[0]?.storageProfileId ||
       item.originalFilename !== image.filename ||
       item.contentType !== image.contentType ||
       item.sizeBytes !== image.sizeBytes ||
