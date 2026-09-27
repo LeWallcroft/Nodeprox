@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { loadStorageProfileConfig } from "../../packages/config/src/index.js";
+import { loadStorageProfileConfig } from "@nodeprox/config";
 
 describe("storage profile secret configuration", () => {
   it("permits read-only profile management when the master key is absent", () => {
