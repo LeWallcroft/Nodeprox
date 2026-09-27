@@ -7,6 +7,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 
@@ -32,6 +33,7 @@ export const storageCleanupOutbox = pgTable(
         onDelete: "cascade",
       }),
     storageKey: text("storage_key").notNull(),
+    originRequestId: varchar("origin_request_id", { length: 128 }),
     reason: storageCleanupReasonEnum("reason").notNull(),
     status: storageCleanupStatusEnum("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),

@@ -1,0 +1,2 @@
+ALTER TABLE "chapter_replacement_processing_outbox" ADD COLUMN "origin_request_id" varchar(128);--> statement-breakpoint
+ALTER TABLE "storage_cleanup_outbox" ADD COLUMN "origin_request_id" varchar(128);

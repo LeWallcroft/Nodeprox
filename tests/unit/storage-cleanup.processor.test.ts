@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StorageCleanupRepositoryPort } from "../../apps/worker/src/storage-cleanup/application/ports.js";
 import { StorageCleanupProcessor } from "../../apps/worker/src/storage-cleanup/application/storage-cleanup.processor.js";
+import { DrizzleStorageCleanupRepository } from "../../apps/worker/src/storage-cleanup/infrastructure/persistence/drizzle/storage-cleanup.repository.js";
 import type { StoragePort } from "@nodeprox/storage/port";
 
-function harness(safe: boolean, deleteFails = false) {
+function harness(safe: boolean, deleteFails = false, originRequestId?: string) {
   const effect = {
     id: "cleanup",
     replacementId: "replacement",
     storageKey: "artifact",
     reason: "replacement_source_zip" as const,
     attempts: 1,
+    ...(originRequestId ? { originRequestId } : {}),
   };
   const repository: StorageCleanupRepositoryPort = {
     claimPending: vi.fn().mockResolvedValue([effect]),
@@ -30,6 +32,7 @@ function harness(safe: boolean, deleteFails = false) {
   return {
     repository,
     storage,
+    logger,
     processor: new StorageCleanupProcessor(repository, storage, logger),
   };
 }
@@ -50,5 +53,54 @@ describe("CHR3 storage cleanup processor", () => {
       "cleanup",
       "storage-cleanup-not-safe",
     );
+  });
+
+  it("logs cleanup with its original HTTP request when available", async () => {
+    const target = harness(true, false, "request-complete");
+    await target.processor.runOnce();
+    expect(target.logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ originRequestId: "request-complete" }),
+      "Storage cleanup completed",
+    );
+  });
+
+  it("maps claimed cleanup origin and historical NULL without fabricating IDs", async () => {
+    const execute = vi
+      .fn()
+      .mockResolvedValueOnce([
+        {
+          id: "new-cleanup",
+          replacementId: "replacement",
+          storageKey: "artifact",
+          reason: "replacement_source_zip",
+          attempts: 1,
+          originRequestId: "request-complete",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "legacy-cleanup",
+          replacementId: "replacement",
+          storageKey: "artifact",
+          reason: "replacement_source_zip",
+          attempts: 1,
+          originRequestId: null,
+        },
+      ]);
+    const repository = new DrizzleStorageCleanupRepository({
+      execute,
+    } as never);
+    expect(await repository.claimPending(1)).toMatchObject([
+      { id: "new-cleanup", originRequestId: "request-complete" },
+    ]);
+    expect(await repository.claimPending(1)).toEqual([
+      {
+        id: "legacy-cleanup",
+        replacementId: "replacement",
+        storageKey: "artifact",
+        reason: "replacement_source_zip",
+        attempts: 1,
+      },
+    ]);
   });
 });

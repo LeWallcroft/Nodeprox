@@ -40,4 +40,16 @@ describe("ProcessingOutboxDispatcher", () => {
     await dispatcher.dispatchOnce();
     expect(outbox.markEnqueued).not.toHaveBeenCalled();
   });
+
+  it("retains normal Chapter processing origin in the existing queue contract", async () => {
+    const { outbox, queue } = setup();
+    vi.mocked(outbox.findPending).mockResolvedValueOnce([
+      { ...entry, originRequestId: "request-upload" },
+    ]);
+    await new ProcessingOutboxDispatcher(outbox, queue).dispatchOnce();
+    expect(queue.enqueueChapterProcessing).toHaveBeenCalledWith({
+      ...entry,
+      originRequestId: "request-upload",
+    });
+  });
 });

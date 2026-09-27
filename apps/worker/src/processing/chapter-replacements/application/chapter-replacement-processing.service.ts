@@ -68,12 +68,21 @@ export class ChapterReplacementProcessingService {
           throw new Error("chapter-replacement-storage-evidence-conflict");
       }
 
-      if (!(await this.repository.markReady(claim.context.replacementId)))
+      if (
+        !(await this.repository.markReady(
+          claim.context.replacementId,
+          input.originRequestId,
+        ))
+      )
         throw new Error("chapter-replacement-ready-conflict");
     } catch (error) {
       const code = errorCode(error);
       if (!terminalValidationCodes.has(code)) throw error;
-      await this.repository.markFailed(claim.context.replacementId, code);
+      await this.repository.markFailed(
+        claim.context.replacementId,
+        code,
+        input.originRequestId,
+      );
     } finally {
       await this.extractor.dispose().catch(() => undefined);
     }

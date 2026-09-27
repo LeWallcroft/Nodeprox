@@ -4,6 +4,7 @@ export type StorageCleanupEffect = {
   storageKey: string;
   reason: "replacement_source_zip" | "replacement_failed_candidate";
   attempts: number;
+  originRequestId?: string;
 };
 
 export interface StorageCleanupRepositoryPort {

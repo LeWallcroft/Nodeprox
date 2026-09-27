@@ -57,6 +57,7 @@ export interface ProcessingQueuePort {
 export type ProcessChapterReplacementInput = {
   replacementId: string;
   chapterId: string;
+  originRequestId?: string;
 };
 
 export interface ChapterReplacementQueuePort {

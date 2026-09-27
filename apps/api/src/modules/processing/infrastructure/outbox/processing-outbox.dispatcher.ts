@@ -54,6 +54,9 @@ export class ProcessingOutboxDispatcher {
           await replacementQueue.enqueueChapterReplacement({
             replacementId: replacement.replacementId,
             chapterId: replacement.chapterId,
+            ...(replacement.originRequestId
+              ? { originRequestId: replacement.originRequestId }
+              : {}),
           });
           await this.replacements?.markEnqueued(replacement.id);
         } catch {

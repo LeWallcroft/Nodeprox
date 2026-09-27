@@ -192,7 +192,10 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
     });
   }
 
-  async markReady(replacementId: string): Promise<boolean> {
+  async markReady(
+    replacementId: string,
+    originRequestId?: string,
+  ): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       const [operation] = await tx
         .select({
@@ -246,13 +249,18 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           replacementId,
           storageKey: operation.sourceStorageKey,
           reason: "replacement_source_zip",
+          ...(originRequestId ? { originRequestId } : {}),
         })
         .onConflictDoNothing();
       return true;
     });
   }
 
-  async markFailed(replacementId: string, errorCode: string): Promise<boolean> {
+  async markFailed(
+    replacementId: string,
+    errorCode: string,
+    originRequestId?: string,
+  ): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       const [operation] = await tx
         .select({
@@ -307,11 +315,13 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
             replacementId,
             storageKey: operation.sourceStorageKey,
             reason: "replacement_source_zip" as const,
+            ...(originRequestId ? { originRequestId } : {}),
           },
           ...items.map((item) => ({
             replacementId,
             storageKey: item.storageKey,
             reason: "replacement_failed_candidate" as const,
+            ...(originRequestId ? { originRequestId } : {}),
           })),
         ])
         .onConflictDoNothing();

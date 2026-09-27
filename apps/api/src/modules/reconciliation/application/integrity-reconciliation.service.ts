@@ -36,6 +36,7 @@ export type ReconciliationFinding = {
   processingAttemptId?: string;
   outboxId?: string;
   jobId?: string;
+  originRequestId?: string;
   storageKey?: string;
   result: "detected" | "repaired" | "manual-review" | "repair-failed";
 };
@@ -46,6 +47,7 @@ export type QueueIntent = {
   chapterId: string;
   status: "pending" | "enqueued";
   jobId: string;
+  originRequestId?: string;
   aggregateStatus: string | null;
   payload:
     | ProcessChapterInput
@@ -74,6 +76,7 @@ export type CandidateObject = {
     | "cleanup_pending"
     | "cleaned";
   attemptStatus: string;
+  originRequestId?: string;
   createdAt: Date;
 };
 export type AttemptWork = {
@@ -86,12 +89,14 @@ export type AttemptWork = {
   sourceStorageKey: string | null;
   status: string;
   startedAt: Date;
+  originRequestId?: string;
 };
 export type SourceCleanup = {
   id: string;
   chapterId: string;
   uploadId: string;
   storageKey: string;
+  originRequestId?: string;
 };
 export type CleanupIntent = {
   id: string;
@@ -99,6 +104,7 @@ export type CleanupIntent = {
   storageKey: string;
   status: "pending" | "processing" | "failed";
   updatedAt: Date;
+  originRequestId?: string;
 };
 export type ReconciliationCursor = Partial<
   Record<
@@ -208,6 +214,9 @@ export class IntegrityReconciliationService {
         chapterId: intent.chapterId,
         outboxId: intent.id,
         jobId: intent.jobId,
+        ...(intent.originRequestId
+          ? { originRequestId: intent.originRequestId }
+          : {}),
       };
       if (state === "missing") {
         if (
@@ -290,6 +299,9 @@ export class IntegrityReconciliationService {
         ...(candidate.uploadId ? { uploadId: candidate.uploadId } : {}),
         processingAttemptId: candidate.attemptId,
         storageKey: candidate.storageKey,
+        ...(candidate.originRequestId
+          ? { originRequestId: candidate.originRequestId }
+          : {}),
       };
       if (await this.repository.isPublishedKey(candidate.storageKey)) {
         await record({
@@ -360,6 +372,9 @@ export class IntegrityReconciliationService {
         ...(attempt.uploadId ? { uploadId: attempt.uploadId } : {}),
         processingAttemptId: attempt.id,
         ...(attempt.jobId ? { jobId: attempt.jobId } : {}),
+        ...(attempt.originRequestId
+          ? { originRequestId: attempt.originRequestId }
+          : {}),
       };
       if (state === "failed" && attempt.chapterStatus === "processing") {
         await record(
@@ -379,8 +394,16 @@ export class IntegrityReconciliationService {
           attempt.uploadId,
         );
         if (intent)
-          await record({ ...base, action: "requeue", result: "detected" }, () =>
-            this.queue.enqueue(intent),
+          await record(
+            {
+              ...base,
+              ...(intent.originRequestId && !attempt.originRequestId
+                ? { originRequestId: intent.originRequestId }
+                : {}),
+              action: "requeue",
+              result: "detected",
+            },
+            () => this.queue.enqueue(intent),
           );
         else
           await record({
@@ -408,6 +431,9 @@ export class IntegrityReconciliationService {
           uploadId: source.uploadId,
           processingAttemptId: source.id,
           storageKey: source.storageKey,
+          ...(source.originRequestId
+            ? { originRequestId: source.originRequestId }
+            : {}),
           result: "detected",
         },
         () => this.storage.delete(source.storageKey),
@@ -422,6 +448,9 @@ export class IntegrityReconciliationService {
         chapterId: intent.chapterId,
         outboxId: intent.id,
         storageKey: intent.storageKey,
+        ...(intent.originRequestId
+          ? { originRequestId: intent.originRequestId }
+          : {}),
         result: intent.status === "failed" ? "manual-review" : "detected",
       });
     }

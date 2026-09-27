@@ -50,6 +50,37 @@ describe("Worker composition", () => {
     });
   });
 
+  it("keeps the durable request origin in replacement Worker logs and payload", async () => {
+    const info = vi.fn();
+    const replacement = vi.fn();
+    const handler = createWorkerJobHandler({
+      logger: { info },
+      deletion: { execute: vi.fn() },
+      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      createExtractor: vi.fn().mockReturnValue({}),
+      createChapterProcessing: () => ({ process: vi.fn() }),
+      createReplacementProcessing: () => ({ process: replacement }),
+    } as never);
+    const job = {
+      ...fakeJob("chapter.replacement.process"),
+      data: {
+        chapterId: "chapter-1",
+        replacementId: "replacement-1",
+        originRequestId: "request-complete",
+      },
+    } as Job;
+    await handler(job);
+    expect(replacement).toHaveBeenCalledWith(job.data);
+    expect(info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: "job-1",
+        replacementId: "replacement-1",
+        originRequestId: "request-complete",
+      }),
+      "Worker job started",
+    );
+  });
+
   it("starts background processors once and stops the Worker and DB idempotently", async () => {
     const close = vi.fn().mockResolvedValue(undefined);
     const end = vi.fn().mockResolvedValue(undefined);

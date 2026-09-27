@@ -138,7 +138,13 @@ export class DrizzleChapterReplacementProcessingRepository
       if (!uploaded) throw new Error("chapter-replacement-upload-conflict");
       await tx
         .insert(chapterReplacementProcessingOutbox)
-        .values({ replacementId: uploaded.id, chapterId: uploaded.chapterId })
+        .values({
+          replacementId: uploaded.id,
+          chapterId: uploaded.chapterId,
+          ...(input.originRequestId
+            ? { originRequestId: input.originRequestId }
+            : {}),
+        })
         .onConflictDoNothing();
       return uploaded;
     });
@@ -150,6 +156,7 @@ export class DrizzleChapterReplacementProcessingRepository
         id: chapterReplacementProcessingOutbox.id,
         replacementId: chapterReplacementProcessingOutbox.replacementId,
         chapterId: chapterReplacementProcessingOutbox.chapterId,
+        originRequestId: chapterReplacementProcessingOutbox.originRequestId,
       })
       .from(chapterReplacementProcessingOutbox)
       .where(
@@ -160,7 +167,10 @@ export class DrizzleChapterReplacementProcessingRepository
       )
       .orderBy(asc(chapterReplacementProcessingOutbox.createdAt))
       .limit(Math.max(1, Math.min(limit, 20)));
-    return rows;
+    return rows.map(({ originRequestId, ...row }) => ({
+      ...row,
+      ...(originRequestId ? { originRequestId } : {}),
+    }));
   }
 
   async markEnqueued(id: string): Promise<void> {
