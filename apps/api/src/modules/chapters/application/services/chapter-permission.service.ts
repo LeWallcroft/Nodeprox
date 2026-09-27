@@ -1,5 +1,10 @@
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import type { AuthorizationService } from "../../../authorization/application/services/authorization.service.js";
+import type {
+  ChapterAuthorizationFailureCode,
+  ChapterTechnicalFailure,
+} from "../chapter-authorization-result.js";
+import type { ChapterAuthorizationFailureReporter } from "../ports/chapter-authorization-failure-reporter.port.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
 import type { AuthorizationAuditRepository } from "../../../authorization/application/ports/authorization.ports.js";
 import {
@@ -24,8 +29,9 @@ export type ChapterPermissionResult =
     }
   | {
       allowed: false;
-      reason: "unauthenticated" | "not-found" | "denied" | "policy-error";
-    };
+      reason: "unauthenticated" | "not-found" | "denied";
+    }
+  | ChapterTechnicalFailure;
 
 export class ChapterPermissionService {
   constructor(
@@ -34,6 +40,7 @@ export class ChapterPermissionService {
     private readonly users: ChapterUserPort,
     private readonly permissions: ChapterPermissionRepositoryPort,
     private readonly audit: AuthorizationAuditRepository,
+    private readonly failures?: ChapterAuthorizationFailureReporter,
   ) {}
 
   async grant(input: {
@@ -54,13 +61,14 @@ export class ChapterPermissionService {
       PERMISSIONS.CHAPTERS_HELPER_GRANT,
     );
     if (!actor.allowed) {
-      await this.recordDenied(
-        input.context.userId,
-        "chapter.permission.grant.denied",
-        input.chapterId,
-        "forbidden",
-        input.requestId,
-      );
+      if (actor.reason !== "authorization-unavailable")
+        await this.recordDenied(
+          input.context.userId,
+          "chapter.permission.grant.denied",
+          input.chapterId,
+          "forbidden",
+          input.requestId,
+        );
       return actor.reason === "not-found"
         ? { notFound: true }
         : { denied: true };
@@ -85,16 +93,7 @@ export class ChapterPermissionService {
     if (new Set(delegable).size !== delegable.length || delegable.length === 0)
       throw new InvalidChapterPermissionError();
     const cooldown = await this.authorization.getHelperCooldownDecision();
-    if (!cooldown.allowed) {
-      await this.recordDenied(
-        input.context.userId,
-        "chapter.permission.grant.denied",
-        input.chapterId,
-        "forbidden",
-        input.requestId,
-      );
-      return { denied: true };
-    }
+    if (!cooldown.allowed) return { denied: true };
     const result = await this.permissions.grant({
       actor: input.context,
       chapterId: input.chapterId,
@@ -127,12 +126,13 @@ export class ChapterPermissionService {
       PERMISSIONS.CHAPTERS_HELPER_REVOKE,
     );
     if (!actor.allowed) {
-      await this.recordDenied(
-        input.context.userId,
-        "chapter.permission.revoke.denied",
-        input.chapterId,
-        "forbidden",
-      );
+      if (actor.reason !== "authorization-unavailable")
+        await this.recordDenied(
+          input.context.userId,
+          "chapter.permission.revoke.denied",
+          input.chapterId,
+          "forbidden",
+        );
       return actor.reason === "not-found"
         ? { notFound: true }
         : { denied: true };
@@ -158,85 +158,125 @@ export class ChapterPermissionService {
   }): Promise<ChapterPermissionResult> {
     if (!input.context.userId || !input.context.sessionId)
       return { allowed: false, reason: "unauthenticated" };
+    let chapter: Awaited<ReturnType<ChapterRepositoryPort["findById"]>>;
     try {
-      const chapter = await this.chapters.findById(input.chapterId);
-      if (!chapter) return { allowed: false, reason: "not-found" };
-      if (
-        input.permission === PERMISSIONS.CHAPTERS_HELPER_GRANT ||
-        input.permission === PERMISSIONS.CHAPTERS_HELPER_REVOKE
-      ) {
-        const manager = await this.resolveManager(
+      chapter = await this.chapters.findById(input.chapterId);
+    } catch (error) {
+      return this.technicalFailure(
+        "chapter-read-failed",
+        "check",
+        input.context,
+        input.chapterId,
+        input.permission,
+        error,
+      );
+    }
+    if (!chapter) return { allowed: false, reason: "not-found" };
+    if (
+      input.permission === PERMISSIONS.CHAPTERS_HELPER_GRANT ||
+      input.permission === PERMISSIONS.CHAPTERS_HELPER_REVOKE
+    ) {
+      const manager = await this.resolveManager(
+        input.context,
+        input.chapterId,
+        input.permission,
+      );
+      return manager.allowed
+        ? {
+            allowed: true,
+            reason: manager.reason,
+            seriesId: manager.seriesId,
+          }
+        : manager;
+    }
+    if (!isDelegableChapterPermission(input.permission))
+      return { allowed: false, reason: "denied" };
+    const roleDecision = await this.authorization.authorize(
+      input.context,
+      input.permission as DelegableChapterPermission,
+    );
+    if (!roleDecision.allowed) {
+      if (roleDecision.reason === "authorization-unavailable")
+        return roleDecision;
+      return {
+        allowed: false,
+        reason: "denied",
+      };
+    }
+    let owner = false;
+    if (roleDecision.role === "gestor" && this.chapters.isSeriesOwner) {
+      try {
+        owner = await this.chapters.isSeriesOwner(
+          chapter.seriesId,
+          input.context.userId,
+        );
+      } catch (error) {
+        return this.technicalFailure(
+          "series-owner-evaluation-failed",
+          "check",
           input.context,
           input.chapterId,
           input.permission,
+          error,
         );
-        return manager.allowed
-          ? {
-              allowed: true,
-              reason: manager.reason,
-              seriesId: manager.seriesId,
-            }
-          : { allowed: false, reason: manager.reason };
       }
-      if (!isDelegableChapterPermission(input.permission))
-        return { allowed: false, reason: "denied" };
-      const roleDecision = await this.authorization.authorize(
-        input.context,
-        input.permission as DelegableChapterPermission,
-      );
-      if (!roleDecision.allowed)
-        return {
-          allowed: false,
-          reason:
-            roleDecision.reason === "policy-error" ? "policy-error" : "denied",
-        };
-      const isSeriesOwner =
-        roleDecision.role === "gestor" &&
-        Boolean(
-          this.chapters.isSeriesOwner &&
-            (await this.chapters.isSeriesOwner(
-              chapter.seriesId,
-              input.context.userId,
-            )),
+    }
+    let isAssigned = false;
+    if (roleDecision.role === "uploader" && this.chapters.isAssigned) {
+      try {
+        isAssigned = await this.chapters.isAssigned(
+          chapter.seriesId,
+          input.context.userId,
         );
-      const isAssigned =
-        roleDecision.role === "uploader" &&
-        Boolean(
-          this.chapters.isAssigned &&
-            (await this.chapters.isAssigned(
-              chapter.seriesId,
-              input.context.userId,
-            )),
+      } catch (error) {
+        return this.technicalFailure(
+          "series-assignment-evaluation-failed",
+          "check",
+          input.context,
+          input.chapterId,
+          input.permission,
+          error,
         );
-      const contextualReason = evaluateChapterContextualAuthorization({
-        role: roleDecision.role,
-        isSeriesOwner,
-        isAssigned,
-        hasHelperPermission: false,
-      });
-      if (contextualReason)
-        return {
-          allowed: true,
-          reason: contextualReason,
-          seriesId: chapter.seriesId,
-        };
-      const hasHelperPermission = await this.permissions.hasActivePermission({
+      }
+    }
+    const contextualReason = evaluateChapterContextualAuthorization({
+      role: roleDecision.role,
+      isSeriesOwner: owner,
+      isAssigned,
+      hasHelperPermission: false,
+    });
+    if (contextualReason)
+      return {
+        allowed: true,
+        reason: contextualReason,
+        seriesId: chapter.seriesId,
+      };
+    let hasHelperPermission: boolean;
+    try {
+      hasHelperPermission = await this.permissions.hasActivePermission({
         chapterId: input.chapterId,
         helperUserId: input.context.userId,
         permission: input.permission as DelegableChapterPermission,
       });
-      const reason = evaluateChapterContextualAuthorization({
-        role: roleDecision.role,
-        isSeriesOwner: false,
-        isAssigned: false,
-        hasHelperPermission,
-      });
-      return reason
-        ? { allowed: true, reason, seriesId: chapter.seriesId }
-        : { allowed: false, reason: "denied" };
-    } catch {
-      return { allowed: false, reason: "policy-error" };
+    } catch (error) {
+      return this.technicalFailure(
+        "helper-permission-evaluation-failed",
+        "check",
+        input.context,
+        input.chapterId,
+        input.permission,
+        error,
+      );
     }
+    const reason = evaluateChapterContextualAuthorization({
+      role: roleDecision.role,
+      isSeriesOwner: false,
+      isAssigned: false,
+      hasHelperPermission,
+    });
+    return reason
+      ? { allowed: true, reason, seriesId: chapter.seriesId }
+      : { allowed: false, reason: "denied" };
   }
 
   async projectCapabilities(context: AuthorizationContext, chapterId: string) {
@@ -256,26 +296,64 @@ export class ChapterPermissionService {
       if (result.allowed) capabilities.push(permission);
     }
 
-    const chapter = await this.chapters.findById(chapterId);
+    let chapter: Awaited<ReturnType<ChapterRepositoryPort["findById"]>>;
+    try {
+      chapter = await this.chapters.findById(chapterId);
+    } catch (error) {
+      this.technicalFailure(
+        "chapter-read-failed",
+        "projectCapabilities",
+        context,
+        chapterId,
+        PERMISSIONS.CHAPTERS_DELETE,
+        error,
+      );
+      return { capabilities };
+    }
     if (chapter) {
       const decision = await this.authorization.authorize(
         context,
         PERMISSIONS.CHAPTERS_DELETE,
       );
       if (decision.allowed) {
-        const isOwner = Boolean(
-          decision.role === "gestor" &&
-            this.chapters.isSeriesOwner &&
-            (await this.chapters.isSeriesOwner(
+        let isOwner = false;
+        if (decision.role === "gestor" && this.chapters.isSeriesOwner) {
+          try {
+            isOwner = await this.chapters.isSeriesOwner(
               chapter.seriesId,
               context.userId,
-            )),
-        );
-        const isAssigned = Boolean(
-          decision.role === "uploader" &&
-            this.chapters.isAssigned &&
-            (await this.chapters.isAssigned(chapter.seriesId, context.userId)),
-        );
+            );
+          } catch (error) {
+            this.technicalFailure(
+              "series-owner-evaluation-failed",
+              "projectCapabilities",
+              context,
+              chapterId,
+              PERMISSIONS.CHAPTERS_DELETE,
+              error,
+            );
+            return { capabilities };
+          }
+        }
+        let isAssigned = false;
+        if (decision.role === "uploader" && this.chapters.isAssigned) {
+          try {
+            isAssigned = await this.chapters.isAssigned(
+              chapter.seriesId,
+              context.userId,
+            );
+          } catch (error) {
+            this.technicalFailure(
+              "series-assignment-evaluation-failed",
+              "projectCapabilities",
+              context,
+              chapterId,
+              PERMISSIONS.CHAPTERS_DELETE,
+              error,
+            );
+            return { capabilities };
+          }
+        }
         const deletePolicy = evaluateChapterDelete({
           actorRole: decision.role,
           permission: PERMISSIONS.CHAPTERS_DELETE,
@@ -296,15 +374,39 @@ export class ChapterPermissionService {
       permission: PERMISSIONS.CHAPTERS_READ,
     });
     if (read.allowed) return read;
+    if (read.reason === "authorization-unavailable") return read;
     if (!context.userId || !context.sessionId) return read;
-    const chapter = await this.chapters.findById(chapterId);
+    let chapter: Awaited<ReturnType<ChapterRepositoryPort["findById"]>>;
+    try {
+      chapter = await this.chapters.findById(chapterId);
+    } catch (error) {
+      return this.technicalFailure(
+        "chapter-read-failed",
+        "canReadContext",
+        context,
+        chapterId,
+        PERMISSIONS.CHAPTERS_READ,
+        error,
+      );
+    }
     if (!chapter)
       return { allowed: false as const, reason: "not-found" as const };
-    const hasOperationalPermission =
-      await this.permissions.hasAnyActivePermission({
+    let hasOperationalPermission: boolean;
+    try {
+      hasOperationalPermission = await this.permissions.hasAnyActivePermission({
         chapterId,
         helperUserId: context.userId,
       });
+    } catch (error) {
+      return this.technicalFailure(
+        "helper-permission-evaluation-failed",
+        "canReadContext",
+        context,
+        chapterId,
+        PERMISSIONS.CHAPTERS_READ,
+        error,
+      );
+    }
     return hasOperationalPermission
       ? {
           allowed: true as const,
@@ -382,24 +484,51 @@ export class ChapterPermissionService {
     permission: Permission,
   ): Promise<
     | { allowed: true; reason: "role" | "assigned"; seriesId: string }
-    | { allowed: false; reason: "not-found" | "denied" | "policy-error" }
+    | { allowed: false; reason: "not-found" | "denied" }
+    | ChapterTechnicalFailure
   > {
     if (!context.userId || !context.sessionId)
       return { allowed: false, reason: "denied" };
-    const chapter = await this.chapters.findById(chapterId);
+    let chapter: Awaited<ReturnType<ChapterRepositoryPort["findById"]>>;
+    try {
+      chapter = await this.chapters.findById(chapterId);
+    } catch (error) {
+      return this.technicalFailure(
+        "chapter-read-failed",
+        "resolveManager",
+        context,
+        chapterId,
+        permission,
+        error,
+      );
+    }
     if (!chapter) return { allowed: false, reason: "not-found" };
     const decision = await this.authorization.authorize(context, permission);
-    if (!decision.allowed)
+    if (!decision.allowed) {
+      if (decision.reason === "authorization-unavailable") return decision;
       return {
         allowed: false,
-        reason: decision.reason === "policy-error" ? "policy-error" : "denied",
+        reason: "denied",
       };
-    const isAssigned =
-      decision.role === "uploader" &&
-      Boolean(
-        this.chapters.isAssigned &&
-          (await this.chapters.isAssigned(chapter.seriesId, context.userId)),
-      );
+    }
+    let isAssigned = false;
+    if (decision.role === "uploader" && this.chapters.isAssigned) {
+      try {
+        isAssigned = await this.chapters.isAssigned(
+          chapter.seriesId,
+          context.userId,
+        );
+      } catch (error) {
+        return this.technicalFailure(
+          "series-assignment-evaluation-failed",
+          "resolveManager",
+          context,
+          chapterId,
+          permission,
+          error,
+        );
+      }
+    }
     const reason = evaluateChapterAdministrationAuthorization({
       role: decision.role,
       isAssigned,
@@ -407,6 +536,30 @@ export class ChapterPermissionService {
     return reason
       ? { allowed: true, reason, seriesId: chapter.seriesId }
       : { allowed: false, reason: "denied" };
+  }
+
+  private technicalFailure(
+    failureCode: ChapterAuthorizationFailureCode,
+    operation: string,
+    context: AuthorizationContext,
+    chapterId: string,
+    permission: string,
+    error?: unknown,
+  ): ChapterTechnicalFailure {
+    try {
+      this.failures?.report({
+        code: failureCode,
+        operation,
+        actorId: context.userId,
+        permission,
+        resourceType: "chapter",
+        resourceId: chapterId,
+        ...(error === undefined ? {} : { error }),
+      });
+    } catch {
+      // Logging must not alter the fail-closed result.
+    }
+    return { allowed: false, reason: "authorization-unavailable", failureCode };
   }
 
   private async recordDenied(
