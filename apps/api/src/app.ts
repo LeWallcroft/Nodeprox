@@ -4,9 +4,9 @@ import Fastify, {
   type FastifyServerOptions,
 } from "fastify";
 import {
-  createApiDependencies,
   type ApiDependencies,
   type AppDependencies,
+  createApiDependencies,
 } from "./composition/create-api-dependencies.js";
 import { registerAccountPlugin } from "./modules/authentication/presentation/account.plugin.js";
 import { registerAuthentication } from "./modules/authentication/presentation/authentication.plugin.js";
@@ -29,6 +29,7 @@ import { registerNotificationPlugin } from "./modules/notifications/presentation
 import { registerOverviewPlugin } from "./modules/overview/presentation/overview.plugin.js";
 import { registerPublicationPlugin } from "./modules/publication/presentation/publication.plugin.js";
 import { registerSeriesPlugin } from "./modules/series/presentation/series.plugin.js";
+import { registerStorageProfilePlugin } from "./modules/storage-profiles/presentation/storage-profile.plugin.js";
 import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
 import { registerUploadCenterPlugin } from "./modules/uploads/presentation/upload-center.plugin.js";
 import { API_LOGGER_OPTIONS } from "./observability/logger.js";
@@ -103,6 +104,13 @@ export function buildApp(
     });
     registerAuditPlugin(app, database, authentication, authorization);
     registerSettingsPlugin(app, database, authentication, authorization);
+    registerStorageProfilePlugin(
+      app,
+      database,
+      authentication,
+      authorization,
+      services.storageProfileConfig,
+    );
     registerOverviewPlugin(app, database, authentication, authorization);
     const chapterPermissions = registerChapterPermissionPlugin(
       app,

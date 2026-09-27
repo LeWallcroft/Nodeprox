@@ -56,6 +56,19 @@ const b2ConfigSchema = z.object({
   B2_KEY_ID: z.string().trim().min(1),
   B2_APPLICATION_KEY: z.string().trim().min(1),
 });
+const storageProfileConfigSchema = z.object({
+  STORAGE_PROFILE_MASTER_KEY: z
+    .string()
+    .optional()
+    .refine(
+      (value) =>
+        value === undefined ||
+        (Buffer.from(value, "base64").length === 32 &&
+          Buffer.from(value, "base64").toString("base64") === value),
+      "STORAGE_PROFILE_MASTER_KEY must encode exactly 32 bytes",
+    ),
+  STORAGE_RESERVED_HOSTNAME_LABELS: z.string().default(""),
+});
 const processingConfigSchema = z.object({
   REDIS_URL: z.url(),
   PROCESSING_QUEUE_NAME: z.string().trim().min(1).default("chapter-processing"),
@@ -133,6 +146,9 @@ export type NodeProxStorageConfig =
       b2: z.infer<typeof b2ConfigSchema>;
     };
 export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
+export type NodeProxStorageProfileConfig = z.infer<
+  typeof storageProfileConfigSchema
+>;
 export type NodeProxMediaEffectsConfig = z.infer<
   typeof mediaEffectsConfigSchema
 >;
@@ -219,4 +235,10 @@ export function loadStorageConfig(
     uploadPendingTtlSeconds: parsed.UPLOAD_PENDING_TTL_SECONDS,
     b2: b2ConfigSchema.parse(env),
   };
+}
+
+export function loadStorageProfileConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxStorageProfileConfig {
+  return storageProfileConfigSchema.parse(env);
 }

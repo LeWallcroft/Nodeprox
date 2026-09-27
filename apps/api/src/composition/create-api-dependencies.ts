@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import {
   DEFAULT_PUBLIC_MEDIA_ORIGIN,
+  loadStorageProfileConfig,
   type NodeProxConfig,
   type NodeProxStorageConfig,
+  type NodeProxStorageProfileConfig,
 } from "@nodeprox/config";
 import {
   B2Storage,
@@ -57,6 +59,7 @@ import {
 
 export interface AppDependencies {
   database?: NodeProxDatabase;
+  storageProfileConfig?: NodeProxStorageProfileConfig;
   secureCookie?: boolean;
   storage?: NodeProxStorageConfig;
   uploadTransfer?: UploadTransferPort;
@@ -120,6 +123,8 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
 
   return {
     database,
+    storageProfileConfig:
+      input.storageProfileConfig ?? loadStorageProfileConfig(environment),
     connection,
     secureCookie: input.secureCookie ?? false,
     storageConfig,
