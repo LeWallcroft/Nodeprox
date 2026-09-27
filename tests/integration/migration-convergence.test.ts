@@ -387,16 +387,33 @@ describe("convergent migration sequence", () => {
         WHERE size_bytes <= 0
       `;
       expect(legacy?.count).toBe("2");
+      const [legacyProfile] = await database.sql<{ count: string }[]>`
+        SELECT count(*)::text AS count
+        FROM uploads
+        WHERE size_bytes <= 0
+          AND storage_profile_id = '00000000-0000-4000-8000-000000000001'
+      `;
+      expect(legacyProfile?.count).toBe("2");
+      const [profileDefault] = await database.sql<
+        { column_default: string | null }[]
+      >`
+        SELECT column_default
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'uploads'
+          AND column_name = 'storage_profile_id'
+      `;
+      expect(profileDefault?.column_default).toBeNull();
 
       let violationCode: string | undefined;
       try {
         await database.sql`
           INSERT INTO uploads (
-            id, chapter_id, storage_key, original_filename, content_type,
+            id, chapter_id, storage_key, storage_profile_id, original_filename, content_type,
             size_bytes, status, created_by
           ) VALUES (
             ${randomUUID()}, ${invalidChapterId}, ${`new/${invalidChapterId}.zip`},
-            'invalid.zip', 'application/zip', 0, 'pending', ${userId}
+            '00000000-0000-4000-8000-000000000001', 'invalid.zip', 'application/zip', 0, 'pending', ${userId}
           )
         `;
       } catch (error) {

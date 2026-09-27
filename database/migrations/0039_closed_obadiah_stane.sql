@@ -8,13 +8,12 @@ ALTER TABLE "images" ADD COLUMN "storage_profile_id" uuid;--> statement-breakpoi
 ALTER TABLE "media_effect_outbox" ADD COLUMN "storage_profile_id" uuid;--> statement-breakpoint
 ALTER TABLE "processing_outbox" ADD COLUMN "storage_profile_id" uuid;--> statement-breakpoint
 ALTER TABLE "storage_cleanup_outbox" ADD COLUMN "storage_profile_id" uuid;--> statement-breakpoint
-ALTER TABLE "uploads" ADD COLUMN "storage_profile_id" uuid;--> statement-breakpoint
+ALTER TABLE "uploads" ADD COLUMN "storage_profile_id" uuid DEFAULT '00000000-0000-4000-8000-000000000001';--> statement-breakpoint
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM storage_profiles WHERE id = '00000000-0000-4000-8000-000000000001' AND provider = 'b2' AND source = 'env' AND status = 'active' AND public_hostname = 'media.nodeprox.org') THEN
     RAISE EXCEPTION 'legacy-storage-profile-invariant';
   END IF;
 END $$;--> statement-breakpoint
-UPDATE "uploads" SET "storage_profile_id" = '00000000-0000-4000-8000-000000000001' WHERE "storage_profile_id" IS NULL;--> statement-breakpoint
 UPDATE "processing_outbox" SET "storage_profile_id" = '00000000-0000-4000-8000-000000000001' WHERE "storage_profile_id" IS NULL;--> statement-breakpoint
 UPDATE "chapter_processing_attempts" SET "storage_profile_id" = '00000000-0000-4000-8000-000000000001' WHERE "storage_profile_id" IS NULL;--> statement-breakpoint
 UPDATE "chapter_processing_objects" SET "storage_profile_id" = '00000000-0000-4000-8000-000000000001' WHERE "storage_profile_id" IS NULL;--> statement-breakpoint
@@ -40,6 +39,7 @@ DO $$ BEGIN
     RAISE EXCEPTION 'storage-profile-backfill-incomplete';
   END IF;
 END $$;--> statement-breakpoint
+ALTER TABLE "uploads" ALTER COLUMN "storage_profile_id" DROP DEFAULT;--> statement-breakpoint
 SET CONSTRAINTS ALL IMMEDIATE;--> statement-breakpoint
 ALTER TABLE "chapter_processing_attempts" ALTER COLUMN "storage_profile_id" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "chapter_processing_objects" ALTER COLUMN "storage_profile_id" SET NOT NULL;--> statement-breakpoint
