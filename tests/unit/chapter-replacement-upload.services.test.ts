@@ -233,6 +233,22 @@ describe("CHR3 replacement upload services", () => {
     expect(target.intents).toEqual(new Set([result.replacementId]));
   });
 
+  it("uses the completion request as the durable processing origin", async () => {
+    const { target, result } = await prepared();
+    await target.complete.execute({
+      context,
+      chapterId,
+      replacementId: result.replacementId,
+      originRequestId: "request-complete",
+    });
+    expect(target.repository.markUploadedAndEnqueue).toHaveBeenCalledWith({
+      replacementId: result.replacementId,
+      chapterId,
+      etag: "zip-etag",
+      originRequestId: "request-complete",
+    });
+  });
+
   it("CHR3-UP-10 repeated complete does not duplicate intent or verification", async () => {
     const { target, result } = await prepared();
     await target.complete.execute({

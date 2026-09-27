@@ -133,6 +133,33 @@ describe("integrity reconciliation", () => {
     );
   });
 
+  it("reports a missing replacement job with its durable HTTP origin", async () => {
+    const batch = empty();
+    batch.intents.push({
+      kind: "replacement",
+      id: "replacement-intent",
+      chapterId: "chapter-1",
+      originRequestId: "request-complete",
+      status: "enqueued",
+      jobId: "chapter-replacement-replacement-1",
+      aggregateStatus: "uploaded",
+      payload: {
+        replacementId: "replacement-1",
+        chapterId: "chapter-1",
+        originRequestId: "request-complete",
+      },
+      updatedAt: old,
+    });
+    const target = setup(batch);
+    expect(
+      (await target.service.run({ limit: 10, dryRun: true })).findings,
+    ).toMatchObject([
+      { code: "missing-queue-job", originRequestId: "request-complete" },
+    ]);
+    await target.service.run({ limit: 10 });
+    expect(target.queue.enqueue).toHaveBeenCalledWith(batch.intents[0]);
+  });
+
   it("does not enqueue a second logical job after a successful repair", async () => {
     const batch = empty();
     batch.intents.push(processingIntent);
@@ -346,6 +373,7 @@ describe("integrity reconciliation", () => {
       storageKey: "Media/a/1/candidate.jpg",
       status: "failed",
       updatedAt: old,
+      originRequestId: "request-complete",
     });
     const target = setup(batch);
     expect((await target.service.run({ limit: 10 })).findings).toMatchObject([
@@ -353,6 +381,7 @@ describe("integrity reconciliation", () => {
         code: "cleanup-pending",
         action: "manual-review",
         resourceType: "cleanup-outbox",
+        originRequestId: "request-complete",
       },
     ]);
     expect(target.storage.delete).not.toHaveBeenCalled();

@@ -36,6 +36,7 @@ export class CompleteChapterReplacementUploadService {
     context: AuthorizationContext;
     replacementId: string;
     chapterId: string;
+    originRequestId?: string;
   }): Promise<ChapterReplacementUploadResult> {
     let operation = await this.repository.findByIdForChapter(
       input.replacementId,
@@ -80,6 +81,9 @@ export class CompleteChapterReplacementUploadService {
     operation = await this.repository.markUploadedAndEnqueue({
       replacementId: operation.id,
       chapterId: operation.chapterId,
+      ...(input.originRequestId
+        ? { originRequestId: input.originRequestId }
+        : {}),
       ...(verified.etag ? { etag: verified.etag } : {}),
     });
     if (!operation) throw new ChapterReplacementUploadNotFoundError();

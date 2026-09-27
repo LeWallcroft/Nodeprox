@@ -6,6 +6,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  varchar,
 } from "drizzle-orm/pg-core";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
 import { chapters } from "./chapters.js";
@@ -27,6 +28,7 @@ export const chapterReplacementProcessingOutbox = pgTable(
     chapterId: uuid("chapter_id")
       .notNull()
       .references(() => chapters.id, { onDelete: "cascade" }),
+    originRequestId: varchar("origin_request_id", { length: 128 }),
     status: chapterReplacementProcessingOutboxStatusEnum("status")
       .notNull()
       .default("pending"),

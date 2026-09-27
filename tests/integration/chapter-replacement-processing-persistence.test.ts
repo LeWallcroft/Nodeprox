@@ -96,6 +96,32 @@ describe("CHR3 processing persistence", () => {
     expect(intents).toHaveLength(1);
   });
 
+  it("persists and reads the completion request origin on its durable intent", async () => {
+    const target = await pending();
+    await apiRepository.markUploadedAndEnqueue({
+      replacementId: target.operation.id,
+      chapterId: target.chapter.chapterId,
+      etag: "zip-etag",
+      originRequestId: "request-complete",
+    });
+    const intents = await database.db
+      .select()
+      .from(chapterReplacementProcessingOutbox)
+      .where(
+        eq(
+          chapterReplacementProcessingOutbox.replacementId,
+          target.operation.id,
+        ),
+      );
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.originRequestId).toBe("request-complete");
+    expect(
+      (await apiRepository.findPending(100)).find(
+        (intent) => intent.replacementId === target.operation.id,
+      )?.originRequestId,
+    ).toBe("request-complete");
+  });
+
   it("repeated upload completion creates no duplicate intent", async () => {
     const target = await uploaded();
     await apiRepository.markUploadedAndEnqueue({

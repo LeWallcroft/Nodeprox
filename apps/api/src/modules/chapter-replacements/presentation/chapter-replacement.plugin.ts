@@ -227,9 +227,11 @@ export function registerChapterReplacementPlugin(
       try {
         const params = parse(replacementParams, request.params);
         parse(emptyBody, request.body);
+        const requestId = getRequestContext()?.requestId;
         const result = await dependencies.completeUpload.execute({
           context: context(),
           ...params,
+          ...(requestId ? { originRequestId: requestId } : {}),
         });
         if ("imageCount" in result)
           return reply.code(200).send(

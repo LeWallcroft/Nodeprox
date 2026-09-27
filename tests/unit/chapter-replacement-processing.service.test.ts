@@ -36,6 +36,8 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
   cleanup: string[] = [];
   calls: string[] = [];
   failEvidenceOnce = false;
+  readyOriginRequestId: string | undefined;
+  failedOriginRequestId: string | undefined;
   activeImages: Array<{
     sortOrder: number;
     logicalFilename: string;
@@ -102,7 +104,8 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
     return true;
   }
 
-  async markReady() {
+  async markReady(_id: string, originRequestId?: string) {
+    this.readyOriginRequestId = originRequestId;
     this.calls.push("ready");
     if (this.status === "ready") return true;
     if (
@@ -115,7 +118,8 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
     return true;
   }
 
-  async markFailed(_id: string, code: string) {
+  async markFailed(_id: string, code: string, originRequestId?: string) {
+    this.failedOriginRequestId = originRequestId;
     this.calls.push(`failed:${code}`);
     if (this.status !== "processing") return false;
     this.status = "failed";
@@ -261,6 +265,15 @@ describe("CHR3 replacement Worker processing", () => {
     expect(target.repository.status).toBe("ready");
   });
 
+  it("propagates the durable origin to successful cleanup scheduling", async () => {
+    const target = harness();
+    await target.service.process({
+      ...target.input,
+      originRequestId: "request-complete",
+    });
+    expect(target.repository.readyOriginRequestId).toBe("request-complete");
+  });
+
   it("CHR3-WRK-08 ready duplicate delivery is a no-op", async () => {
     const target = harness();
     target.repository.status = "ready";
@@ -282,6 +295,18 @@ describe("CHR3 replacement Worker processing", () => {
     );
     await target.service.process(target.input);
     expect(target.repository.status).toBe("failed");
+  });
+
+  it("propagates the durable origin to failed cleanup scheduling", async () => {
+    const target = harness();
+    vi.mocked(target.extractor.inspect).mockRejectedValue(
+      new Error("invalid-zip-path"),
+    );
+    await target.service.process({
+      ...target.input,
+      originRequestId: "request-complete",
+    });
+    expect(target.repository.failedOriginRequestId).toBe("request-complete");
   });
 
   it("CHR3-WRK-11 transient storage failure remains processing and retryable", async () => {

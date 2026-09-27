@@ -52,6 +52,9 @@ export class StorageCleanupProcessor {
       replacementId: effect.replacementId,
       reason: effect.reason,
       attempt: effect.attempts,
+      ...(effect.originRequestId
+        ? { originRequestId: effect.originRequestId }
+        : {}),
     };
     try {
       if (!(await this.repository.isSafeToDelete(effect))) {

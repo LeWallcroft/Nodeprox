@@ -51,6 +51,10 @@ export interface ChapterReplacementProcessingRepositoryPort {
     etag?: string;
     storedAt: Date;
   }): Promise<boolean>;
-  markReady(replacementId: string): Promise<boolean>;
-  markFailed(replacementId: string, errorCode: string): Promise<boolean>;
+  markReady(replacementId: string, originRequestId?: string): Promise<boolean>;
+  markFailed(
+    replacementId: string,
+    errorCode: string,
+    originRequestId?: string,
+  ): Promise<boolean>;
 }

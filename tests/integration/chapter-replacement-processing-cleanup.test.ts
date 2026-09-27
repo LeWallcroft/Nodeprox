@@ -86,6 +86,23 @@ describe("CHR3 durable storage cleanup", () => {
     ).toHaveLength(3);
   });
 
+  it("persists the origin on source and candidate cleanup after failure", async () => {
+    const candidate = await target(2, true);
+    await processing.markFailed(
+      candidate.replacementId,
+      "invalid-zip-layout",
+      "request-complete",
+    );
+    const rows = await database.db
+      .select()
+      .from(storageCleanupOutbox)
+      .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
+    expect(rows).toHaveLength(3);
+    expect(
+      rows.every((row) => row.originRequestId === "request-complete"),
+    ).toBe(true);
+  });
+
   it("CHR3-CLN-03 ready transition atomically schedules source ZIP cleanup", async () => {
     const candidate = await target(2, true);
     expect(await processing.markReady(candidate.replacementId)).toBe(true);
@@ -95,6 +112,19 @@ describe("CHR3 durable storage cleanup", () => {
       .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
     expect(rows).toHaveLength(1);
     expect(rows[0]?.reason).toBe("replacement_source_zip");
+  });
+
+  it("persists the origin on successful source cleanup", async () => {
+    const candidate = await target(1, true);
+    expect(
+      await processing.markReady(candidate.replacementId, "request-complete"),
+    ).toBe(true);
+    const rows = await database.db
+      .select()
+      .from(storageCleanupOutbox)
+      .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.originRequestId).toBe("request-complete");
   });
 
   it("CHR3-CLN-04 ready candidate media is protected", async () => {

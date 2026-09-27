@@ -40,7 +40,8 @@ export class DrizzleStorageCleanupRepository
                 cleanup.replacement_id as "replacementId",
                 cleanup.storage_key as "storageKey",
                 cleanup.reason,
-                cleanup.attempts
+                cleanup.attempts,
+                cleanup.origin_request_id as "originRequestId"
     `);
     return [...rows].map((row) => ({
       id: String(row.id),
@@ -48,6 +49,9 @@ export class DrizzleStorageCleanupRepository
       storageKey: String(row.storageKey),
       reason: row.reason as StorageCleanupEffect["reason"],
       attempts: Number(row.attempts),
+      ...(row.originRequestId
+        ? { originRequestId: String(row.originRequestId) }
+        : {}),
     }));
   }
 

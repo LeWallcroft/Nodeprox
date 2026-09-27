@@ -13,13 +13,16 @@ const initialOutbox: ProcessingOutboxPort = {
   markEnqueued: vi.fn(),
 };
 
-function harness(queueFails = false) {
+function harness(queueFails = false, originRequestId?: string) {
   const replacements: ChapterReplacementProcessingOutboxPort = {
-    findPending: vi
-      .fn()
-      .mockResolvedValue([
-        { id: "intent", replacementId: "replacement", chapterId: "chapter" },
-      ]),
+    findPending: vi.fn().mockResolvedValue([
+      {
+        id: "intent",
+        replacementId: "replacement",
+        chapterId: "chapter",
+        ...(originRequestId ? { originRequestId } : {}),
+      },
+    ]),
     markEnqueued: vi.fn(),
   };
   const queue: ProcessingQueuePort & ChapterReplacementQueuePort = {
@@ -53,6 +56,19 @@ describe("CHR3 replacement processing outbox", () => {
     const target = harness(true);
     await target.dispatcher.dispatchOnce();
     expect(target.replacements.markEnqueued).not.toHaveBeenCalled();
+  });
+
+  it("preserves the HTTP origin without changing replacement job identity", async () => {
+    const target = harness(false, "request-complete");
+    await target.dispatcher.dispatchOnce();
+    expect(target.queue.enqueueChapterReplacement).toHaveBeenCalledWith({
+      replacementId: "replacement",
+      chapterId: "chapter",
+      originRequestId: "request-complete",
+    });
+    expect(replacementProcessingJobId({ replacementId: "replacement" })).toBe(
+      "chapter-replacement-replacement",
+    );
   });
 
   it("derives deterministic BullMQ job identity from replacementId", () => {

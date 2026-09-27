@@ -5,6 +5,7 @@ export type ChapterReplacementProcessingIntent = {
   id: string;
   replacementId: string;
   chapterId: string;
+  originRequestId?: string;
 };
 
 export interface ChapterReplacementUploadRepository {
@@ -29,6 +30,7 @@ export interface ChapterReplacementUploadRepository {
     replacementId: string;
     chapterId: string;
     etag?: string;
+    originRequestId?: string;
   }): Promise<ChapterReplacementOperation | null>;
 }
 

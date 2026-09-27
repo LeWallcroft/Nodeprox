@@ -289,17 +289,19 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
       headers: { cookie },
     });
     expect(second.statusCode).toBe(202);
-    expect(
-      await database.db
-        .select()
-        .from(chapterReplacementProcessingOutbox)
-        .where(
-          eq(
-            chapterReplacementProcessingOutbox.replacementId,
-            first.replacementId,
-          ),
+    const intents = await database.db
+      .select()
+      .from(chapterReplacementProcessingOutbox)
+      .where(
+        eq(
+          chapterReplacementProcessingOutbox.replacementId,
+          first.replacementId,
         ),
-    ).toHaveLength(1);
+      );
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.originRequestId).toBe(
+      first.completed.headers["x-request-id"],
+    );
   });
 
   it("CHR4-HTTP-07/08 status returns safe lifecycle without storage internals", async () => {
