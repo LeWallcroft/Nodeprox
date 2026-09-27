@@ -9,17 +9,17 @@ export {
 } from "./authorization.js";
 export { bootstrapMetadata } from "./bootstrap.js";
 export {
-  chapterProcessingAttempts,
-  chapterProcessingAttemptStatusEnum,
-} from "./chapter-processing-attempts.js";
-export {
-  chapterProcessingObjects,
-  chapterProcessingObjectStatusEnum,
-} from "./chapter-processing-objects.js";
-export {
   chapterDeletionOutbox,
   chapterDeletionOutboxStatusEnum,
 } from "./chapter-deletion-outbox.js";
+export {
+  chapterProcessingAttemptStatusEnum,
+  chapterProcessingAttempts,
+} from "./chapter-processing-attempts.js";
+export {
+  chapterProcessingObjectStatusEnum,
+  chapterProcessingObjects,
+} from "./chapter-processing-objects.js";
 export { chapterReplacementItems } from "./chapter-replacement-items.js";
 export {
   chapterReplacementOperationStatusEnum,
@@ -65,4 +65,11 @@ export {
   storageCleanupReasonEnum,
   storageCleanupStatusEnum,
 } from "./storage-cleanup-outbox.js";
+export {
+  cloudflareProvisioningStatusEnum,
+  storageProfileProviderEnum,
+  storageProfileSourceEnum,
+  storageProfileStatusEnum,
+  storageProfiles,
+} from "./storage-profiles.js";
 export { uploads } from "./uploads.js";
