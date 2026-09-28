@@ -16,6 +16,7 @@ import {
 import { MediaStorageKey } from "../../../../images/domain/media-storage-key.js";
 import { MediaVersion } from "../../../../images/domain/media-version.js";
 import { PublicMediaUrl } from "../../../../images/domain/public-media-url.js";
+import type { PublicMediaOriginResolver } from "../../../../storage-profiles/application/ports/public-media-origin.port.js";
 import { acquireChapterMediaLock } from "../../../../images/infrastructure/persistence/drizzle/chapter-media-lock.js";
 import type {
   ActivateChapterReplacementOutcome,
@@ -28,7 +29,7 @@ export class DrizzleChapterMediaReplacementRepository
 {
   constructor(
     private readonly db: NodeProxDatabase,
-    private readonly publicMediaOrigin: string,
+    private readonly publicMediaOrigin: string | PublicMediaOriginResolver,
   ) {}
 
   async activate(
@@ -238,14 +239,27 @@ export class DrizzleChapterMediaReplacementRepository
         if (!retired) throw new Error("chapter-media-retirement-conflict");
       }
 
-      const effects = activeImages.flatMap((image) => {
-        const oldPublicUrl = PublicMediaUrl.fromImage(this.publicMediaOrigin, {
+      const effects = [] as {
+        replacementOperationId: string;
+        storageProfileId: string;
+        effectType: "cdn_purge" | "storage_delete";
+        imageId: string;
+        target: string;
+      }[];
+      for (const image of activeImages) {
+        const origin =
+          typeof this.publicMediaOrigin === "string"
+            ? this.publicMediaOrigin
+            : await this.publicMediaOrigin.originFor(
+                image.currentStorageProfileId,
+              );
+        const oldPublicUrl = PublicMediaUrl.fromImage(origin, {
           seriesPublicSlug: chapter.seriesSlug,
           chapterPublicKey: chapter.publicKey,
           filename: image.currentPhysicalFilename,
           contentType: image.currentContentType,
         }).toString();
-        return [
+        effects.push(
           {
             replacementOperationId: operation.id,
             storageProfileId: image.currentStorageProfileId,
@@ -260,8 +274,8 @@ export class DrizzleChapterMediaReplacementRepository
             imageId: image.id,
             target: image.currentStorageKey,
           },
-        ];
-      });
+        );
+      }
       if (effects.length > 0)
         await tx.insert(mediaEffectOutbox).values(effects);
 

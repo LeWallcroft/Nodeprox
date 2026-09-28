@@ -22,6 +22,14 @@ export interface StorageExecutionResolver {
   uploadTransferFor(profileId: string): Promise<UploadTransferPort>;
 }
 
+/** Explicit control-plane access for probes against managed drafts. */
+export interface ManagedStorageAdministrationResolver {
+  administrationStorageFor(profileId: string): Promise<StoragePort>;
+  administrationUploadTransferFor(
+    profileId: string,
+  ): Promise<UploadTransferPort>;
+}
+
 export interface ActiveStorageProfilePort {
   getActiveStorageProfileId(): Promise<string>;
 }
@@ -78,7 +86,9 @@ export class AesGcmSecretCipher implements SecretCipherPort {
   }
 }
 
-export class StorageClientRegistry implements StorageExecutionResolver {
+export class StorageClientRegistry
+  implements StorageExecutionResolver, ManagedStorageAdministrationResolver
+{
   private readonly clients = new Map<
     string,
     { storage: StoragePort; transfer: UploadTransferPort | null }
@@ -96,21 +106,36 @@ export class StorageClientRegistry implements StorageExecutionResolver {
   ) {}
 
   async storageFor(profileId: string): Promise<StoragePort> {
-    return (await this.resolve(profileId)).storage;
+    return (await this.resolve(profileId, false)).storage;
   }
 
   async uploadTransferFor(profileId: string): Promise<UploadTransferPort> {
-    const transfer = (await this.resolve(profileId)).transfer;
+    const transfer = (await this.resolve(profileId, false)).transfer;
     if (!transfer) throw new Error("storage-profile-transfer-unavailable");
     return transfer;
   }
 
-  private async resolve(profileId: string) {
+  async administrationStorageFor(profileId: string): Promise<StoragePort> {
+    return (await this.resolve(profileId, true)).storage;
+  }
+
+  async administrationUploadTransferFor(
+    profileId: string,
+  ): Promise<UploadTransferPort> {
+    const transfer = (await this.resolve(profileId, true)).transfer;
+    if (!transfer) throw new Error("storage-profile-transfer-unavailable");
+    return transfer;
+  }
+
+  private async resolve(profileId: string, allowDraft: boolean) {
     const profile = await this.loadProfile(profileId);
     if (!profile) throw new Error("storage-profile-not-found");
     if (profile.id !== profileId)
       throw new Error("storage-profile-runtime-config-invalid");
-    if (profile.provider !== "b2" || profile.status === "draft")
+    if (
+      profile.provider !== "b2" ||
+      (profile.status === "draft" && !allowDraft)
+    )
       throw new Error("storage-profile-runtime-config-invalid");
     const cacheKey = [profile.id, profile.credentialVersion].join(":");
     const cached = this.clients.get(cacheKey);

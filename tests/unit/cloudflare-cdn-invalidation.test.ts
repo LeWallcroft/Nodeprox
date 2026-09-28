@@ -3,7 +3,34 @@ import { CloudflareCdnInvalidationAdapter } from "../../apps/worker/src/media-ef
 import { CdnInvalidationError } from "../../apps/worker/src/media-effects/application/ports.js";
 
 describe("CloudflareCdnInvalidationAdapter", () => {
-  it("purges only the exact requested URL", async () => {
+  it("requires a persisted managed hostname and deduplicates prefixes", async () => {
+    const fetcher = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(null, { status: 200 }),
+    );
+    const adapter = new CloudflareCdnInvalidationAdapter(
+      "zone-id",
+      "token",
+      fetcher,
+      async (hostname) => hostname === "manga.nodeprox.org",
+    );
+    await adapter.purgeUrls([
+      "https://manga.nodeprox.org/a.webp?x=1",
+      "https://manga.nodeprox.org/a.webp?x=2",
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      prefixes: ["manga.nodeprox.org/a.webp"],
+    });
+    await expect(
+      adapter.purgeUrls(["https://foreign.nodeprox.org/a.webp"]),
+    ).rejects.toMatchObject({ code: "cdn-invalid-url" });
+    await expect(adapter.purgeUrls(["not-a-url"])).rejects.toMatchObject({
+      code: "cdn-invalid-url",
+      retryable: false,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("purges the exact media host/path prefix without query", async () => {
     const fetcher = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>
         new Response(null, { status: 200 }),
@@ -12,11 +39,11 @@ describe("CloudflareCdnInvalidationAdapter", () => {
       "zone-id",
       "secret-token",
       fetcher,
-    ).purgeUrls(["https://media.example.test/raven/1/00.jpg"]);
+    ).purgeUrls(["https://media.nodeprox.org/raven/1/00.jpg?x=1"]);
 
     const [, init] = fetcher.mock.calls[0] ?? [];
     expect(JSON.parse(String(init?.body))).toEqual({
-      files: ["https://media.example.test/raven/1/00.jpg"],
+      prefixes: ["media.nodeprox.org/raven/1/00.jpg"],
     });
     expect(String(init?.body)).not.toContain("purge_everything");
   });
@@ -28,7 +55,7 @@ describe("CloudflareCdnInvalidationAdapter", () => {
       vi.fn(async () => new Response(null, { status: 429 })),
     );
     await expect(
-      adapter.purgeUrls(["https://media.example.test/raven/1/00.jpg"]),
+      adapter.purgeUrls(["https://media.nodeprox.org/raven/1/00.jpg"]),
     ).rejects.toMatchObject({
       code: "cdn-rate-limited",
       retryable: true,
@@ -44,7 +71,7 @@ describe("CloudflareCdnInvalidationAdapter", () => {
     );
     let failure: unknown;
     try {
-      await adapter.purgeUrls(["https://media.example.test/raven/1/00.jpg"]);
+      await adapter.purgeUrls(["https://media.nodeprox.org/raven/1/00.jpg"]);
     } catch (error) {
       failure = error;
     }

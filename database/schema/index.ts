@@ -72,4 +72,10 @@ export {
   storageProfileStatusEnum,
   storageProfiles,
 } from "./storage-profiles.js";
+export {
+  storageProfileChecks,
+  storageProfileCheckTypeEnum,
+  storageProfileCheckStatusEnum,
+} from "./storage-profile-checks.js";
+export { storageProfileProbeSessions } from "./storage-profile-probe-sessions.js";
 export { uploads } from "./uploads.js";

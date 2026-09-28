@@ -8,11 +8,14 @@ import {
 } from "@nodeprox/config";
 import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
 import { StorageClientRegistry } from "@nodeprox/storage/profile-execution";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import pino from "pino";
 import { createDatabase } from "../../../../database/client.js";
 import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
-import { systemConfig } from "../../../../database/schema/index.js";
+import {
+  storageProfiles,
+  systemConfig,
+} from "../../../../database/schema/index.js";
 import { ChapterDeletionService } from "../deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "../deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import { MediaEffectProcessor } from "../media-effects/application/media-effect.processor.js";
@@ -43,6 +46,7 @@ export function createWorkerDependencies() {
         "REDIS_URL",
         "presignedUrl",
         "CLOUDFLARE_PURGE_API_TOKEN",
+        "B2_APPLICATION_KEY",
         "STORAGE_PROFILE_MASTER_KEY",
         "encryptedApplicationKey",
         "b2ApplicationKey",
@@ -74,6 +78,21 @@ export function createWorkerDependencies() {
         new CloudflareCdnInvalidationAdapter(
           mediaEffectsConfig.CLOUDFLARE_ZONE_ID,
           mediaEffectsConfig.CLOUDFLARE_PURGE_API_TOKEN,
+          fetch,
+          async (hostname) => {
+            const [profile] = await database.db
+              .select({ id: storageProfiles.id })
+              .from(storageProfiles)
+              .where(
+                and(
+                  eq(storageProfiles.publicHostname, hostname),
+                  eq(storageProfiles.source, "managed"),
+                  eq(storageProfiles.cloudflareProvisioningStatus, "verified"),
+                ),
+              )
+              .limit(1);
+            return Boolean(profile);
+          },
         ),
         storageExecution,
         logger,

@@ -5,8 +5,9 @@ import { loadStorageProfileConfig } from "@nodeprox/config";
 describe("storage profile secret configuration", () => {
   it("permits read-only profile management when the master key is absent", () => {
     expect(loadStorageProfileConfig({})).toEqual({
-      STORAGE_PROFILE_MASTER_KEY: undefined,
       STORAGE_RESERVED_HOSTNAME_LABELS: "",
+      STORAGE_BROWSER_UPLOAD_ORIGINS: "http://localhost:3000",
+      STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED: false,
     });
   });
 

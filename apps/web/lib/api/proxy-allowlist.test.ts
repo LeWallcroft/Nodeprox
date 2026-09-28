@@ -60,4 +60,34 @@ describe("same-origin proxy allowlist", () => {
     expect(route).toContain("isAllowedProxyRoute");
     expect(route).not.toContain("function isAllowedRoute");
   });
+
+  it("permits only the explicit StorageProfile administration routes and methods", () => {
+    const allowed: readonly [string, readonly string[]][] = [
+      ["admin/storage/profiles", ["GET", "POST"]],
+      ["admin/storage/profiles/id", ["GET", "PATCH"]],
+      ["admin/storage/profiles/id/readiness", ["GET"]],
+      ["admin/storage/profiles/id/credentials", ["POST"]],
+      ["admin/storage/profiles/id/b2/provision", ["POST"]],
+      ["admin/storage/profiles/id/b2/recheck", ["POST"]],
+      ["admin/storage/profiles/id/browser-probe/start", ["POST"]],
+      ["admin/storage/profiles/id/browser-probe/complete", ["POST"]],
+      ["admin/storage/profiles/id/cloudflare/status", ["GET"]],
+      ["admin/storage/profiles/id/cloudflare/provision", ["POST"]],
+      ["admin/storage/profiles/id/cloudflare/recheck", ["POST"]],
+      ["admin/storage/profiles/id/activate", ["POST"]],
+    ];
+    for (const [path, methods] of allowed) {
+      for (const method of methods)
+        expect(isAllowedProxyRoute(path, method)).toBe(true);
+      expect(isAllowedProxyRoute(path, "DELETE")).toBe(false);
+    }
+    for (const path of [
+      "admin/storage/profiles/id/delete",
+      "admin/storage/profiles/id/cloudflare/purge",
+      "admin/storage/profiles/id/b2/cors",
+      "admin/storage/profiles/id/readiness-extra",
+      "admin/storage/profilesXYZ",
+    ])
+      expect(isAllowedProxyRoute(path, "POST")).toBe(false);
+  });
 });

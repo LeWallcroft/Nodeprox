@@ -8,13 +8,14 @@ import {
 } from "../../../../../../../../database/schema/index.js";
 import type { ImageVersionResultRepository } from "../../../application/image-version-result.repository.js";
 import { PublicMediaUrl } from "../../../domain/public-media-url.js";
+import type { PublicMediaOriginResolver } from "../../../../storage-profiles/application/ports/public-media-origin.port.js";
 
 export class DrizzleImageVersionResultRepository
   implements ImageVersionResultRepository
 {
   constructor(
     private readonly db: NodeProxDatabase,
-    private readonly publicMediaOrigin: string,
+    private readonly publicMediaOrigin: string | PublicMediaOriginResolver,
   ) {}
 
   async findVersionResultById(imageVersionId: string) {
@@ -25,6 +26,7 @@ export class DrizzleImageVersionResultRepository
         version: imageVersions.version,
         filename: imageVersions.physicalFilename,
         storageKey: imageVersions.storageKey,
+        storageProfileId: imageVersions.storageProfileId,
         contentType: imageVersions.contentType,
         seriesSlug: series.slug,
         chapterPublicKey: chapters.publicKey,
@@ -42,12 +44,17 @@ export class DrizzleImageVersionResultRepository
       version: row.version,
       filename: row.filename,
       storageKey: row.storageKey,
-      publicUrl: PublicMediaUrl.fromImage(this.publicMediaOrigin, {
-        seriesPublicSlug: row.seriesSlug,
-        chapterPublicKey: row.chapterPublicKey,
-        filename: row.filename,
-        contentType: row.contentType,
-      }).toString(),
+      publicUrl: PublicMediaUrl.fromImage(
+        typeof this.publicMediaOrigin === "string"
+          ? this.publicMediaOrigin
+          : await this.publicMediaOrigin.originFor(row.storageProfileId),
+        {
+          seriesPublicSlug: row.seriesSlug,
+          chapterPublicKey: row.chapterPublicKey,
+          filename: row.filename,
+          contentType: row.contentType,
+        },
+      ).toString(),
     };
   }
 }
