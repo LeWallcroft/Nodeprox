@@ -38,6 +38,7 @@ export class DrizzlePublishedChapterRepository
         chapterId: images.chapterId,
         filename: imageVersions.physicalFilename,
         storageKey: imageVersions.storageKey,
+        storageProfileId: imageVersions.storageProfileId,
         extension: imageVersions.extension,
         contentType: imageVersions.contentType,
         sizeBytes: imageVersions.sizeBytes,

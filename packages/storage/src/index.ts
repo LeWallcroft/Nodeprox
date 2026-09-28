@@ -15,6 +15,7 @@ export {
   LEGACY_STORAGE_PROFILE_ID,
   StorageClientRegistry,
   type ActiveStorageProfilePort,
+  type ManagedStorageAdministrationResolver,
   type SecretCipherPort,
   type StorageExecutionResolver,
   type StorageRuntimeProfile,

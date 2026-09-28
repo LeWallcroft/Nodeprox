@@ -61,7 +61,7 @@ export function createApiRuntime(input: {
           new DrizzleChapterReplacementRepository(database),
           new DrizzleChapterMediaReplacementRepository(
             database,
-            config.PUBLIC_MEDIA_ORIGIN,
+            dependencies.publicMediaOriginResolver,
           ),
         ),
       ),
@@ -70,7 +70,7 @@ export function createApiRuntime(input: {
         storageExecution,
         new ActivateImageCandidateService(
           new DrizzleMediaReplacementRepository(database),
-          config.PUBLIC_MEDIA_ORIGIN,
+          dependencies.publicMediaOriginResolver,
         ),
       ),
     ]),

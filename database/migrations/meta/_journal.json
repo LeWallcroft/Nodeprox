@@ -281,6 +281,13 @@
       "when": 1790543025115,
       "tag": "0039_closed_obadiah_stane",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1790556349997,
+      "tag": "0040_third_hannibal_king",
+      "breakpoints": true
     }
   ]
 }

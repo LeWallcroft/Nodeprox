@@ -41,6 +41,29 @@ export const PROXY_ROUTE_RULES: readonly ProxyRouteRule[] = [
     methods: GET,
   },
   { pattern: "admin/settings", methods: ["GET", "PATCH"] },
+  { pattern: "admin/storage/profiles", methods: ["GET", "POST"] },
+  { pattern: /^admin\/storage\/profiles\/[^/]+$/, methods: ["GET", "PATCH"] },
+  { pattern: /^admin\/storage\/profiles\/[^/]+\/readiness$/, methods: GET },
+  { pattern: /^admin\/storage\/profiles\/[^/]+\/credentials$/, methods: POST },
+  {
+    pattern: /^admin\/storage\/profiles\/[^/]+\/b2\/(provision|recheck)$/,
+    methods: POST,
+  },
+  {
+    pattern: /^admin\/storage\/profiles\/[^/]+\/cloudflare\/status$/,
+    methods: GET,
+  },
+  {
+    pattern:
+      /^admin\/storage\/profiles\/[^/]+\/cloudflare\/(provision|recheck)$/,
+    methods: POST,
+  },
+  {
+    pattern:
+      /^admin\/storage\/profiles\/[^/]+\/browser-probe\/(start|complete)$/,
+    methods: POST,
+  },
+  { pattern: /^admin\/storage\/profiles\/[^/]+\/activate$/, methods: POST },
   { pattern: "admin/discord/authorized-roles", methods: ["GET", "PUT"] },
   { pattern: /^admin\/users\/[^/]+$/, methods: PATCH },
   { pattern: /^admin\/users\/[^/]+\/series-responsibilities$/, methods: PUT },

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { DrizzleChapterMediaReplacementRepository } from "../../apps/api/src/modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-media-replacement.repository.js";
+import { DrizzlePublicMediaOriginResolver } from "../../apps/api/src/modules/storage-profiles/infrastructure/persistence/drizzle/public-media-origin.resolver.js";
 import { DrizzleMediaEffectRepository } from "../../apps/worker/src/media-effects/infrastructure/persistence/drizzle/media-effect.repository.js";
 import { DrizzleStorageCleanupRepository } from "../../apps/worker/src/storage-cleanup/infrastructure/persistence/drizzle/storage-cleanup.repository.js";
 import { createDatabase } from "../../database/client.js";
@@ -50,6 +51,60 @@ async function activated(oldCount: number, newCount: number) {
 }
 
 describe("CHR2 canonical storage-delete safety", () => {
+  it("purges an old managed image using its persisted, even retired, hostname", async () => {
+    const profileId = randomUUID();
+    const hostname = `retired-${profileId.slice(0, 8)}.nodeprox.org`;
+    await database.db.insert(storageProfiles).values({
+      id: profileId,
+      provider: "b2",
+      source: "managed",
+      status: "retired",
+      name: "Retired origin fixture",
+      publicHostnameLabel: `retired-${profileId.slice(0, 8)}`,
+      publicHostname: hostname,
+    });
+    const chapter = await createReplacementChapter(database.db, 1);
+    const imageId = chapter.imageIds[0] as string;
+    const [current] = await database.db
+      .select({ versionId: images.currentVersionId })
+      .from(images)
+      .where(eq(images.id, imageId));
+    if (!current?.versionId) throw new Error("missing-current-version");
+    await database.db
+      .update(images)
+      .set({ storageProfileId: profileId })
+      .where(eq(images.id, imageId));
+    await database.db
+      .update(imageVersions)
+      .set({ storageProfileId: profileId })
+      .where(eq(imageVersions.id, current.versionId));
+    const replacement = await createReadyReplacement(database.db, chapter, 1);
+    const result = await new DrizzleChapterMediaReplacementRepository(
+      database.db,
+      new DrizzlePublicMediaOriginResolver(database.db, publicOrigin, true),
+    ).activate({
+      replacementId: replacement.replacementId,
+      chapterId: chapter.chapterId,
+      actorUserId: chapter.userId,
+    });
+    expect(result.outcome).toBe("completed");
+    const effects = await database.db
+      .select({
+        effectType: mediaEffectOutbox.effectType,
+        target: mediaEffectOutbox.target,
+        storageProfileId: mediaEffectOutbox.storageProfileId,
+      })
+      .from(mediaEffectOutbox)
+      .where(
+        eq(mediaEffectOutbox.replacementOperationId, replacement.replacementId),
+      );
+    expect(
+      effects.find((effect) => effect.effectType === "cdn_purge"),
+    ).toMatchObject({
+      storageProfileId: profileId,
+      target: expect.stringContaining(`https://${hostname}/`),
+    });
+  });
   it("preserves old A and new B physical lineage and judges B cleanup by the pair", async () => {
     const profileB = randomUUID();
     await database.db.insert(storageProfiles).values({

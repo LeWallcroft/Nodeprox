@@ -53,6 +53,10 @@ export class StorageProfileService {
     if (!decision.allowed) throw new StorageProfileForbiddenError();
   }
 
+  async checkManage(context: AuthorizationContext): Promise<void> {
+    await this.requireManage(context);
+  }
+
   async list(context: AuthorizationContext) {
     await this.requireManage(context);
     return {
@@ -155,7 +159,7 @@ export class StorageProfileResolver {
       profile?.id !== LEGACY_STORAGE_PROFILE_ID ||
       profile.provider !== "b2" ||
       profile.source !== "env" ||
-      profile.status !== "active" ||
+      (profile.status !== "active" && profile.status !== "retired") ||
       profile.publicHostnameLabel !== "media" ||
       profile.publicHostname !== LEGACY_PUBLIC_HOSTNAME ||
       profile.credentialVersion !== 0 ||

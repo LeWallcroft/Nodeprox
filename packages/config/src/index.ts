@@ -35,6 +35,8 @@ const configSchema = z.object({
   B2_APPLICATION_KEY: z.string().trim().min(1).optional(),
   CLOUDFLARE_ZONE_ID: z.string().trim().min(1).optional(),
   CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1).optional(),
+  CLOUDFLARE_PROVISIONING_API_TOKEN: z.string().trim().min(1).optional(),
+  CLOUDFLARE_CACHE_RULES_API_TOKEN: z.string().trim().min(1).optional(),
   DISCORD_APPLICATION_ID: z.string().trim().min(1).optional(),
   DISCORD_BOT_TOKEN: z.string().trim().min(1).optional(),
   DISCORD_GUILD_ID: z.string().trim().min(1).optional(),
@@ -68,6 +70,14 @@ const storageProfileConfigSchema = z.object({
       "STORAGE_PROFILE_MASTER_KEY must encode exactly 32 bytes",
     ),
   STORAGE_RESERVED_HOSTNAME_LABELS: z.string().default(""),
+  STORAGE_BROWSER_UPLOAD_ORIGINS: z.string().default("http://localhost:3000"),
+  STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  CLOUDFLARE_ZONE_ID: z.string().trim().min(1).optional(),
+  CLOUDFLARE_PROVISIONING_API_TOKEN: z.string().trim().min(1).optional(),
+  CLOUDFLARE_CACHE_RULES_API_TOKEN: z.string().trim().min(1).optional(),
 });
 const processingConfigSchema = z.object({
   REDIS_URL: z.url(),

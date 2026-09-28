@@ -19,6 +19,7 @@ const images = [
     chapterId: chapter.id,
     filename: "00.jpg",
     storageKey: "Media/raven/1/00.jpg",
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     extension: "jpg",
     contentType: "image/jpeg",
     sizeBytes: 30,
@@ -29,6 +30,7 @@ const images = [
     chapterId: chapter.id,
     filename: "02.png",
     storageKey: "Media/raven/1/02.png",
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     extension: "png",
     contentType: "image/png",
     sizeBytes: 20,
@@ -39,6 +41,7 @@ const images = [
     chapterId: chapter.id,
     filename: "01.jpg",
     storageKey: "Media/raven/1/01.jpg",
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     extension: "jpg",
     contentType: "image/jpeg",
     sizeBytes: 10,
@@ -57,6 +60,29 @@ function repository(
 }
 
 describe("GetPublishedChapter", () => {
+  it("resolves mixed historical media by each persisted profile, including retired profiles", async () => {
+    const managedId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const resolved: string[] = [];
+    const [legacyImage, managedImage] = images;
+    if (!legacyImage || !managedImage) throw new Error("missing-image-fixture");
+    const mixed = [
+      legacyImage,
+      { ...managedImage, storageProfileId: managedId },
+    ];
+    const result = await new GetPublishedChapter(repository(chapter, mixed), {
+      async originFor(profileId: string) {
+        resolved.push(profileId);
+        return profileId === managedId
+          ? "https://manga.nodeprox.org"
+          : "https://media.nodeprox.org";
+      },
+    }).execute(chapter.id);
+    expect(resolved).toEqual([legacyImage.storageProfileId, managedId]);
+    expect(result.images.map((image) => image.url)).toEqual([
+      "https://media.nodeprox.org/raven/1/00.jpg",
+      "https://manga.nodeprox.org/raven/1/02.png",
+    ]);
+  });
   it("publishes a ready chapter with sorted canonical image URLs", async () => {
     const result = await new GetPublishedChapter(
       repository(),

@@ -114,6 +114,7 @@ export function buildApp(
       authentication,
       authorization,
       services.storageProfileConfig,
+      services.storageProfileControl,
     );
     registerOverviewPlugin(app, database, authentication, authorization);
     const chapterPermissions = registerChapterPermissionPlugin(

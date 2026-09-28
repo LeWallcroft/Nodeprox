@@ -113,6 +113,13 @@ export class DrizzleStorageProfileRepository
               eq(storageProfiles.id, input.id),
               eq(storageProfiles.source, "managed"),
               eq(storageProfiles.status, "draft"),
+              ...(Object.keys(input).some(
+                (key) => !["id", "actorId", "requestId", "name"].includes(key),
+              )
+                ? [
+                    sql`${storageProfiles.cloudflareProvisioningStatus} <> 'verified'`,
+                  ]
+                : []),
             ),
           )
           .returning();

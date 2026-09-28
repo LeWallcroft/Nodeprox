@@ -45,12 +45,15 @@ export const storageProfiles = pgTable(
     b2Region: text("b2_region"),
     b2Bucket: text("b2_bucket"),
     b2KeyId: text("b2_key_id"),
+    b2BucketId: text("b2_bucket_id"),
+    b2DownloadHost: text("b2_download_host"),
     encryptedApplicationKey: text("encrypted_application_key"),
     credentialVersion: integer("credential_version").notNull().default(0),
     dnsRecordId: text("dns_record_id"),
     transformRulesetId: text("transform_ruleset_id"),
     transformRuleId: text("transform_rule_id"),
     cacheRulesetId: text("cache_ruleset_id"),
+    cacheRuleId: text("cache_rule_id"),
     cloudflareProvisioningVersion: integer("cloudflare_provisioning_version")
       .notNull()
       .default(0),
@@ -60,6 +63,16 @@ export const storageProfiles = pgTable(
       .notNull()
       .default("pending"),
     cloudflareLastErrorCode: text("cloudflare_last_error_code"),
+    cloudflareProvisioningStartedAt: timestamp(
+      "cloudflare_provisioning_started_at",
+      { withTimezone: true },
+    ),
+    cloudflareVerifiedAt: timestamp("cloudflare_verified_at", {
+      withTimezone: true,
+    }),
+    readyAt: timestamp("ready_at", { withTimezone: true }),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -74,6 +87,9 @@ export const storageProfiles = pgTable(
     uniqueIndex("storage_profiles_hostname_label_unique").on(
       table.publicHostnameLabel,
     ),
+    uniqueIndex("storage_profiles_single_active")
+      .on(table.status)
+      .where(sql`${table.status} = 'active'`),
     check(
       "storage_profiles_legacy_secret_absent",
       sql`${table.source} <> 'env' or (${table.encryptedApplicationKey} is null and ${table.b2KeyId} is null and ${table.b2Bucket} is null and ${table.b2Endpoint} is null and ${table.b2Region} is null)`,
@@ -92,7 +108,7 @@ export const storageProfiles = pgTable(
     ),
     check(
       "storage_profiles_env_active",
-      sql`${table.source} <> 'env' or ${table.status} = 'active'`,
+      sql`${table.source} <> 'env' or ${table.status} in ('active', 'retired')`,
     ),
   ],
 );

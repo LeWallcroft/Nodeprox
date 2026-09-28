@@ -20,6 +20,7 @@ export type PublishedImageRecord = {
   chapterId: string;
   filename: string;
   storageKey: string;
+  storageProfileId: string;
   extension: string;
   contentType: string;
   sizeBytes: number;

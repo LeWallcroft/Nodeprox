@@ -10,16 +10,36 @@ export class CloudflareCdnInvalidationAdapter implements CdnInvalidationPort {
     private readonly zoneId: string,
     private readonly token: string,
     private readonly fetcher: FetchPort = fetch,
+    private readonly isManagedHostname: (
+      hostname: string,
+    ) => Promise<boolean> = async () => false,
   ) {}
 
   async purgeUrls(urls: readonly string[]): Promise<void> {
     if (urls.length === 0) return;
-    const files = urls.map((value) => {
-      const url = new URL(value);
+    const prefixes: string[] = [];
+    for (const value of urls) {
+      let url: URL;
+      try {
+        url = new URL(value);
+      } catch {
+        throw new CdnInvalidationError("cdn-invalid-url", false);
+      }
       if (url.protocol !== "https:" && url.protocol !== "http:")
         throw new CdnInvalidationError("cdn-invalid-url", false);
-      return url.toString();
-    });
+      if (
+        url.username ||
+        url.password ||
+        url.port ||
+        (url.hostname !== "media.nodeprox.org" &&
+          !(
+            url.hostname.endsWith(".nodeprox.org") &&
+            (await this.isManagedHostname(url.hostname))
+          ))
+      )
+        throw new CdnInvalidationError("cdn-invalid-url", false);
+      prefixes.push(`${url.hostname}${url.pathname}`);
+    }
     let response: Response;
     try {
       response = await this.fetcher(
@@ -30,7 +50,7 @@ export class CloudflareCdnInvalidationAdapter implements CdnInvalidationPort {
             authorization: `Bearer ${this.token}`,
             "content-type": "application/json",
           },
-          body: JSON.stringify({ files }),
+          body: JSON.stringify({ prefixes: [...new Set(prefixes)] }),
           signal: AbortSignal.timeout(10_000),
         },
       );

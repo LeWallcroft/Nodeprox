@@ -1,6 +1,7 @@
 import { PublicMediaUrl } from "../../../images/domain/public-media-url.js";
 import type { PublishedChapterRepositoryPort } from "../ports/published-chapter.repository.js";
 import type { PublicChapterDto } from "../../domain/publication.types.js";
+import type { PublicMediaOriginResolver } from "../../../storage-profiles/application/ports/public-media-origin.port.js";
 
 export class PublishedChapterNotFoundError extends Error {
   constructor() {
@@ -19,7 +20,7 @@ export class PublishedChapterIntegrityError extends Error {
 export class GetPublishedChapter {
   constructor(
     private readonly repository: PublishedChapterRepositoryPort,
-    private readonly publicMediaOrigin: string,
+    private readonly publicMediaOrigin: PublicMediaOriginResolver | string,
   ) {}
 
   async execute(chapterId: string): Promise<PublicChapterDto> {
@@ -30,41 +31,47 @@ export class GetPublishedChapter {
     if (images.length === 0) throw new PublishedChapterIntegrityError();
 
     const sortOrders = new Set<number>();
-    const publicImages = images.map((image) => {
-      if (
-        image.chapterId !== chapter.id ||
-        image.filename.trim().length === 0 ||
-        image.sizeBytes <= 0 ||
-        !Number.isInteger(image.sizeBytes) ||
-        !Number.isInteger(image.sortOrder) ||
-        image.sortOrder < 0 ||
-        sortOrders.has(image.sortOrder)
-      )
-        throw new PublishedChapterIntegrityError();
-      sortOrders.add(image.sortOrder);
+    const publicImages = await Promise.all(
+      images.map(async (image) => {
+        if (
+          image.chapterId !== chapter.id ||
+          image.filename.trim().length === 0 ||
+          image.sizeBytes <= 0 ||
+          !Number.isInteger(image.sizeBytes) ||
+          !Number.isInteger(image.sortOrder) ||
+          image.sortOrder < 0 ||
+          sortOrders.has(image.sortOrder)
+        )
+          throw new PublishedChapterIntegrityError();
+        sortOrders.add(image.sortOrder);
 
-      let url: string;
-      try {
-        url = PublicMediaUrl.fromImage(this.publicMediaOrigin, {
-          seriesPublicSlug: chapter.seriesPublicSlug,
-          chapterPublicKey: chapter.chapterPublicKey,
+        let url: string;
+        try {
+          const origin =
+            typeof this.publicMediaOrigin === "string"
+              ? this.publicMediaOrigin
+              : await this.publicMediaOrigin.originFor(image.storageProfileId);
+          url = PublicMediaUrl.fromImage(origin, {
+            seriesPublicSlug: chapter.seriesPublicSlug,
+            chapterPublicKey: chapter.chapterPublicKey,
+            filename: image.filename,
+            contentType: image.contentType,
+          }).toString();
+        } catch {
+          throw new PublishedChapterIntegrityError();
+        }
+
+        return {
+          id: image.id,
           filename: image.filename,
+          extension: image.extension,
           contentType: image.contentType,
-        }).toString();
-      } catch {
-        throw new PublishedChapterIntegrityError();
-      }
-
-      return {
-        id: image.id,
-        filename: image.filename,
-        extension: image.extension,
-        contentType: image.contentType,
-        sizeBytes: image.sizeBytes,
-        sortOrder: image.sortOrder,
-        url,
-      };
-    });
+          sizeBytes: image.sizeBytes,
+          sortOrder: image.sortOrder,
+          url,
+        };
+      }),
+    );
 
     publicImages.sort((left, right) => left.sortOrder - right.sortOrder);
     return {

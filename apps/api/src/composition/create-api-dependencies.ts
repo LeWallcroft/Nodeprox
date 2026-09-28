@@ -13,9 +13,14 @@ import {
   StorageClientRegistry,
   type ActiveStorageProfilePort,
   type StorageExecutionResolver,
+  type ManagedStorageAdministrationResolver,
   type UploadTransferPort,
 } from "@nodeprox/storage";
 import type { FastifyBaseLogger } from "fastify";
+import {
+  createStorageProfileControl,
+  type StorageProfileProviderOverrides,
+} from "./create-storage-profile-control.js";
 import {
   createDatabase,
   type NodeProxDatabase,
@@ -53,6 +58,7 @@ import { DrizzleMediaReplacementRepository } from "../modules/images/infrastruct
 import { DrizzleNotificationRepository } from "../modules/notifications/infrastructure/persistence/drizzle-notification.repository.js";
 import { GetPublishedChapter } from "../modules/publication/application/services/get-published-chapter.js";
 import { DrizzlePublishedChapterRepository } from "../modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
+import { DrizzlePublicMediaOriginResolver } from "../modules/storage-profiles/infrastructure/persistence/drizzle/public-media-origin.resolver.js";
 import { ListUploadOperationsService } from "../modules/uploads/application/services/list-upload-operations.service.js";
 import { DrizzleUploadOperationReadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload-operation-read.repository.js";
 import { UnavailableUploadTransfer } from "../modules/uploads/infrastructure/storage/unavailable-upload-transfer.js";
@@ -68,6 +74,8 @@ export interface AppDependencies {
   storage?: NodeProxStorageConfig;
   uploadTransfer?: UploadTransferPort;
   storageExecution?: StorageExecutionResolver;
+  storageAdministration?: ManagedStorageAdministrationResolver;
+  storageProfileProviders?: StorageProfileProviderOverrides;
   activeStorageProfile?: ActiveStorageProfilePort;
   publicMediaOrigin?: string;
   operationAuditWriter?: OperationAuditWriter;
@@ -121,6 +129,22 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
           storageProfileConfig.STORAGE_PROFILE_MASTER_KEY,
         )
       : undefined);
+  const storageAdministration =
+    input.storageAdministration ??
+    (storageExecution instanceof StorageClientRegistry
+      ? storageExecution
+      : undefined);
+  const storageProfileControl =
+    database && storageAdministration
+      ? createStorageProfileControl({
+          database,
+          config: storageProfileConfig,
+          administration: storageAdministration,
+          ...(input.storageProfileProviders
+            ? { providers: input.storageProfileProviders }
+            : {}),
+        })
+      : undefined;
   const requireStorageRuntime = () => {
     if (!storageExecution || !activeStorageProfile)
       throw new Error("api-storage-profile-runtime-required");
@@ -128,6 +152,13 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
   };
   const publicMediaOrigin =
     input.publicMediaOrigin ?? DEFAULT_PUBLIC_MEDIA_ORIGIN;
+  const publicMediaOriginResolver = database
+    ? new DrizzlePublicMediaOriginResolver(
+        database,
+        publicMediaOrigin,
+        environment.NODE_ENV === "production",
+      )
+    : publicMediaOrigin;
   const seriesChannelGateway =
     input.seriesChannelGateway ??
     (input.discord?.botInternalUrl && input.discord.internalToken
@@ -152,12 +183,15 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
     storageProfileConfig,
     activeStorageProfile,
     storageExecution,
+    storageAdministration,
+    storageProfileControl,
     connection,
     secureCookie: input.secureCookie ?? false,
     storageConfig,
     uploadTransfer,
     imageStorage,
     publicMediaOrigin,
+    publicMediaOriginResolver,
     seriesChannelGateway,
     discord: input.discord,
     email,
@@ -240,7 +274,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
         operations,
         new DrizzleChapterMediaReplacementRepository(
           database,
-          publicMediaOrigin,
+          publicMediaOriginResolver,
         ),
         chapterPermissions,
       );
@@ -302,7 +336,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
       if (!database) throw new Error("api-database-required");
       return new GetPublishedChapter(
         new DrizzlePublishedChapterRepository(database),
-        publicMediaOrigin,
+        publicMediaOriginResolver,
       );
     },
   };
