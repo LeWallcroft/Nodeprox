@@ -14,6 +14,7 @@ const operation = (
   chapterId: "chapter-1",
   requestedByUserId: "user-1",
   candidateZipStorageKey: "private/source.zip",
+  storageProfileId: "00000000-0000-4000-8000-000000000001",
   originalFilename: "chapter.zip",
   contentType: "application/zip",
   sizeBytes: 10,

@@ -1,4 +1,4 @@
-export const LEGACY_STORAGE_PROFILE_ID = "00000000-0000-4000-8000-000000000001";
+export { LEGACY_STORAGE_PROFILE_ID } from "@nodeprox/storage/profile-execution";
 export const LEGACY_PUBLIC_HOSTNAME = "media.nodeprox.org";
 export const NODEPROX_RESERVED_HOSTNAME_LABELS = [
   "www",

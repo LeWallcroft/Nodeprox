@@ -32,6 +32,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           chapterId: chapterReplacementOperations.chapterId,
           requestedByUserId: chapterReplacementOperations.requestedByUserId,
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
+          storageProfileId: chapterReplacementOperations.storageProfileId,
           status: chapterReplacementOperations.status,
           seriesSlug: series.slug,
           chapterPublicKey: chapters.publicKey,
@@ -106,6 +107,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           chapterId: operation.chapterId,
           requestedByUserId: operation.requestedByUserId,
           sourceStorageKey: operation.sourceStorageKey,
+          storageProfileId: operation.storageProfileId,
           seriesSlug: operation.seriesSlug,
           chapterPublicKey: operation.chapterPublicKey,
           status: "processing" as const,
@@ -123,13 +125,22 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
   ): Promise<readonly ChapterReplacementManifestItem[]> {
     return this.db.transaction(async (tx) => {
       const [operation] = await tx
-        .select({ status: chapterReplacementOperations.status })
+        .select({
+          status: chapterReplacementOperations.status,
+          storageProfileId: chapterReplacementOperations.storageProfileId,
+        })
         .from(chapterReplacementOperations)
         .where(eq(chapterReplacementOperations.id, replacementId))
         .limit(1)
         .for("update");
       if (operation?.status !== "processing")
         throw new Error("chapter-replacement-processing-state-conflict");
+      if (
+        plan.some(
+          (item) => item.storageProfileId !== operation.storageProfileId,
+        )
+      )
+        throw new Error("chapter-replacement-profile-mismatch");
       let rows = await tx
         .select()
         .from(chapterReplacementItems)
@@ -204,6 +215,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           requestedByUserId: chapterReplacementOperations.requestedByUserId,
           chapterId: chapterReplacementOperations.chapterId,
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
+          storageProfileId: chapterReplacementOperations.storageProfileId,
         })
         .from(chapterReplacementOperations)
         .where(eq(chapterReplacementOperations.id, replacementId))
@@ -247,6 +259,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .insert(storageCleanupOutbox)
         .values({
           replacementId,
+          storageProfileId: operation.storageProfileId,
           storageKey: operation.sourceStorageKey,
           reason: "replacement_source_zip",
           ...(originRequestId ? { originRequestId } : {}),
@@ -269,6 +282,7 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           requestedByUserId: chapterReplacementOperations.requestedByUserId,
           chapterId: chapterReplacementOperations.chapterId,
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
+          storageProfileId: chapterReplacementOperations.storageProfileId,
         })
         .from(chapterReplacementOperations)
         .where(eq(chapterReplacementOperations.id, replacementId))
@@ -278,7 +292,10 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
       if (operation.status === "failed") return true;
       if (operation.status !== "processing") return false;
       const items = await tx
-        .select({ storageKey: chapterReplacementItems.candidateStorageKey })
+        .select({
+          storageKey: chapterReplacementItems.candidateStorageKey,
+          storageProfileId: chapterReplacementItems.storageProfileId,
+        })
         .from(chapterReplacementItems)
         .where(eq(chapterReplacementItems.operationId, replacementId));
       const [failed] = await tx
@@ -313,12 +330,14 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         .values([
           {
             replacementId,
+            storageProfileId: operation.storageProfileId,
             storageKey: operation.sourceStorageKey,
             reason: "replacement_source_zip" as const,
             ...(originRequestId ? { originRequestId } : {}),
           },
           ...items.map((item) => ({
             replacementId,
+            storageProfileId: item.storageProfileId,
             storageKey: item.storageKey,
             reason: "replacement_failed_candidate" as const,
             ...(originRequestId ? { originRequestId } : {}),

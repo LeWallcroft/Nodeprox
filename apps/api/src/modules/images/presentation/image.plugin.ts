@@ -1,9 +1,9 @@
 import {
   type UploadTransferGrant,
   UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
   UploadTransferProviderError,
 } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "../../../errors/app-error.js";
@@ -228,7 +228,7 @@ export function registerImagePlugin(
     sessionGuard: ImageSessionGuard;
     replacementPreparation: {
       service: PrepareImageReplacementService;
-      transfer: UploadTransferPort;
+      storageExecution: StorageExecutionResolver;
     };
     replacementCompletion: {
       service: CompleteImageReplacementService;
@@ -298,7 +298,11 @@ export function registerImagePlugin(
           imageId,
           ...body,
         });
-        const upload = await replacementPreparation.transfer.initiate({
+        const transfer =
+          await replacementPreparation.storageExecution.uploadTransferFor(
+            prepared.storageProfileId,
+          );
+        const upload = await transfer.initiate({
           key: prepared.candidateStorageKey,
           contentType: prepared.contentType,
           sizeBytes: prepared.sizeBytes,

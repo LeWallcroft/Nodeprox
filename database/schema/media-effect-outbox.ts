@@ -8,6 +8,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const mediaEffectTypeEnum = pgEnum("media_effect_type", [
   "cdn_purge",
@@ -29,6 +30,9 @@ export const mediaEffectOutbox = pgTable(
     effectType: mediaEffectTypeEnum("effect_type").notNull(),
     imageId: uuid("image_id").notNull(),
     target: text("target").notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     status: mediaEffectStatusEnum("status").notNull().default("pending"),
     attempts: integer("attempts").notNull().default(0),
     availableAt: timestamp("available_at", { withTimezone: true })
@@ -54,5 +58,6 @@ export const mediaEffectOutbox = pgTable(
       table.availableAt,
     ),
     index("media_effect_outbox_image_idx").on(table.imageId),
+    index("media_effect_outbox_profile_idx").on(table.storageProfileId),
   ],
 );

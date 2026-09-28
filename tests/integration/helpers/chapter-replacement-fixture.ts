@@ -8,6 +8,7 @@ import {
   users,
 } from "../../../database/schema/index.js";
 import { insertImagesWithInitialVersions } from "./image-fixture.js";
+import { legacyStorageProfileId } from "../../helpers/storage-execution.js";
 
 export async function createReplacementChapter(
   db: NodeProxDatabase,
@@ -78,6 +79,7 @@ export async function createReadyReplacement(
     chapterId: chapter.chapterId,
     requestedByUserId: chapter.userId,
     candidateZipStorageKey: `chapter-replacements/${chapter.chapterId}/${replacementId}/source.zip`,
+    storageProfileId: legacyStorageProfileId,
     originalFilename: "replacement.zip",
     contentType: "application/zip",
     sizeBytes: 1000,
@@ -103,6 +105,7 @@ export async function createReadyReplacement(
           operationId: replacementId,
           sortOrder: options.sortOrders?.[index] ?? index + 1,
           candidateStorageKey: `Media/${chapter.seriesSlug}/${chapter.chapterPublicKey}/${physicalFilename}`,
+          storageProfileId: legacyStorageProfileId,
           physicalFilename,
           originalFilename: logicalFilename,
           contentType: "image/jpeg",

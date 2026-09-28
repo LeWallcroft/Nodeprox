@@ -8,6 +8,10 @@ import {
   type ReconciliationQueuePort,
 } from "../../apps/api/src/modules/reconciliation/application/integrity-reconciliation.service.js";
 import type { StoragePort } from "@nodeprox/storage/port";
+import {
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const old = new Date("2020-01-01T00:00:00.000Z");
 const now = new Date("2020-01-02T00:00:00.000Z");
@@ -25,7 +29,7 @@ function setup(batch: ReconciliationBatch) {
   const repository: IntegrityRepositoryPort = {
     scan: vi.fn().mockResolvedValue(batch),
     markEnqueued: vi.fn().mockResolvedValue(undefined),
-    isPublishedKey: vi.fn().mockResolvedValue(false),
+    isPublishedObject: vi.fn().mockResolvedValue(false),
     withCandidateCleanupLock: vi
       .fn<IntegrityRepositoryPort["withCandidateCleanupLock"]>()
       .mockImplementation(async (_candidate, cleanup) => {
@@ -49,7 +53,7 @@ function setup(batch: ReconciliationBatch) {
   const service = new IntegrityReconciliationService(
     repository,
     queue,
-    storage,
+    legacyStorageExecution(storage),
     logger,
     () => now,
   );
@@ -60,6 +64,7 @@ const processingIntent = {
   kind: "processing" as const,
   id: "outbox-1",
   chapterId: "chapter-1",
+  storageProfileId: legacyStorageProfileId,
   status: "enqueued" as const,
   jobId: "job-1",
   aggregateStatus: "uploaded",
@@ -73,12 +78,71 @@ const processingIntent = {
 };
 
 describe("integrity reconciliation", () => {
+  it("reconciles B objects through B while the legacy profile remains available", async () => {
+    const profileB = "11111111-1111-4111-8111-111111111111";
+    const batch = empty();
+    batch.ready.push({
+      id: "version-b",
+      chapterId: "chapter-b",
+      storageProfileId: profileB,
+      storageKey: "Media/a/1/01.jpg",
+      canonicalStorageKey: "Media/a/1/01.jpg",
+    });
+    batch.candidates.push({
+      id: "candidate-b",
+      chapterId: "chapter-b",
+      uploadId: "upload-b",
+      attemptId: "attempt-b",
+      storageProfileId: profileB,
+      storageKey: "Media/a/1/02.jpg",
+      checksum: createHash("sha256").update("object").digest("hex"),
+      status: "cleanup_pending",
+      attemptStatus: "terminal_failed",
+      createdAt: old,
+    });
+    batch.sources.push({
+      id: "source-b",
+      chapterId: "chapter-b",
+      uploadId: "upload-b",
+      storageProfileId: profileB,
+      storageKey: "uploads/source-b.zip",
+    });
+    const target = setup(batch);
+    const b: StoragePort = {
+      put: vi.fn(),
+      get: vi.fn(async () => Readable.from([Buffer.from("object")])),
+      exists: vi.fn(async () => true),
+      delete: vi.fn(async () => undefined),
+    };
+    const resolver = {
+      storageFor: vi.fn(async (id: string) =>
+        id === profileB ? b : target.storage,
+      ),
+      uploadTransferFor: async () => {
+        throw new Error("unused");
+      },
+    };
+    const service = new IntegrityReconciliationService(
+      target.repository,
+      target.queue,
+      resolver,
+      target.logger,
+      () => now,
+    );
+    await service.run({ limit: 10 });
+    expect(resolver.storageFor).toHaveBeenCalledWith(profileB);
+    expect(b.delete).toHaveBeenCalledWith("Media/a/1/02.jpg");
+    expect(b.delete).toHaveBeenCalledWith("uploads/source-b.zip");
+    expect(target.storage.delete).not.toHaveBeenCalled();
+  });
+
   it("leaves a ready Chapter with a present canonical object unchanged", async () => {
     const batch = empty();
     batch.ready.push({
       id: "version-1",
       chapterId: "chapter-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       canonicalStorageKey: "Media/a/1/01.jpg",
     });
     const target = setup(batch);
@@ -92,6 +156,7 @@ describe("integrity reconciliation", () => {
       id: "version-1",
       chapterId: "chapter-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       canonicalStorageKey: "Media/a/1/01.jpg",
     });
     const target = setup(batch);
@@ -182,6 +247,7 @@ describe("integrity reconciliation", () => {
       jobAttempt: 1,
       chapterStatus: "processing",
       sourceStorageKey: "uploads/source.zip",
+      sourceStorageProfileId: legacyStorageProfileId,
       status: "processing",
       startedAt: old,
     });
@@ -209,6 +275,7 @@ describe("integrity reconciliation", () => {
       jobAttempt: 3,
       chapterStatus: "processing",
       sourceStorageKey: "uploads/source.zip",
+      sourceStorageProfileId: legacyStorageProfileId,
       status: "processing",
       startedAt: old,
     };
@@ -238,6 +305,7 @@ describe("integrity reconciliation", () => {
       jobAttempt: 1,
       chapterStatus: "processing",
       sourceStorageKey: "uploads/source.zip",
+      sourceStorageProfileId: legacyStorageProfileId,
       status: "processing",
       startedAt: old,
     });
@@ -257,6 +325,7 @@ describe("integrity reconciliation", () => {
       chapterId: "chapter-1",
       uploadId: "upload-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       checksum: createHash("sha256").update("object").digest("hex"),
       status: "cleanup_pending",
       attemptStatus: "terminal_failed",
@@ -281,6 +350,7 @@ describe("integrity reconciliation", () => {
       chapterId: "chapter-1",
       uploadId: "upload-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       checksum: createHash("sha256").update("object").digest("hex"),
       status: "cleanup_pending",
       attemptStatus: "terminal_failed",
@@ -304,6 +374,7 @@ describe("integrity reconciliation", () => {
       chapterId: "chapter-1",
       uploadId: "upload-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       checksum: createHash("sha256").update("object").digest("hex"),
       status: "cleanup_pending",
       attemptStatus: "terminal_failed",
@@ -327,6 +398,7 @@ describe("integrity reconciliation", () => {
       chapterId: "chapter-1",
       uploadId: "upload-1",
       storageKey: "Media/a/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       checksum: "different",
       status: "created",
       attemptStatus: "terminal_failed",
@@ -336,7 +408,7 @@ describe("integrity reconciliation", () => {
     expect((await target.service.run({ limit: 10 })).findings).toMatchObject([
       { action: "manual-review" },
     ]);
-    vi.mocked(target.repository.isPublishedKey).mockResolvedValue(true);
+    vi.mocked(target.repository.isPublishedObject).mockResolvedValue(true);
     expect((await target.service.run({ limit: 10 })).findings).toMatchObject([
       { action: "manual-review" },
     ]);
@@ -349,6 +421,7 @@ describe("integrity reconciliation", () => {
       id: "version-1",
       chapterId: "chapter-1",
       storageKey: "Media/wrong/1/01.jpg",
+      storageProfileId: legacyStorageProfileId,
       canonicalStorageKey: "Media/a/1/01.jpg",
     });
     batch.sources.push({
@@ -356,6 +429,7 @@ describe("integrity reconciliation", () => {
       chapterId: "chapter-1",
       uploadId: "upload-1",
       storageKey: "uploads/source.zip",
+      storageProfileId: legacyStorageProfileId,
     });
     const target = setup(batch);
     expect((await target.service.run({ limit: 10 })).findings).toMatchObject([
@@ -371,6 +445,7 @@ describe("integrity reconciliation", () => {
       id: "cleanup-1",
       chapterId: "chapter-1",
       storageKey: "Media/a/1/candidate.jpg",
+      storageProfileId: legacyStorageProfileId,
       status: "failed",
       updatedAt: old,
       originRequestId: "request-complete",

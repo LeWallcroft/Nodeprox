@@ -2,6 +2,7 @@ export type StorageCleanupEffect = {
   id: string;
   replacementId: string;
   storageKey: string;
+  storageProfileId: string;
   reason: "replacement_source_zip" | "replacement_failed_candidate";
   attempts: number;
   originRequestId?: string;

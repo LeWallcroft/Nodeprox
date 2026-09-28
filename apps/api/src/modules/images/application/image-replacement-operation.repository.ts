@@ -15,6 +15,7 @@ export type ImageReplacementOperation = {
   chapterId: string;
   requestedByUserId: string;
   candidateStorageKey: string;
+  storageProfileId: string;
   originalFilename: string;
   contentType: string;
   sizeBytes: number;

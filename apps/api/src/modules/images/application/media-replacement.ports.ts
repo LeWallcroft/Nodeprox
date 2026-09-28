@@ -1,5 +1,6 @@
 export type CurrentMediaVersion = {
   id: string;
+  storageProfileId: string;
   version: number;
   physicalFilename: string;
   storageKey: string;
@@ -62,6 +63,7 @@ export interface MediaReplacementRepositoryPort {
   enqueueOrphanCleanup(input: {
     operationId: string;
     imageId: string;
+    storageProfileId: string;
     storageKey: string;
   }): Promise<void>;
 }
@@ -70,6 +72,7 @@ export interface MediaReplacementObservabilityPort {
   orphanCandidate(input: {
     operationId: string;
     imageId: string;
+    storageProfileId: string;
     storageKey: string;
     errorName: string;
   }): void;

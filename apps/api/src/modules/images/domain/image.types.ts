@@ -5,6 +5,7 @@ export type ImageRecord = {
   chapterId: string;
   filename: string;
   storageKey: string;
+  storageProfileId: string;
   extension: string;
   contentType: string;
   sizeBytes: number;
@@ -15,4 +16,7 @@ export type ImageRecord = {
   updatedAt: Date;
 };
 
-export type ImageMetadata = Omit<ImageRecord, "storageKey">;
+export type ImageMetadata = Omit<
+  ImageRecord,
+  "storageKey" | "storageProfileId"
+>;

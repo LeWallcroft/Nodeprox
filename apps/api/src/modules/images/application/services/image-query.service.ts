@@ -1,5 +1,5 @@
 import type { Readable } from "node:stream";
-import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type {
   ChapterImageAuthorizationPort,
   ImageQueryContext,
@@ -42,14 +42,17 @@ export class ImageContentInfrastructureError extends Error {
   }
 }
 
-const toMetadata = ({ storageKey: _storageKey, ...image }: ImageRecord) =>
-  image satisfies ImageMetadata;
+const toMetadata = ({
+  storageKey: _storageKey,
+  storageProfileId: _storageProfileId,
+  ...image
+}: ImageRecord) => image satisfies ImageMetadata;
 
 export class ImageQueryService {
   constructor(
     private readonly repository: ImageRepositoryPort,
     private readonly authorization: ChapterImageAuthorizationPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
   ) {}
 
   async list(
@@ -77,7 +80,9 @@ export class ImageQueryService {
     try {
       return {
         image: toMetadata(image),
-        stream: await this.storage.get(image.storageKey),
+        stream: await (
+          await this.storageExecution.storageFor(image.storageProfileId)
+        ).get(image.storageKey),
       };
     } catch (error) {
       if (isMissingStorageObject(error)) throw new ImageContentNotFoundError();

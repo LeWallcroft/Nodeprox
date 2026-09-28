@@ -17,6 +17,7 @@ import {
 } from "../../database/schema/index.js";
 import type { StoragePort } from "@nodeprox/storage/port";
 import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
+import { legacyStorageExecution } from "../helpers/storage-execution.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -90,6 +91,7 @@ beforeAll(async () => {
     id: uploadId,
     chapterId,
     storageKey: sourceKey,
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     originalFilename: "25.zip",
     contentType: "application/zip",
     sizeBytes: 128,
@@ -252,7 +254,7 @@ describe("durable Chapter deletion", () => {
     };
     const cleanup = new ChapterDeletionService(
       new DrizzleChapterDeletionRepository(database.db),
-      storage,
+      legacyStorageExecution(storage),
     );
     await expect(
       cleanup.execute({ deletionId: request.id, chapterId }),

@@ -9,10 +9,11 @@ import type { ImageRecord } from "../../../domain/image.types.js";
 
 type ImageRow = Omit<
   typeof images.$inferSelect,
-  "retiredAt" | "retiredByChapterReplacementId"
+  "retiredAt" | "retiredByChapterReplacementId" | "storageProfileId"
 > & {
   physicalFilename: string;
   physicalStorageKey: string;
+  physicalStorageProfileId: string;
   physicalExtension: string;
   physicalContentType: string;
   physicalSizeBytes: number;
@@ -24,6 +25,7 @@ const toImage = (row: ImageRow): ImageRecord => ({
   chapterId: row.chapterId,
   filename: row.physicalFilename,
   storageKey: row.physicalStorageKey,
+  storageProfileId: row.physicalStorageProfileId,
   extension: row.physicalExtension,
   contentType: row.physicalContentType,
   sizeBytes: row.physicalSizeBytes,
@@ -79,6 +81,7 @@ function columns() {
     updatedAt: images.updatedAt,
     physicalFilename: imageVersions.physicalFilename,
     physicalStorageKey: imageVersions.storageKey,
+    physicalStorageProfileId: imageVersions.storageProfileId,
     physicalExtension: imageVersions.extension,
     physicalContentType: imageVersions.contentType,
     physicalSizeBytes: imageVersions.sizeBytes,

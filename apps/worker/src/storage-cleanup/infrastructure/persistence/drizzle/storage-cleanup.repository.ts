@@ -39,6 +39,7 @@ export class DrizzleStorageCleanupRepository
       returning cleanup.id,
                 cleanup.replacement_id as "replacementId",
                 cleanup.storage_key as "storageKey",
+                cleanup.storage_profile_id as "storageProfileId",
                 cleanup.reason,
                 cleanup.attempts,
                 cleanup.origin_request_id as "originRequestId"
@@ -47,6 +48,7 @@ export class DrizzleStorageCleanupRepository
       id: String(row.id),
       replacementId: String(row.replacementId),
       storageKey: String(row.storageKey),
+      storageProfileId: String(row.storageProfileId),
       reason: row.reason as StorageCleanupEffect["reason"],
       attempts: Number(row.attempts),
       ...(row.originRequestId
@@ -60,6 +62,7 @@ export class DrizzleStorageCleanupRepository
       const [operation] = await this.db
         .select({
           sourceStorageKey: chapterReplacementOperations.candidateZipStorageKey,
+          storageProfileId: chapterReplacementOperations.storageProfileId,
           status: chapterReplacementOperations.status,
         })
         .from(chapterReplacementOperations)
@@ -68,6 +71,7 @@ export class DrizzleStorageCleanupRepository
       return Boolean(
         operation &&
           operation.sourceStorageKey === effect.storageKey &&
+          operation.storageProfileId === effect.storageProfileId &&
           ["ready", "completing", "completed", "failed"].includes(
             operation.status,
           ),
@@ -75,7 +79,10 @@ export class DrizzleStorageCleanupRepository
     }
 
     const [candidate] = await this.db
-      .select({ status: chapterReplacementOperations.status })
+      .select({
+        status: chapterReplacementOperations.status,
+        storageProfileId: chapterReplacementItems.storageProfileId,
+      })
       .from(chapterReplacementItems)
       .innerJoin(
         chapterReplacementOperations,
@@ -88,10 +95,15 @@ export class DrizzleStorageCleanupRepository
         and(
           eq(chapterReplacementItems.operationId, effect.replacementId),
           eq(chapterReplacementItems.candidateStorageKey, effect.storageKey),
+          eq(chapterReplacementItems.storageProfileId, effect.storageProfileId),
         ),
       )
       .limit(1);
-    if (candidate?.status !== "failed") return false;
+    if (
+      candidate?.status !== "failed" ||
+      candidate.storageProfileId !== effect.storageProfileId
+    )
+      return false;
     const [canonical] = await this.db
       .select({ id: images.id })
       .from(images)
@@ -99,6 +111,7 @@ export class DrizzleStorageCleanupRepository
       .where(
         and(
           eq(imageVersions.storageKey, effect.storageKey),
+          eq(imageVersions.storageProfileId, effect.storageProfileId),
           isNull(images.retiredAt),
         ),
       )

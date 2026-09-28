@@ -998,7 +998,12 @@ describe("ChapterImportBatch metadata orchestration", () => {
     };
     const processor = new ChapterProcessingService(
       new DrizzleProcessingRepository(database.db),
-      storage,
+      {
+        storageFor: async () => storage,
+        uploadTransferFor: async () => {
+          throw new Error("unexpected-transfer");
+        },
+      },
       extractor,
       { append: async () => undefined },
     );

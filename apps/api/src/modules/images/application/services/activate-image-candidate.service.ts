@@ -19,6 +19,7 @@ export class ActivateImageCandidateService {
     context: AuthorizationContext;
     imageId: string;
     candidateStorageKey: string;
+    storageProfileId: string;
     contentType: string;
     sizeBytes: number;
     checksum: string;
@@ -59,6 +60,7 @@ export class ActivateImageCandidateService {
           ...(input.requestId ? { requestId: input.requestId } : {}),
           oldPublicUrl,
           next: {
+            storageProfileId: input.storageProfileId,
             version: nextVersion.toNumber(),
             physicalFilename: candidate.physicalFilename,
             storageKey: candidate.storageKey,

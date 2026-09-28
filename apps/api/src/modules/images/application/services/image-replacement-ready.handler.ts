@@ -1,3 +1,4 @@
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import {
   UploadTransferObjectNotFoundError,
   type UploadTransferPort,
@@ -22,7 +23,7 @@ export class ImageReplacementReadyHandler implements DomainEventHandler {
 
   constructor(
     private readonly operations: ImageReplacementOperationRepository,
-    private readonly transfer: UploadTransferPort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly activator: Pick<ActivateImageCandidateService, "execute">,
     private readonly now: () => Date = () => new Date(),
   ) {}
@@ -42,7 +43,10 @@ export class ImageReplacementReadyHandler implements DomainEventHandler {
 
     let verified: Awaited<ReturnType<UploadTransferPort["verify"]>>;
     try {
-      verified = await this.transfer.verify({
+      const transfer = await this.storageExecution.uploadTransferFor(
+        operation.storageProfileId,
+      );
+      verified = await transfer.verify({
         key: operation.candidateStorageKey,
       });
     } catch (error) {
@@ -83,6 +87,7 @@ export class ImageReplacementReadyHandler implements DomainEventHandler {
       },
       imageId: operation.imageId,
       candidateStorageKey: operation.candidateStorageKey,
+      storageProfileId: operation.storageProfileId,
       contentType,
       sizeBytes: verified.sizeBytes,
       checksum: verified.etag,

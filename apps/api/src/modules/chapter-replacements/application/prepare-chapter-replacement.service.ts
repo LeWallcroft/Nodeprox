@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   type UploadTransferGrant,
-  type UploadTransferPort,
   UploadTransferProviderError,
 } from "@nodeprox/storage/port";
+import type {
+  ActiveStorageProfilePort,
+  StorageExecutionResolver,
+} from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../authorization/domain/authorization.types.js";
 import type { ChapterImageAuthorizationPort } from "../../images/application/ports.js";
 import { validateUploadMetadata } from "../../uploads/domain/upload.policy.js";
@@ -27,7 +30,8 @@ export class PrepareChapterReplacementService {
   constructor(
     private readonly authorization: ChapterImageAuthorizationPort,
     private readonly repository: ChapterReplacementUploadRepository,
-    private readonly transfer: UploadTransferPort,
+    private readonly storageExecution: StorageExecutionResolver,
+    private readonly activeProfile: ActiveStorageProfilePort,
     private readonly maxSizeBytes: number,
   ) {}
 
@@ -58,11 +62,14 @@ export class PrepareChapterReplacementService {
       chapterId: input.chapterId,
       replacementId,
     });
+    const storageProfileId =
+      await this.activeProfile.getActiveStorageProfileId();
     const operation = await this.repository.createPending({
       id: replacementId,
       chapterId: input.chapterId,
       requestedByUserId: input.context.userId,
       candidateZipStorageKey: sourceKey,
+      storageProfileId,
       originalFilename: metadata.filename,
       contentType: metadata.contentType,
       sizeBytes: input.sizeBytes,
@@ -70,7 +77,10 @@ export class PrepareChapterReplacementService {
     if (!operation) throw new ChapterReplacementPrepareConflictError();
 
     try {
-      const upload = await this.transfer.initiate({
+      const transfer = await this.storageExecution.uploadTransferFor(
+        operation.storageProfileId,
+      );
+      const upload = await transfer.initiate({
         key: operation.candidateZipStorageKey,
         contentType: operation.contentType,
         sizeBytes: operation.sizeBytes,

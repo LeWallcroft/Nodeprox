@@ -255,6 +255,7 @@ describe("CHR2 atomic whole-Chapter activation", () => {
     if (!oldImage) throw new Error("missing-old-image");
     const oldUrl = `${publicOrigin}/${target.chapter.seriesSlug}/${target.chapter.chapterPublicKey}/${oldImage.filename}`;
     await database.db.insert(mediaEffectOutbox).values({
+      storageProfileId: "00000000-0000-4000-8000-000000000001",
       replacementOperationId: target.replacement.replacementId,
       effectType: "cdn_purge",
       imageId: oldImage.id,

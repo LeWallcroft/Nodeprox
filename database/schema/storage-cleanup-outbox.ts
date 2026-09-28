@@ -10,6 +10,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { chapterReplacementOperations } from "./chapter-replacement-operations.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const storageCleanupReasonEnum = pgEnum("storage_cleanup_reason", [
   "replacement_source_zip",
@@ -33,6 +34,9 @@ export const storageCleanupOutbox = pgTable(
         onDelete: "cascade",
       }),
     storageKey: text("storage_key").notNull(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     originRequestId: varchar("origin_request_id", { length: 128 }),
     reason: storageCleanupReasonEnum("reason").notNull(),
     status: storageCleanupStatusEnum("status").notNull().default("pending"),
@@ -60,5 +64,6 @@ export const storageCleanupOutbox = pgTable(
       table.availableAt,
     ),
     index("storage_cleanup_outbox_replacement_idx").on(table.replacementId),
+    index("storage_cleanup_outbox_profile_idx").on(table.storageProfileId),
   ],
 );

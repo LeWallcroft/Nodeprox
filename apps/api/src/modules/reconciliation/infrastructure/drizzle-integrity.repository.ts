@@ -66,6 +66,8 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
       .select({
         intent: chapterReplacementProcessingOutbox,
         operationStatus: chapterReplacementOperations.status,
+        operationStorageProfileId:
+          chapterReplacementOperations.storageProfileId,
       })
       .from(chapterReplacementProcessingOutbox)
       .innerJoin(
@@ -87,6 +89,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         kind: "processing" as const,
         id: intent.id,
         chapterId: intent.chapterId,
+        storageProfileId: intent.storageProfileId,
         status: intent.status,
         aggregateStatus: chapterStatus,
         updatedAt: intent.updatedAt,
@@ -123,31 +126,35 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
             : {}),
         },
       })),
-      ...replacements.map(({ intent, operationStatus }) => ({
-        kind: "replacement" as const,
-        id: intent.id,
-        chapterId: intent.chapterId,
-        status: intent.status,
-        aggregateStatus: operationStatus,
-        updatedAt: intent.updatedAt,
-        jobId: replacementProcessingJobId(intent),
-        ...(intent.originRequestId
-          ? { originRequestId: intent.originRequestId }
-          : {}),
-        payload: {
-          replacementId: intent.replacementId,
+      ...replacements.map(
+        ({ intent, operationStatus, operationStorageProfileId }) => ({
+          kind: "replacement" as const,
+          id: intent.id,
           chapterId: intent.chapterId,
+          storageProfileId: operationStorageProfileId,
+          status: intent.status,
+          aggregateStatus: operationStatus,
+          updatedAt: intent.updatedAt,
+          jobId: replacementProcessingJobId(intent),
           ...(intent.originRequestId
             ? { originRequestId: intent.originRequestId }
             : {}),
-        },
-      })),
+          payload: {
+            replacementId: intent.replacementId,
+            chapterId: intent.chapterId,
+            ...(intent.originRequestId
+              ? { originRequestId: intent.originRequestId }
+              : {}),
+          },
+        }),
+      ),
     ];
     const readyRows = await this.db
       .select({
         id: imageVersions.id,
         chapterId: chapters.id,
         storageKey: imageVersions.storageKey,
+        storageProfileId: imageVersions.storageProfileId,
         physicalFilename: imageVersions.physicalFilename,
         seriesSlug: series.slug,
         chapterPublicKey: chapters.publicKey,
@@ -169,6 +176,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
       id: row.id,
       chapterId: row.chapterId,
       storageKey: row.storageKey,
+      storageProfileId: row.storageProfileId,
       canonicalStorageKey: (() => {
         try {
           return buildChapterMediaStorageKey({
@@ -212,6 +220,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         uploadId,
         attemptId: object.attemptId,
         storageKey: object.storageKey,
+        storageProfileId: object.storageProfileId,
         checksum: object.checksum,
         status: object.status,
         attemptStatus,
@@ -224,6 +233,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         attempt: chapterProcessingAttempts,
         chapterStatus: chapters.status,
         sourceStorageKey: uploads.storageKey,
+        sourceStorageProfileId: uploads.storageProfileId,
         originRequestId: processingOutbox.originRequestId,
       })
       .from(chapterProcessingAttempts)
@@ -244,7 +254,13 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
       .orderBy(asc(chapterProcessingAttempts.id))
       .limit(limit);
     const attempts: AttemptWork[] = attemptRows.map(
-      ({ attempt, chapterStatus, sourceStorageKey, originRequestId }) => ({
+      ({
+        attempt,
+        chapterStatus,
+        sourceStorageKey,
+        sourceStorageProfileId,
+        originRequestId,
+      }) => ({
         id: attempt.id,
         chapterId: attempt.chapterId,
         uploadId: attempt.uploadId,
@@ -252,6 +268,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         jobAttempt: attempt.jobAttempt,
         chapterStatus,
         sourceStorageKey,
+        sourceStorageProfileId,
         status: attempt.status,
         startedAt: attempt.startedAt,
         ...(originRequestId ? { originRequestId } : {}),
@@ -263,6 +280,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         chapterId: chapterProcessingAttempts.chapterId,
         uploadId: uploads.id,
         storageKey: uploads.storageKey,
+        storageProfileId: uploads.storageProfileId,
         originRequestId: processingOutbox.originRequestId,
       })
       .from(chapterProcessingAttempts)
@@ -323,6 +341,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         id: intent.id,
         chapterId,
         storageKey: intent.storageKey,
+        storageProfileId: intent.storageProfileId,
         ...(intent.originRequestId
           ? { originRequestId: intent.originRequestId }
           : {}),
@@ -351,11 +370,19 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         .set({ status: "enqueued", enqueuedAt: updatedAt, updatedAt })
         .where(eq(chapterReplacementProcessingOutbox.id, intent.id));
   }
-  async isPublishedKey(key: string): Promise<boolean> {
+  async isPublishedObject(input: {
+    storageProfileId: string;
+    storageKey: string;
+  }): Promise<boolean> {
     const [row] = await this.db
       .select({ id: imageVersions.id })
       .from(imageVersions)
-      .where(eq(imageVersions.storageKey, key))
+      .where(
+        and(
+          eq(imageVersions.storageKey, input.storageKey),
+          eq(imageVersions.storageProfileId, input.storageProfileId),
+        ),
+      )
       .limit(1);
     return Boolean(row);
   }
@@ -371,6 +398,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
       kind: "processing",
       id: row.intent.id,
       chapterId: row.intent.chapterId,
+      storageProfileId: row.intent.storageProfileId,
       status: row.intent.status,
       jobId: processingJobId(row.intent),
       aggregateStatus: row.chapterStatus,
@@ -411,6 +439,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
           id: chapterProcessingObjects.id,
           chapterId: chapterProcessingAttempts.chapterId,
           storageKey: chapterProcessingObjects.storageKey,
+          storageProfileId: chapterProcessingObjects.storageProfileId,
           checksum: chapterProcessingObjects.checksum,
           status: chapterProcessingObjects.status,
           attemptStatus: chapterProcessingAttempts.status,
@@ -426,6 +455,7 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
         !object ||
         object.chapterId !== candidate.chapterId ||
         object.storageKey !== candidate.storageKey ||
+        object.storageProfileId !== candidate.storageProfileId ||
         object.checksum !== candidate.checksum ||
         !["reserved", "created", "cleanup_pending"].includes(object.status) ||
         !["retryable_failed", "terminal_failed"].includes(object.attemptStatus)
@@ -434,7 +464,12 @@ export class DrizzleIntegrityRepository implements IntegrityRepositoryPort {
       const [published] = await tx
         .select({ id: imageVersions.id })
         .from(imageVersions)
-        .where(eq(imageVersions.storageKey, candidate.storageKey))
+        .where(
+          and(
+            eq(imageVersions.storageKey, candidate.storageKey),
+            eq(imageVersions.storageProfileId, candidate.storageProfileId),
+          ),
+        )
         .limit(1);
       if (published) return false;
       await cleanup();

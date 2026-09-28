@@ -1,9 +1,9 @@
 import {
   UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
   UploadTransferProviderError,
   type VerifiedUploadedObject,
 } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../authorization/domain/authorization.types.js";
 import type { ChapterImageAuthorizationPort } from "../../images/application/ports.js";
 import type { ChapterReplacementResult } from "../domain/chapter-replacement-result.js";
@@ -28,7 +28,7 @@ export type ChapterReplacementUploadResult =
 export class CompleteChapterReplacementUploadService {
   constructor(
     private readonly repository: ChapterReplacementUploadRepository,
-    private readonly transfer: UploadTransferPort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly authorization: ChapterImageAuthorizationPort,
   ) {}
 
@@ -59,7 +59,10 @@ export class CompleteChapterReplacementUploadService {
 
     let verified: VerifiedUploadedObject;
     try {
-      verified = await this.transfer.verify({
+      const transfer = await this.storageExecution.uploadTransferFor(
+        operation.storageProfileId,
+      );
+      verified = await transfer.verify({
         key: operation.candidateZipStorageKey,
       });
     } catch (error) {

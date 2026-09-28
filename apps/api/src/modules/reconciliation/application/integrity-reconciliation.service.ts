@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { StoragePort } from "@nodeprox/storage/port";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type {
   DeleteChapterStorageInput,
   ProcessChapterInput,
@@ -38,6 +38,7 @@ export type ReconciliationFinding = {
   jobId?: string;
   originRequestId?: string;
   storageKey?: string;
+  storageProfileId?: string;
   result: "detected" | "repaired" | "manual-review" | "repair-failed";
 };
 
@@ -45,6 +46,7 @@ export type QueueIntent = {
   kind: "processing" | "deletion" | "replacement";
   id: string;
   chapterId: string;
+  storageProfileId?: string;
   status: "pending" | "enqueued";
   jobId: string;
   originRequestId?: string;
@@ -59,6 +61,7 @@ export type ReadyObject = {
   id: string;
   chapterId: string;
   storageKey: string;
+  storageProfileId: string;
   canonicalStorageKey: string;
 };
 export type CandidateObject = {
@@ -67,6 +70,7 @@ export type CandidateObject = {
   uploadId: string | null;
   attemptId: string;
   storageKey: string;
+  storageProfileId: string;
   checksum: string;
   status:
     | "reserved"
@@ -87,6 +91,7 @@ export type AttemptWork = {
   jobAttempt: number | null;
   chapterStatus: string | null;
   sourceStorageKey: string | null;
+  sourceStorageProfileId: string | null;
   status: string;
   startedAt: Date;
   originRequestId?: string;
@@ -96,12 +101,14 @@ export type SourceCleanup = {
   chapterId: string;
   uploadId: string;
   storageKey: string;
+  storageProfileId: string;
   originRequestId?: string;
 };
 export type CleanupIntent = {
   id: string;
   chapterId: string;
   storageKey: string;
+  storageProfileId: string;
   status: "pending" | "processing" | "failed";
   updatedAt: Date;
   originRequestId?: string;
@@ -135,7 +142,10 @@ export interface IntegrityRepositoryPort {
     cursor: ReconciliationCursor,
   ): Promise<ReconciliationBatch>;
   markEnqueued(intent: QueueIntent): Promise<void>;
-  isPublishedKey(key: string): Promise<boolean>;
+  isPublishedObject(input: {
+    storageProfileId: string;
+    storageKey: string;
+  }): Promise<boolean>;
   withCandidateCleanupLock(
     candidate: CandidateObject,
     cleanup: () => Promise<void>,
@@ -158,7 +168,7 @@ export class IntegrityReconciliationService {
   constructor(
     private readonly repository: IntegrityRepositoryPort,
     private readonly queue: ReconciliationQueuePort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
     private readonly logger: ReconciliationLogger,
     private readonly now: () => Date = () => new Date(),
     private readonly safeAgeMs = 5 * 60_000,
@@ -221,9 +231,11 @@ export class IntegrityReconciliationService {
       if (state === "missing") {
         if (
           intent.kind === "processing" &&
-          !(await this.storage.exists(
-            (intent.payload as ProcessChapterInput).sourceStorageKey,
-          ))
+          !(await (
+            await this.storageExecution.storageFor(
+              intent.storageProfileId ?? "",
+            )
+          ).exists((intent.payload as ProcessChapterInput).sourceStorageKey))
         ) {
           await record({
             ...base,
@@ -269,7 +281,11 @@ export class IntegrityReconciliationService {
           storageKey: row.storageKey,
           result: "manual-review",
         });
-      } else if (!(await this.storage.exists(row.storageKey))) {
+      } else if (
+        !(await (
+          await this.storageExecution.storageFor(row.storageProfileId)
+        ).exists(row.storageKey))
+      ) {
         await record({
           code: "missing-storage-object",
           action: "manual-review",
@@ -299,11 +315,12 @@ export class IntegrityReconciliationService {
         ...(candidate.uploadId ? { uploadId: candidate.uploadId } : {}),
         processingAttemptId: candidate.attemptId,
         storageKey: candidate.storageKey,
+        storageProfileId: candidate.storageProfileId,
         ...(candidate.originRequestId
           ? { originRequestId: candidate.originRequestId }
           : {}),
       };
-      if (await this.repository.isPublishedKey(candidate.storageKey)) {
+      if (await this.repository.isPublishedObject(candidate)) {
         await record({
           ...base,
           code: "orphan-storage-object",
@@ -312,7 +329,10 @@ export class IntegrityReconciliationService {
         });
         continue;
       }
-      if (!(await this.storage.exists(candidate.storageKey))) {
+      const candidateStorage = await this.storageExecution.storageFor(
+        candidate.storageProfileId,
+      );
+      if (!(await candidateStorage.exists(candidate.storageKey))) {
         await record(
           {
             ...base,
@@ -331,7 +351,9 @@ export class IntegrityReconciliationService {
         continue;
       }
       const hash = createHash("sha256");
-      for await (const chunk of await this.storage.get(candidate.storageKey))
+      for await (const chunk of await candidateStorage.get(
+        candidate.storageKey,
+      ))
         hash.update(chunk);
       if (hash.digest("hex") !== candidate.checksum) {
         await record({
@@ -352,7 +374,7 @@ export class IntegrityReconciliationService {
         async () => {
           const cleaned = await this.repository.withCandidateCleanupLock(
             candidate,
-            () => this.storage.delete(candidate.storageKey),
+            () => candidateStorage.delete(candidate.storageKey),
           );
           if (!cleaned) throw new Error("candidate-cleanup-race");
         },
@@ -388,7 +410,10 @@ export class IntegrityReconciliationService {
         attempt.jobAttempt === 1 &&
         attempt.uploadId &&
         attempt.sourceStorageKey &&
-        (await this.storage.exists(attempt.sourceStorageKey))
+        attempt.sourceStorageProfileId &&
+        (await (
+          await this.storageExecution.storageFor(attempt.sourceStorageProfileId)
+        ).exists(attempt.sourceStorageKey))
       ) {
         const intent = await this.repository.findProcessingIntent(
           attempt.uploadId,
@@ -421,7 +446,10 @@ export class IntegrityReconciliationService {
     }
 
     for (const source of batch.sources) {
-      if (!(await this.storage.exists(source.storageKey))) continue;
+      const sourceStorage = await this.storageExecution.storageFor(
+        source.storageProfileId,
+      );
+      if (!(await sourceStorage.exists(source.storageKey))) continue;
       await record(
         {
           code: "cleanup-pending",
@@ -431,12 +459,13 @@ export class IntegrityReconciliationService {
           uploadId: source.uploadId,
           processingAttemptId: source.id,
           storageKey: source.storageKey,
+          storageProfileId: source.storageProfileId,
           ...(source.originRequestId
             ? { originRequestId: source.originRequestId }
             : {}),
           result: "detected",
         },
-        () => this.storage.delete(source.storageKey),
+        () => sourceStorage.delete(source.storageKey),
       );
     }
     for (const intent of batch.cleanupIntents) {
@@ -448,6 +477,7 @@ export class IntegrityReconciliationService {
         chapterId: intent.chapterId,
         outboxId: intent.id,
         storageKey: intent.storageKey,
+        storageProfileId: intent.storageProfileId,
         ...(intent.originRequestId
           ? { originRequestId: intent.originRequestId }
           : {}),

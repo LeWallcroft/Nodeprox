@@ -11,6 +11,8 @@ import {
   StorageObjectAlreadyExistsError,
   type StoragePort,
 } from "@nodeprox/storage/port";
+import { legacyStorageProfileId } from "../helpers/storage-execution.js";
+import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 
 const input = {
   chapterId: "chapter-1",
@@ -29,11 +31,13 @@ function setup() {
       status: "uploaded",
       chapterStatus: "uploaded",
       storageKey: input.sourceStorageKey,
+      storageProfileId: legacyStorageProfileId,
     }),
     claimChapter: vi.fn().mockResolvedValue({
       outcome: "claimed",
       attempt: {
         id: "attempt-1",
+        storageProfileId: legacyStorageProfileId,
         chapterId: input.chapterId,
         uploadId: input.uploadId,
         jobId: null,
@@ -51,7 +55,15 @@ function setup() {
     replaceImagesAndMarkReady: vi.fn().mockResolvedValue(undefined),
     markFailed: vi.fn().mockResolvedValue(undefined),
   };
-  const storage: StoragePort = {
+  const storage: StoragePort & StorageExecutionResolver = {
+    storageFor: async (profileId) => {
+      if (profileId !== legacyStorageProfileId)
+        throw new Error("unexpected-profile");
+      return storage;
+    },
+    uploadTransferFor: async () => {
+      throw new Error("unexpected-transfer");
+    },
     put: vi.fn().mockResolvedValue({
       key: "Media/prueba1/6/01.jpg",
       sizeBytes: 3,
@@ -92,6 +104,43 @@ function setup() {
 }
 
 describe("ChapterProcessingService lifecycle", () => {
+  it("uses the persisted B profile for the source, candidate, publication and cleanup", async () => {
+    const profileB = "11111111-1111-4111-8111-111111111111";
+    const deps = setup();
+    const originalUpload = await deps.repository.findUpload(input.uploadId);
+    if (!originalUpload) throw new Error("missing-upload-fixture");
+    vi.mocked(deps.repository.findUpload).mockResolvedValueOnce({
+      ...originalUpload,
+      storageProfileId: profileB,
+    });
+    const profileBStorage = setup().storage;
+    const resolver = {
+      storageFor: vi.fn(async (id: string) =>
+        id === profileB ? profileBStorage : deps.storage,
+      ),
+      uploadTransferFor: async () => {
+        throw new Error("unused");
+      },
+    };
+    await new ChapterProcessingService(
+      deps.repository,
+      resolver,
+      deps.extractor,
+      deps.audit,
+    ).process(input);
+    expect(resolver.storageFor).toHaveBeenCalledWith(profileB);
+    expect(profileBStorage.put).toHaveBeenCalledOnce();
+    expect(profileBStorage.delete).toHaveBeenCalledWith(input.sourceStorageKey);
+    expect(deps.storage.put).not.toHaveBeenCalled();
+    expect(deps.repository.replaceImagesAndMarkReady).toHaveBeenCalledWith(
+      input.chapterId,
+      input.uploadId,
+      "attempt-1",
+      "user-1",
+      [expect.objectContaining({ storageProfileId: profileB })],
+    );
+  });
+
   it("rejects a storage object whose persisted content type differs", async () => {
     const deps = setup();
     deps.storage.head = vi.fn().mockResolvedValue({
@@ -321,6 +370,7 @@ describe("ChapterProcessingService lifecycle", () => {
       outcome: "finished",
       attempt: {
         id: "attempt-1",
+        storageProfileId: legacyStorageProfileId,
         chapterId: input.chapterId,
         uploadId: input.uploadId,
         jobId: "job-1",
@@ -374,6 +424,7 @@ describe("ChapterProcessingService lifecycle", () => {
       status: "uploaded",
       chapterStatus: "ready",
       storageKey: input.sourceStorageKey,
+      storageProfileId: legacyStorageProfileId,
     });
     await new ChapterProcessingService(
       retry.repository,

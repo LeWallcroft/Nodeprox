@@ -4,9 +4,12 @@ import {
   loadConfig,
   loadProcessingConfig,
   loadStorageConfig,
+  loadStorageProfileConfig,
 } from "@nodeprox/config";
 import { B2Storage, FilesystemStorage } from "@nodeprox/storage/adapters";
+import { StorageClientRegistry } from "@nodeprox/storage/profile-execution";
 import { createDatabase } from "../database/client.js";
+import { DrizzleStorageProfileRuntimeRepository } from "../database/storage-profile-runtime.js";
 import { IntegrityReconciliationService } from "../apps/api/src/modules/reconciliation/application/integrity-reconciliation.service.js";
 import { BullMQReconciliationQueue } from "../apps/api/src/modules/reconciliation/infrastructure/bullmq-reconciliation.queue.js";
 import { DrizzleIntegrityRepository } from "../apps/api/src/modules/reconciliation/infrastructure/drizzle-integrity.repository.js";
@@ -20,6 +23,12 @@ const storage =
     ? new B2Storage(storageConfig.b2)
     : new FilesystemStorage(join(process.cwd(), ".nodeprox-storage"));
 const database = createDatabase(config.DATABASE_URL);
+const profileRuntime = new DrizzleStorageProfileRuntimeRepository(database.db);
+const storageExecution = new StorageClientRegistry(
+  (id) => profileRuntime.loadRuntimeProfile(id),
+  { storage, transfer: null },
+  loadStorageProfileConfig().STORAGE_PROFILE_MASTER_KEY,
+);
 const queue = new BullMQReconciliationQueue(
   config.REDIS_URL,
   processing.PROCESSING_QUEUE_NAME,
@@ -75,7 +84,7 @@ try {
   const result = await new IntegrityReconciliationService(
     new DrizzleIntegrityRepository(database.db),
     queue,
-    storage,
+    storageExecution,
     logger,
   ).run({ limit, cursor, dryRun });
   process.stdout.write(

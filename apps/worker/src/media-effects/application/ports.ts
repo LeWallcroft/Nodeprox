@@ -5,6 +5,7 @@ export type ClaimedMediaEffect = {
   effectType: MediaEffectType;
   imageId: string;
   target: string;
+  storageProfileId: string;
   attempts: number;
 };
 
@@ -24,7 +25,11 @@ export class CdnInvalidationError extends Error {
 
 export interface MediaEffectRepositoryPort {
   claimPending(limit: number): Promise<readonly ClaimedMediaEffect[]>;
-  isCurrentStorageKey(imageId: string, storageKey: string): Promise<boolean>;
+  isCurrentStorageKey(
+    imageId: string,
+    storageProfileId: string,
+    storageKey: string,
+  ): Promise<boolean>;
   markCompleted(effectId: string): Promise<void>;
   markRetry(effectId: string, availableAt: Date, code: string): Promise<void>;
   markFailed(effectId: string, code: string): Promise<void>;

@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { users } from "./authentication.js";
 import { chapters } from "./chapters.js";
+import { storageProfiles } from "./storage-profiles.js";
 
 export const chapterReplacementOperationStatusEnum = pgEnum(
   "chapter_replacement_operation_status",
@@ -40,6 +41,9 @@ export const chapterReplacementOperations = pgTable(
     candidateZipStorageKey: text("candidate_zip_storage_key")
       .notNull()
       .unique(),
+    storageProfileId: uuid("storage_profile_id")
+      .notNull()
+      .references(() => storageProfiles.id, { onDelete: "restrict" }),
     originalFilename: text("original_filename").notNull(),
     contentType: text("content_type").notNull(),
     sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),

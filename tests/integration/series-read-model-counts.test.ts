@@ -207,6 +207,7 @@ beforeAll(async () => {
     chapterId: chapterIds[2] as string,
     requestedByUserId: gestorId,
     candidateZipStorageKey: `series-counts/${retirementOperationId}.zip`,
+    storageProfileId: "00000000-0000-4000-8000-000000000001",
     originalFilename: "retirement-fixture.zip",
     contentType: "application/zip",
     sizeBytes: 1,

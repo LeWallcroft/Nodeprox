@@ -59,6 +59,7 @@ export class DrizzleChapterMediaReplacementRepository
           currentVersion: imageVersions.version,
           currentPhysicalFilename: imageVersions.physicalFilename,
           currentStorageKey: imageVersions.storageKey,
+          currentStorageProfileId: imageVersions.storageProfileId,
           currentContentType: imageVersions.contentType,
         })
         .from(images)
@@ -101,7 +102,14 @@ export class DrizzleChapterMediaReplacementRepository
           asc(chapterReplacementItems.id),
         )
         .for("update");
-      if (!validManifest(items, chapter.seriesSlug, chapter.publicKey))
+      if (
+        !validManifest(
+          items,
+          chapter.seriesSlug,
+          chapter.publicKey,
+          operation.storageProfileId,
+        )
+      )
         return { outcome: "invalid" as const };
 
       const [claimed] = await tx
@@ -145,6 +153,7 @@ export class DrizzleChapterMediaReplacementRepository
             chapterId: chapter.id,
             filename: item.physicalFilename,
             storageKey: item.candidateStorageKey,
+            storageProfileId: item.storageProfileId,
             extension: parsed.extension,
             contentType: item.contentType,
             sizeBytes: item.sizeBytes,
@@ -161,6 +170,7 @@ export class DrizzleChapterMediaReplacementRepository
           version,
           physicalFilename: item.physicalFilename,
           storageKey: item.candidateStorageKey,
+          storageProfileId: item.storageProfileId,
           extension: parsed.extension,
           contentType: item.contentType,
           sizeBytes: item.sizeBytes,
@@ -173,6 +183,7 @@ export class DrizzleChapterMediaReplacementRepository
             .set({
               filename: item.physicalFilename,
               storageKey: item.candidateStorageKey,
+              storageProfileId: item.storageProfileId,
               extension: parsed.extension,
               contentType: item.contentType,
               sizeBytes: item.sizeBytes,
@@ -237,12 +248,14 @@ export class DrizzleChapterMediaReplacementRepository
         return [
           {
             replacementOperationId: operation.id,
+            storageProfileId: image.currentStorageProfileId,
             effectType: "cdn_purge" as const,
             imageId: image.id,
             target: oldPublicUrl,
           },
           {
             replacementOperationId: operation.id,
+            storageProfileId: image.currentStorageProfileId,
             effectType: "storage_delete" as const,
             imageId: image.id,
             target: image.currentStorageKey,
@@ -319,12 +332,14 @@ function validManifest(
   items: readonly (typeof chapterReplacementItems.$inferSelect)[],
   seriesSlug: string,
   chapterPublicKey: string,
+  storageProfileId: string,
 ): boolean {
   if (items.length === 0) return false;
   const orders = new Set<number>();
   for (const item of items) {
     if (
       item.storedAt === null ||
+      item.storageProfileId !== storageProfileId ||
       item.resultImageId !== null ||
       item.resultImageVersionId !== null ||
       !Number.isSafeInteger(item.sortOrder) ||

@@ -1,6 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { StoragePort } from "@nodeprox/storage/port";
+import type {
+  ActiveStorageProfilePort,
+  StorageExecutionResolver,
+} from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { createImageCandidateStorageKey } from "../../domain/image-candidate-storage-key.js";
 import type {
@@ -24,7 +28,8 @@ export class ReplaceImageService {
   constructor(
     private readonly repository: MediaReplacementRepositoryPort,
     private readonly authorization: ChapterImageAuthorizationPort,
-    private readonly storage: StoragePort,
+    private readonly storageExecution: StorageExecutionResolver,
+    private readonly activeProfile: ActiveStorageProfilePort,
     publicMediaOrigin: string,
     private readonly observability: MediaReplacementObservabilityPort,
     activator?: Pick<ActivateImageCandidateService, "execute">,
@@ -64,6 +69,10 @@ export class ReplaceImageService {
     if (!decision.allowed) throw new ImageReplacementDeniedError();
 
     const operationId = randomUUID();
+    const storageProfileId =
+      await this.activeProfile.getActiveStorageProfileId();
+    const storage: StoragePort =
+      await this.storageExecution.storageFor(storageProfileId);
     const contentType = normalizeContentType(input.contentType);
     if (contentType !== candidateContext.currentContentType)
       throw new ImageReplacementInvalidError();
@@ -75,7 +84,7 @@ export class ReplaceImageService {
     });
     let objectWritten = false;
     try {
-      const stored = await this.storage.put({
+      const stored = await storage.put({
         key: candidateKey,
         body: input.body,
         contentType,
@@ -87,7 +96,7 @@ export class ReplaceImageService {
         stored.key !== candidateKey ||
         stored.sizeBytes !== input.sizeBytes ||
         storedContentType !== contentType ||
-        !(await this.storage.exists(candidateKey))
+        !(await storage.exists(candidateKey))
       )
         throw new ImageReplacementStorageError();
 
@@ -95,6 +104,7 @@ export class ReplaceImageService {
         context: input.context,
         imageId: input.imageId,
         candidateStorageKey: stored.key,
+        storageProfileId,
         contentType: storedContentType,
         sizeBytes: stored.sizeBytes,
         checksum: input.checksum,
@@ -104,18 +114,20 @@ export class ReplaceImageService {
     } catch (error) {
       if (objectWritten) {
         try {
-          await this.storage.delete(candidateKey);
+          await storage.delete(candidateKey);
         } catch (cleanupError) {
           try {
             await this.repository.enqueueOrphanCleanup({
               operationId,
               imageId: input.imageId,
+              storageProfileId,
               storageKey: candidateKey,
             });
           } catch {
             this.observability.orphanCandidate({
               operationId,
               imageId: input.imageId,
+              storageProfileId,
               storageKey: candidateKey,
               errorName:
                 cleanupError instanceof Error

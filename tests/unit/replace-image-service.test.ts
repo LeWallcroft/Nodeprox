@@ -6,6 +6,11 @@ import type {
 } from "../../apps/api/src/modules/images/application/media-replacement.ports.js";
 import { ReplaceImageService } from "../../apps/api/src/modules/images/application/services/replace-image.service.js";
 import type { StoragePort } from "@nodeprox/storage/port";
+import {
+  legacyActiveProfile,
+  legacyStorageExecution,
+  legacyStorageProfileId,
+} from "../helpers/storage-execution.js";
 
 const context = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -23,6 +28,7 @@ function transaction(version = 1): MediaReplacementTransactionPort {
       logicalFilename: "00.jpg",
       current: {
         id: "55555555-5555-4555-8555-555555555555",
+        storageProfileId: legacyStorageProfileId,
         version,
         physicalFilename: version === 1 ? "00.jpg" : `00_v${version}.jpg`,
         storageKey: `Media/raven/1-5/${version === 1 ? "00.jpg" : `00_v${version}.jpg`}`,
@@ -72,12 +78,13 @@ function storage(overrides: Partial<StoragePort> = {}): StoragePort {
 function service(
   repo: MediaReplacementRepositoryPort,
   objectStorage: StoragePort,
-  activator?: ConstructorParameters<typeof ReplaceImageService>[5],
+  activator?: ConstructorParameters<typeof ReplaceImageService>[6],
 ) {
   return new ReplaceImageService(
     repo,
     { check: vi.fn(async () => ({ allowed: true, reason: "role" })) },
-    objectStorage,
+    legacyStorageExecution(objectStorage),
+    legacyActiveProfile,
     "https://media.nodeprox.org",
     { orphanCandidate: vi.fn() },
     activator,

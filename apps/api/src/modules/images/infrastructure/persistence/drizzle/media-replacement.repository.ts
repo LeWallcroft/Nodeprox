@@ -71,6 +71,7 @@ export class DrizzleMediaReplacementRepository
           seriesSlug: series.slug,
           chapterPublicKey: chapters.publicKey,
           currentId: imageVersions.id,
+          storageProfileId: imageVersions.storageProfileId,
           currentVersion: imageVersions.version,
           physicalFilename: imageVersions.physicalFilename,
           storageKey: imageVersions.storageKey,
@@ -104,6 +105,7 @@ export class DrizzleMediaReplacementRepository
           logicalFilename: initial.physicalFilename,
           current: {
             id: row.currentId,
+            storageProfileId: row.storageProfileId,
             version: row.currentVersion,
             physicalFilename: row.physicalFilename,
             storageKey: row.storageKey,
@@ -126,6 +128,7 @@ export class DrizzleMediaReplacementRepository
               currentVersionId: version.id,
               filename: input.next.physicalFilename,
               storageKey: input.next.storageKey,
+              storageProfileId: input.next.storageProfileId,
               extension: input.next.extension,
               contentType: input.next.contentType,
               sizeBytes: input.next.sizeBytes,
@@ -144,12 +147,14 @@ export class DrizzleMediaReplacementRepository
           await tx.insert(mediaEffectOutbox).values([
             {
               replacementOperationId: input.operationId,
+              storageProfileId: row.storageProfileId,
               effectType: "cdn_purge",
               imageId,
               target: input.oldPublicUrl,
             },
             {
               replacementOperationId: input.operationId,
+              storageProfileId: row.storageProfileId,
               effectType: "storage_delete",
               imageId,
               target: row.storageKey,
@@ -232,12 +237,14 @@ export class DrizzleMediaReplacementRepository
   async enqueueOrphanCleanup(input: {
     operationId: string;
     imageId: string;
+    storageProfileId: string;
     storageKey: string;
   }): Promise<void> {
     await this.db
       .insert(mediaEffectOutbox)
       .values({
         replacementOperationId: input.operationId,
+        storageProfileId: input.storageProfileId,
         effectType: "storage_delete",
         imageId: input.imageId,
         target: input.storageKey,
