@@ -29,10 +29,15 @@ export const queryKeys = {
       ["chapters", chapterId, "replacements", replacementId] as const,
   },
   ingestion: {
-    batch: (batchId: string) => ["ingestion", "batch", batchId] as const,
+    batch: (batchId: string, userId?: string) =>
+      userId
+        ? (["ingestion", "batch", batchId, userId] as const)
+        : (["ingestion", "batch", batchId] as const),
   },
   uploads: {
     operations: ["uploads", "operations"] as const,
+    operationsForUser: (userId: string) =>
+      ["uploads", "operations", userId] as const,
   },
   publication: {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,

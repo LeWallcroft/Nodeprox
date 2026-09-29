@@ -108,6 +108,7 @@ beforeAll(async () => {
     {
       id: uploaderTwoId,
       email: emails.uploaderTwo,
+      discordUsername: "m3_uploader_two",
       passwordHash,
       status: "active",
       role: "uploader",
@@ -355,6 +356,7 @@ describe("M3 Series and Chapters Core", () => {
       id: uploaderTwoId,
       email: emails.uploaderTwo,
       role: "uploader",
+      discordUsername: "m3_uploader_two",
     });
 
     const returnToOwner = await app.inject({

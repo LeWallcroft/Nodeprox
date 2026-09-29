@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { uploadQueueStorageKey } from "../providers/upload-queue-provider";
 import {
   errorLabel,
   isActiveItem,
@@ -9,6 +10,13 @@ import {
 } from "./upload-center";
 
 describe("Upload Center presentation", () => {
+  it("keeps browser-tracked batches isolated by authenticated user", () => {
+    expect(uploadQueueStorageKey("user-a")).not.toBe(
+      uploadQueueStorageKey("user-b"),
+    );
+    expect(uploadQueueStorageKey("user-a")).toContain("user-a");
+  });
+
   it("only treats a fully ready persisted batch as dismissible", () => {
     expect(
       isReadyBatch({
@@ -77,5 +85,12 @@ describe("Upload Center presentation", () => {
     expect(provider).toContain(
       "tracked.map((batch) => refreshBatch(batch.batchId))",
     );
+    expect(center).toContain("visibleRecords.filter");
+    expect(center).toContain("previousPathname.current !== pathname");
+    expect(center).toContain(
+      'addEventListener("pointerdown", closeWhenLeaving)',
+    );
+    expect(provider).toContain('operationsForUser(userId ?? "anonymous")');
+    expect(provider).toContain("uploadQueueStorageKey(userId)");
   });
 });

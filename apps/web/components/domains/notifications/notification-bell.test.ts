@@ -24,4 +24,16 @@ describe("NotificationBell", () => {
     expect(source).toContain("if (destination) router.push(destination)");
     expect(source).not.toContain("router.push(notification.actionKey)");
   });
+
+  it("closes the panel when pointer or keyboard focus moves outside", () => {
+    const source = readFileSync(
+      "apps/web/components/domains/notifications/notification-bell.tsx",
+      "utf8",
+    );
+    expect(source).toContain(
+      'addEventListener("pointerdown", closeWhenLeaving)',
+    );
+    expect(source).toContain('addEventListener("focusin", closeWhenLeaving)');
+    expect(source).toContain("!root.current?.contains(event.target)");
+  });
 });

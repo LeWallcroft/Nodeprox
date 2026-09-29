@@ -7,18 +7,24 @@ export function FieldShell({
   error,
   required,
   labelHidden = false,
+  disabled = false,
+  readOnly = false,
   children,
 }: {
   id: string;
   label: string;
   description?: string;
-  error?: string;
+  error?: string | undefined;
   required?: boolean;
   labelHidden?: boolean;
+  disabled?: boolean | undefined;
+  readOnly?: boolean;
   children: ReactNode;
 }) {
   return (
-    <div className="grid gap-2 text-sm">
+    <div
+      className={`grid gap-2 text-sm ${disabled ? "opacity-60" : ""} ${readOnly ? "rounded-control bg-surface-hover/40 p-2" : ""}`}
+    >
       <label
         className={labelHidden ? "sr-only" : "font-medium text-text-secondary"}
         htmlFor={id}
@@ -37,10 +43,17 @@ export function FieldShell({
         </p>
       ) : null}
       {error ? (
-        <p id={`${id}-error`} role="alert" className="m-0 text-xs text-danger">
+        <p
+          id={`${id}-error`}
+          role="alert"
+          className="m-0 h-4 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-danger"
+          title={error}
+        >
           {error}
         </p>
-      ) : null}
+      ) : (
+        <span aria-hidden="true" className="block h-4" />
+      )}
     </div>
   );
 }

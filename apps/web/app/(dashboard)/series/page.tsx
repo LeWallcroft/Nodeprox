@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { Plus, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "../../../components/domains/feedback";
@@ -18,6 +18,7 @@ import { LoadingState } from "../../../components/ui/loading-state";
 import { Pagination } from "../../../components/ui/pagination";
 import { SearchInput } from "../../../components/ui/search-input";
 import { hasCapability } from "../../../lib/auth/visibility";
+import { useProfile } from "../../../lib/domains/account/hooks";
 import { useCapabilities } from "../../../lib/domains/auth/hooks";
 import { useAvailableSeriesCreationGrants } from "../../../lib/domains/authorizations/hooks";
 import { requiresSeriesCreationGrant } from "../../../lib/domains/series/creation-policy";
@@ -35,6 +36,7 @@ import {
 import type { SeriesInput } from "../../../lib/domains/series/types";
 import {
   filterSeries,
+  filterSeriesByResponsible,
   toSeriesListItem,
 } from "../../../lib/domains/series/view-model";
 
@@ -43,12 +45,14 @@ const pageSize = 10;
 export default function SeriesPage() {
   const listQuery = useSeriesList();
   const globalCapabilities = useCapabilities();
+  const profile = useProfile();
   const create = useCreateSeries();
   const remove = useDeleteSeries();
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const didInitializeSelection = useRef(false);
   const [query, setQuery] = useState("");
   const [responsible, setResponsible] = useState("");
+  const [mineOnly, setMineOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -72,6 +76,9 @@ export default function SeriesPage() {
     globalCapabilities.data?.capabilities,
   );
   const isGestor = globalCapabilities.data?.role === "gestor";
+  const canFilterMySeries = ["admin", "gestor"].includes(
+    globalCapabilities.data?.role ?? "",
+  );
   const seriesChannels = useSelectableSeriesChannels(creating && isGestor);
   const availableGrants = useAvailableSeriesCreationGrants(requiresGrant);
   const canCreate = canCreateWithoutGrant || requiresGrant;
@@ -80,11 +87,19 @@ export default function SeriesPage() {
     (!availableGrants.isSuccess || availableGrants.data.length === 0);
 
   const items = useMemo(() => {
-    const filtered = filterSeries(listQuery.data ?? [], query).filter(
+    const baseSeries = mineOnly
+      ? filterSeriesByResponsible(listQuery.data ?? [], profile.data?.id)
+      : (listQuery.data ?? []);
+    const filtered = filterSeries(baseSeries, query).filter(
       (series) => !responsible || series.responsibleUser?.email === responsible,
     );
     return filtered.map(toSeriesListItem);
-  }, [listQuery.data, query, responsible]);
+  }, [listQuery.data, mineOnly, profile.data?.id, query, responsible]);
+  const mySeriesCount = useMemo(
+    () =>
+      filterSeriesByResponsible(listQuery.data ?? [], profile.data?.id).length,
+    [listQuery.data, profile.data?.id],
+  );
   const responsibleOptions = useMemo(
     () =>
       [
@@ -106,6 +121,12 @@ export default function SeriesPage() {
     didInitializeSelection.current = true;
     setSelectedSeriesId(initialSeriesId);
   }, [listQuery.data]);
+  useEffect(() => {
+    if (!mineOnly) return;
+    if (selectedSeriesId && items.some((item) => item.id === selectedSeriesId))
+      return;
+    setSelectedSeriesId(items[0]?.id ?? null);
+  }, [items, mineOnly, selectedSeriesId]);
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageItems = items.slice(
@@ -214,6 +235,22 @@ export default function SeriesPage() {
       {listQuery.isSuccess && listQuery.data.length > 0 ? (
         <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] xl:items-stretch">
           <Card className="flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap xl:col-span-2">
+            {canFilterMySeries ? (
+              <Button
+                aria-pressed={mineOnly}
+                disabled={!profile.data?.id}
+                type="button"
+                variant={mineOnly ? "primary" : "secondary"}
+                onClick={() => {
+                  setMineOnly((current) => !current);
+                  setPage(1);
+                }}
+              >
+                <UserRound aria-hidden="true" className="size-4" />
+                Mis series
+                <span className="text-xs opacity-80">{mySeriesCount}</span>
+              </Button>
+            ) : null}
             <div className="w-full max-w-xs shrink">
               <SearchInput
                 placeholder="Buscar series..."

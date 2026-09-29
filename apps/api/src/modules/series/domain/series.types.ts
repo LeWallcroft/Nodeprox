@@ -2,6 +2,7 @@ export type SeriesResponsibleUser = {
   id: string;
   email: string;
   role: "admin" | "gestor" | "uploader";
+  discordUsername?: string | null;
 };
 
 export type SeriesResponsibleCandidate = SeriesResponsibleUser;

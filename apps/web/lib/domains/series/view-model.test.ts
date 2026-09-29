@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { filterSeries, toSeriesListItem } from "./view-model";
+import {
+  filterSeries,
+  filterSeriesByResponsible,
+  toSeriesListItem,
+} from "./view-model";
 
 const series = [
   {
@@ -55,6 +59,34 @@ describe("Series list view model", () => {
     expect(filterSeries(series, "rav")).toHaveLength(1);
     expect(filterSeries(series, "NORTHWIND")).toHaveLength(1);
     expect(filterSeries(series, "missing")).toHaveLength(0);
+  });
+
+  it("filters only Series assigned to the current responsible user", () => {
+    const first = series.at(0);
+    const second = series.at(1);
+    if (!first || !second) throw new Error("Expected Series fixtures");
+    const mine = {
+      ...first,
+      responsibleUser: {
+        id: "current-user",
+        email: "me@example.com",
+        role: "gestor" as const,
+      },
+    };
+    const assignedToOther = {
+      ...second,
+      createdBy: "current-user",
+      responsibleUser: {
+        id: "other-user",
+        email: "other@example.com",
+        role: "gestor" as const,
+      },
+    };
+
+    expect(
+      filterSeriesByResponsible([mine, assignedToOther], "current-user"),
+    ).toEqual([mine]);
+    expect(filterSeriesByResponsible([mine], null)).toEqual([]);
   });
 
   it("preserves authoritative zero and non-zero aggregate counts", () => {

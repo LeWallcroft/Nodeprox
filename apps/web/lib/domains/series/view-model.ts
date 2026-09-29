@@ -36,3 +36,13 @@ export function filterSeries(
     `${series.title} ${series.slug}`.toLocaleLowerCase().includes(value),
   );
 }
+
+export function filterSeriesByResponsible(
+  items: readonly SeriesListProjection[],
+  responsibleUserId: string | null | undefined,
+) {
+  if (!responsibleUserId) return [];
+  return items.filter(
+    (series) => series.responsibleUser?.id === responsibleUserId,
+  );
+}

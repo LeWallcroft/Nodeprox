@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6
         with:
           version: 11.19.0
@@ -32,7 +34,26 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      - run: pnpm format:check
+      - name: Resolve format baseline
+        id: format-baseline
+        shell: bash
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) format_base="$PR_BASE_SHA" ;;
+            push) format_base="$PUSH_BASE_SHA" ;;
+            *) format_base="" ;;
+          esac
+
+          if [[ -z "$format_base" || "$format_base" =~ ^0+$ ]] || ! git cat-file -e "${format_base}^{commit}" 2>/dev/null; then
+            format_base="$(git rev-parse HEAD^)"
+          fi
+
+          echo "sha=$format_base" >> "$GITHUB_OUTPUT"
+      - name: Format changed files against baseline
+        run: pnpm exec biome format --changed --since=${{ steps.format-baseline.outputs.sha }}
       - run: pnpm typecheck
 
   unit:

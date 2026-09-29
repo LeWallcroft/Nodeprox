@@ -10,8 +10,8 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
+import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
@@ -432,6 +432,7 @@ export class DrizzleSeriesRepository
         id: users.id,
         email: users.email,
         role: users.role,
+        discordUsername: users.discordUsername,
       })
       .from(seriesAssignments)
       .innerJoin(users, eq(users.id, seriesAssignments.responsibleUserId))
@@ -439,7 +440,12 @@ export class DrizzleSeriesRepository
     return new Map(
       rows.map((row) => [
         row.seriesId,
-        { id: row.id, email: row.email, role: row.role },
+        {
+          id: row.id,
+          email: row.email,
+          role: row.role,
+          discordUsername: row.discordUsername,
+        },
       ]),
     );
   }

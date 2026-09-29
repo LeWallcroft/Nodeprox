@@ -18,9 +18,15 @@ describe("Phase 9 user identification presentation", () => {
     expect(helpers).toContain("candidate.email");
   });
 
-  it("keeps settings units explicit", () => {
-    const settings = read("apps/web/app/(dashboard)/admin/settings/page.tsx");
-    expect(settings).toContain('"MB"');
-    expect(settings).toContain('"px"');
+  it("keeps settings units in the canonical API registry, not a Web key heuristic", () => {
+    const registry = read(
+      "apps/api/src/modules/authorization/domain/product-settings.registry.ts",
+    );
+    const page = read("apps/web/app/(dashboard)/admin/settings/page.tsx");
+    expect(registry).toContain('unit: "MB"');
+    expect(registry).toContain('unit: "px"');
+    expect(registry).toContain('unit: "cargas"');
+    expect(page).not.toContain("upload_warning_image_size_mb");
+    expect(page).not.toContain('"MB"');
   });
 });

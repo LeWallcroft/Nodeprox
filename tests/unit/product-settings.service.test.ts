@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import type { AuthorizationService } from "../../apps/api/src/modules/authorization/application/services/authorization.service.js";
 import {
   ProductSettingsService,
   ProductSettingsValidationError,
 } from "../../apps/api/src/modules/authorization/application/services/product-settings.service.js";
-import type { AuthorizationService } from "../../apps/api/src/modules/authorization/application/services/authorization.service.js";
 
 function setup(values = new Map<string, number | boolean | string>()) {
   const repository = {
@@ -24,15 +24,29 @@ describe("ProductSettingsService", () => {
 
   it("projects only registered product settings with persisted overrides", async () => {
     const { service } = setup(new Map([["helper_cooldown_days", 14]]));
-    await expect(service.list(context)).resolves.toEqual({
-      sections: expect.arrayContaining([
-        expect.objectContaining({
-          fields: [
-            expect.objectContaining({ key: "helper_cooldown_days", value: 14 }),
-          ],
-        }),
-      ]),
-    });
+    const result = await service.list(context);
+    const fields = result.sections.flatMap((section) => section.fields);
+    expect(fields).toHaveLength(5);
+    expect(fields).toContainEqual(
+      expect.objectContaining({
+        key: "helper_cooldown_days",
+        value: 14,
+        label: "Espera para volver a colaborar",
+        unit: "días",
+        helpText:
+          "Tiempo mínimo antes de volver a conceder colaboración en la misma serie.",
+        impact: "Cambia cuándo puede volver a concederse colaboración.",
+        constraints: { min: 0, max: 365 },
+      }),
+    );
+    expect(fields).toContainEqual(
+      expect.objectContaining({
+        key: "bulk_upload_concurrency",
+        label: "Subidas ZIP simultáneas",
+        unit: "cargas",
+        constraints: { min: 1, max: 5 },
+      }),
+    );
   });
 
   it("rejects unknown and out-of-range values", async () => {
