@@ -53,8 +53,8 @@ export function SeriesList({
           items.map((series, index) => {
             const selected = selectedId === series.id;
             const responsible = series.responsibleUser;
-              const responsibleName =
-                responsible?.discordUsername || responsible?.email;
+            const responsibleName =
+              responsible?.discordUsername || responsible?.email;
             return (
               <tr
                 key={series.id}
