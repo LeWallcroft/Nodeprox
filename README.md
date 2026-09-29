@@ -24,19 +24,20 @@ pnpm db:check
 pnpm dev
 ```
 
-La API usa `http://127.0.0.1:3001` y el frontend Next.js `http://localhost:3000`. La transferencia directa local requiere `STORAGE_PROVIDER=b2`, las variables B2 server-side y la política bucket CORS descrita en [B2 direct upload](docs/architecture/b2-direct-upload.md). Para el mapa técnico vigente, ver [arquitectura](docs/architecture/README.md); para operación y validación, ver [despliegue V1](docs/deployment/V1_DEPLOYMENT.md) y [quality gates](docs/development/QUALITY_GATES.md).
+La API usa `http://127.0.0.1:3001` y el frontend Next.js `http://localhost:3000`. La transferencia directa local requiere `STORAGE_PROVIDER=b2`, las variables B2 server-side y la política bucket CORS descrita en [B2 direct upload](docs/architecture/b2-direct-upload.md). El control plane de StorageProfile administra readiness y operaciones B2/Cloudflare; en producción sus operaciones comienzan deshabilitadas y requieren habilitación y acción administrativa explícitas. Consulta el [runbook de despliegue y rollout de StorageProfile](docs/deployment/V1_DEPLOYMENT.md). Para el mapa técnico vigente, ver [arquitectura](docs/architecture/README.md) y para CI, [Quality Gates](docs/development/QUALITY_GATES.md).
 
 ## Validación
 
 ```bash
 pnpm lint
-pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm test:integration
-pnpm test:e2e
 pnpm build
+pnpm test:e2e
 ```
+
+CI aplica formato Biome a los archivos cambiados contra la revisión base del evento. `pnpm format:check` sigue disponible como diagnóstico de formato de todo el repositorio y limpieza de deuda histórica; no representa el formatter incremental requerido por CI.
 
 Los comandos de base de datos y B2 son comprobaciones operativas separadas y requieren el entorno correspondiente:
 
