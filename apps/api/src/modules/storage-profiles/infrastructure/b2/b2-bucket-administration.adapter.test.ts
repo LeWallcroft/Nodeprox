@@ -112,10 +112,113 @@ describe("B2 bucket administration", () => {
         })
       ).status,
     ).toBe("verified");
-    expect(f.state.lifecycle).toHaveLength(2);
+    expect(f.state.lifecycle).toHaveLength(3);
     expect(f.state.lifecycle[0]).toMatchObject({
       ID: "foreign",
       Expiration: { Days: 10 },
+    });
+    expect(f.state.lifecycle[1]).toMatchObject({
+      ID: "nodeprox-uploads-v1",
+      Status: "Enabled",
+      Filter: { Prefix: "uploads/" },
+      Expiration: { Days: 1 },
+      NoncurrentVersionExpiration: { NoncurrentDays: 1 },
+      AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+    });
+    expect(f.state.lifecycle[2]).toMatchObject({
+      ID: "nodeprox-uploads-v1_marker",
+      Status: "Enabled",
+      Filter: { Prefix: "uploads/" },
+      Expiration: { ExpiredObjectDeleteMarker: true },
+    });
+    const putCount = f.s3.send.mock.calls.filter(
+      ([command]) => command instanceof PutBucketLifecycleConfigurationCommand,
+    ).length;
+    await expect(
+      f.adapter.ensureNodeProxLifecycle({
+        credentials,
+        inspection,
+        recheckOnly: false,
+      }),
+    ).resolves.toMatchObject({ status: "verified" });
+    expect(
+      f.s3.send.mock.calls.filter(
+        ([command]) =>
+          command instanceof PutBucketLifecycleConfigurationCommand,
+      ),
+    ).toHaveLength(putCount);
+  });
+
+  it("normalizes the base and marker pair and repairs a missing marker only when allowed", async () => {
+    const f = provider();
+    f.state.lifecycle = [
+      {
+        ID: "nodeprox-uploads-v1",
+        Status: "Enabled",
+        Filter: { Prefix: "uploads/" },
+        Expiration: { Days: 1 },
+        NoncurrentVersionExpiration: { NoncurrentDays: 1 },
+        AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+      },
+    ];
+    const inspection = await f.adapter.inspect(credentials);
+    await expect(
+      f.adapter.ensureNodeProxLifecycle({
+        credentials,
+        inspection,
+        recheckOnly: true,
+      }),
+    ).resolves.toMatchObject({ status: "manual_required" });
+    expect(f.s3.send).not.toHaveBeenCalledWith(
+      expect.any(PutBucketLifecycleConfigurationCommand),
+    );
+    await expect(
+      f.adapter.ensureNodeProxLifecycle({
+        credentials,
+        inspection,
+        recheckOnly: false,
+      }),
+    ).resolves.toMatchObject({ status: "verified" });
+    expect(f.state.lifecycle).toHaveLength(2);
+  });
+
+  it("replaces only an invalid owned marker family and treats its marker as owned", async () => {
+    const f = provider();
+    f.state.lifecycle = [
+      {
+        ID: "foreign",
+        Status: "Enabled",
+        Filter: { Prefix: "other/" },
+        Expiration: { Days: 10 },
+      },
+      {
+        ID: "nodeprox-uploads-v1",
+        Status: "Enabled",
+        Filter: { Prefix: "uploads/" },
+        Expiration: { Days: 1 },
+        NoncurrentVersionExpiration: { NoncurrentDays: 1 },
+        AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+      },
+      {
+        ID: "nodeprox-uploads-v1_marker",
+        Status: "Enabled",
+        Filter: { Prefix: "Media/" },
+        Expiration: { ExpiredObjectDeleteMarker: true },
+      },
+    ];
+    const inspection = await f.adapter.inspect(credentials);
+    await expect(
+      f.adapter.ensureNodeProxLifecycle({
+        credentials,
+        inspection,
+        recheckOnly: false,
+      }),
+    ).resolves.toMatchObject({ status: "verified" });
+    expect(f.state.lifecycle).toHaveLength(3);
+    expect(f.state.lifecycle[0]).toMatchObject({ ID: "foreign" });
+    expect(f.state.lifecycle[2]).toMatchObject({
+      ID: "nodeprox-uploads-v1_marker",
+      Filter: { Prefix: "uploads/" },
     });
   });
   it("blocks a broad lifecycle that would expire Media", async () => {
