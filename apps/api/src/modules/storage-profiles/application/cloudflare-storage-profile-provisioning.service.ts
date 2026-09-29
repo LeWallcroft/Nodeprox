@@ -37,6 +37,31 @@ export class CloudflareProvisioningError extends Error {
 }
 
 function providerFailure(error: unknown): string {
+  if (error instanceof Error && "code" in error) {
+    const providerError = error as Error & {
+      code?: unknown;
+      httpStatus?: unknown;
+      providerCode?: unknown;
+    };
+    if (typeof providerError.code === "string") {
+      if (providerError.code === "CLOUDFLARE_AUTHORIZATION_ERROR")
+        return providerError.code;
+      if (/^[A-Z][A-Z0-9_]+$/.test(providerError.code)) {
+        const status =
+          typeof providerError.httpStatus === "number" &&
+          Number.isInteger(providerError.httpStatus)
+            ? `_HTTP_${providerError.httpStatus}`
+            : "";
+        const providerCode =
+          typeof providerError.providerCode === "number" &&
+          Number.isSafeInteger(providerError.providerCode) &&
+          providerError.providerCode >= 0
+            ? `_CF_${providerError.providerCode}`
+            : "";
+        return `${providerError.code}${status}${providerCode}`;
+      }
+    }
+  }
   if (error instanceof Error && /^[A-Z][A-Z0-9_]+$/.test(error.message))
     return error.message;
   return "CLOUDFLARE_PROVIDER_ERROR";
@@ -112,14 +137,37 @@ export class CloudflareStorageProfileProvisioningService {
       ...(actorId ? { actorId } : {}),
       ...(requestId ? { requestId } : {}),
     });
+    let failedCheck:
+      | "cloudflare_dns"
+      | "cloudflare_transform"
+      | "cloudflare_cache"
+      | "cloudflare_delivery"
+      | null = "cloudflare_dns";
     try {
+      for (const type of [
+        "cloudflare_dns",
+        "cloudflare_transform",
+        "cloudflare_cache",
+        "cloudflare_delivery",
+      ] as const) {
+        await this.repository.upsertCheck({
+          profileId,
+          type,
+          status: "pending",
+        });
+      }
+
       const ref = transformRuleRef(profile.id);
-      const [transformPhase, cachePhase, records] = await Promise.all([
-        this.transform.inspect(TRANSFORM),
-        this.cache.inspect(CACHE),
-        this.dns.inspectHostname(profile.publicHostname),
-      ]);
-      this.assertOwnedResources(profile, transformPhase, cachePhase, records);
+      failedCheck = "cloudflare_transform";
+      const transformPhase = await this.transform.inspect(TRANSFORM);
+      this.assertTransformOwnership(profile, transformPhase);
+      failedCheck = "cloudflare_cache";
+      const cachePhase = await this.cache.inspect(CACHE);
+      this.assertCacheOwnership(profile, cachePhase);
+
+      failedCheck = "cloudflare_dns";
+      const records = await this.dns.inspectHostname(profile.publicHostname);
+      this.assertDnsOwnership(profile, records);
       const dnsRecord =
         records[0] ??
         (await this.dns.createManagedCname({
@@ -147,6 +195,7 @@ export class CloudflareStorageProfileProvisioningService {
         status: "verified",
       });
 
+      failedCheck = "cloudflare_transform";
       const rule: ManagedCloudflareRule = {
         ref,
         expression: transformRuleExpression(profile.publicHostname),
@@ -178,6 +227,7 @@ export class CloudflareStorageProfileProvisioningService {
         metadata: { transformRuleRef: ref },
       });
 
+      failedCheck = "cloudflare_cache";
       const hosts = await this.repository.listProvisionedManagedHostnames();
       const cacheRule: ManagedCloudflareRule = {
         ref: MANAGED_CACHE_RULE_REF,
@@ -205,7 +255,9 @@ export class CloudflareStorageProfileProvisioningService {
         type: "cloudflare_cache",
         status: "verified",
       });
+      failedCheck = "cloudflare_delivery";
       await this.probe(profile);
+      failedCheck = null;
       await this.repository.upsertCheck({
         profileId,
         type: "cloudflare_delivery",
@@ -229,12 +281,13 @@ export class CloudflareStorageProfileProvisioningService {
         status: "failed",
         errorCode: code,
       });
-      await this.repository.upsertCheck({
-        profileId,
-        type: "cloudflare_delivery",
-        status: "failed",
-        errorCode: code,
-      });
+      if (failedCheck)
+        await this.repository.upsertCheck({
+          profileId,
+          type: failedCheck,
+          status: "failed",
+          errorCode: code,
+        });
       await this.repository.recomputeReadiness(profileId);
       await this.repository.recordAudit?.({
         profileId,
@@ -248,10 +301,8 @@ export class CloudflareStorageProfileProvisioningService {
     }
   }
 
-  private assertOwnedResources(
+  private assertDnsOwnership(
     profile: StorageProfile,
-    transformPhase: Awaited<ReturnType<CloudflareRulesPort["inspect"]>>,
-    cachePhase: Awaited<ReturnType<CloudflareRulesPort["inspect"]>>,
     records: Awaited<ReturnType<CloudflareDnsPort["inspectHostname"]>>,
   ) {
     const marker = `nodeprox-storage-profile:${profile.id}`;
@@ -265,6 +316,12 @@ export class CloudflareStorageProfileProvisioningService {
       )
     )
       throw new CloudflareProvisioningError("CLOUDFLARE_DNS_CONFLICT");
+  }
+
+  private assertTransformOwnership(
+    profile: StorageProfile,
+    transformPhase: Awaited<ReturnType<CloudflareRulesPort["inspect"]>>,
+  ) {
     const ref = transformRuleRef(profile.id);
     const ownedTransform = transformPhase.rules.find(
       (rule) => rule.ref === ref,
@@ -274,6 +331,19 @@ export class CloudflareStorageProfileProvisioningService {
       ownedTransform?.id !== profile.transformRuleId
     )
       throw new CloudflareProvisioningError("CLOUDFLARE_RULE_CONFLICT");
+    assertNoForeignRuleConflict(
+      transformPhase.rules,
+      profile.publicHostname,
+      ref,
+      "transform",
+    );
+    assertRuleCapacity(transformPhase.rules, ref);
+  }
+
+  private assertCacheOwnership(
+    profile: StorageProfile,
+    cachePhase: Awaited<ReturnType<CloudflareRulesPort["inspect"]>>,
+  ) {
     if (
       profile.cacheRuleId &&
       cachePhase.rules.find((rule) => rule.ref === MANAGED_CACHE_RULE_REF)
@@ -281,18 +351,11 @@ export class CloudflareStorageProfileProvisioningService {
     )
       throw new CloudflareProvisioningError("CLOUDFLARE_RULE_CONFLICT");
     assertNoForeignRuleConflict(
-      transformPhase.rules,
-      profile.publicHostname,
-      ref,
-      "transform",
-    );
-    assertNoForeignRuleConflict(
       cachePhase.rules,
       profile.publicHostname,
       MANAGED_CACHE_RULE_REF,
       "cache",
     );
-    assertRuleCapacity(transformPhase.rules, ref);
     assertRuleCapacity(cachePhase.rules, MANAGED_CACHE_RULE_REF);
   }
 

@@ -48,8 +48,7 @@ export function managedCacheParameters(): Record<string, unknown> {
     browser_ttl: { mode: "override_origin", default: 7_200 },
     cache_key: {
       custom_key: {
-        query_string: { exclude: ["*"] },
-        header: { include: ["origin"] },
+        query_string: { exclude: { all: true } },
       },
     },
   };

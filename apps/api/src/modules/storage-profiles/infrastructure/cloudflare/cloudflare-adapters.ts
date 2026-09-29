@@ -9,12 +9,36 @@ import type {
 } from "../../application/ports/cloudflare.ports.js";
 
 type Fetcher = typeof fetch;
-type Envelope<T> = { success: boolean; result: T };
+type Envelope<T> = {
+  success: boolean;
+  result: T;
+  errors?: Array<{ code?: number | string }>;
+};
 
 export class CloudflareProviderError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly httpStatus?: number,
+    readonly providerCode?: number,
+  ) {
     super(code);
   }
+}
+
+function providerCodeFromEnvelope(value: unknown): number | undefined {
+  if (!value || typeof value !== "object" || !("errors" in value))
+    return undefined;
+  const errors = (value as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return undefined;
+  for (const error of errors) {
+    if (!error || typeof error !== "object" || !("code" in error)) continue;
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "number" && Number.isSafeInteger(code) && code >= 0)
+      return code;
+    if (typeof code === "string" && /^\d{1,10}$/.test(code))
+      return Number(code);
+  }
+  return undefined;
 }
 
 export class CloudflareClient {
@@ -48,10 +72,25 @@ export class CloudflareClient {
       throw new CloudflareProviderError("CLOUDFLARE_PROVIDER_ERROR");
     }
     if (allowMissing && response.status === 404) return null;
-    if (response.status === 401 || response.status === 403)
-      throw new CloudflareProviderError("CLOUDFLARE_AUTHORIZATION_ERROR");
-    if (!response.ok)
-      throw new CloudflareProviderError("CLOUDFLARE_PROVIDER_ERROR");
+    if (!response.ok) {
+      let providerCode: number | undefined;
+      try {
+        providerCode = providerCodeFromEnvelope(await response.json());
+      } catch {
+        // Preserve the safe HTTP diagnosis even when the provider body is invalid.
+      }
+      if (response.status === 401 || response.status === 403)
+        throw new CloudflareProviderError(
+          "CLOUDFLARE_AUTHORIZATION_ERROR",
+          response.status,
+          providerCode,
+        );
+      throw new CloudflareProviderError(
+        "CLOUDFLARE_PROVIDER_ERROR",
+        response.status,
+        providerCode,
+      );
+    }
     let envelope: Envelope<T>;
     try {
       envelope = (await response.json()) as Envelope<T>;
@@ -59,7 +98,11 @@ export class CloudflareClient {
       throw new CloudflareProviderError("CLOUDFLARE_PROVIDER_ERROR");
     }
     if (!envelope.success)
-      throw new CloudflareProviderError("CLOUDFLARE_PROVIDER_ERROR");
+      throw new CloudflareProviderError(
+        "CLOUDFLARE_PROVIDER_ERROR",
+        response.status,
+        providerCodeFromEnvelope(envelope),
+      );
     return envelope.result;
   }
 }

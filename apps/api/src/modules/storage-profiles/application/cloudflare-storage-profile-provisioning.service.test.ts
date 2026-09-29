@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { StoragePort } from "@nodeprox/storage/port";
 import type { ManagedStorageAdministrationResolver } from "@nodeprox/storage/profile-execution";
 import { CloudflareStorageProfileProvisioningService } from "./cloudflare-storage-profile-provisioning.service.js";
+import { CloudflareProviderError } from "../infrastructure/cloudflare/cloudflare-adapters.js";
 import type { StorageProfileReadinessRepository } from "./ports/storage-profile-readiness.ports.js";
 import type {
   CloudflareDnsPort,
@@ -50,9 +51,10 @@ function fixture() {
     >["rules"],
     cache: [] as Awaited<ReturnType<CloudflareRulesPort["inspect"]>>["rules"],
   };
+  let provisioningVersion = 0;
   const repository = {
     findById: vi.fn(async () => profile),
-    startCloudflareAttempt: vi.fn(async () => 1),
+    startCloudflareAttempt: vi.fn(async () => ++provisioningVersion),
     persistCloudflareIds: vi.fn(
       async (_id: string, _version: number, ids: Record<string, string>) =>
         Object.assign(profile, ids),
@@ -260,5 +262,73 @@ describe("Cloudflare managed provisioning", () => {
     expect(f.dns.createManagedCname).toHaveBeenCalledTimes(1);
     expect(f.state.transform).toHaveLength(1);
     expect(f.state.cache).toHaveLength(1);
+  });
+
+  it("attributes cache API failure to cache and retries owned DNS/transform without duplication", async () => {
+    const f = fixture();
+    const originalCreate = vi.mocked(f.rules.create).getMockImplementation();
+    if (!originalCreate) throw new Error("missing rules create fake");
+    let rejectCacheOnce = true;
+    vi.mocked(f.rules.create).mockImplementation(async (phase, rule) => {
+      if (phase === "http_request_cache_settings" && rejectCacheOnce) {
+        rejectCacheOnce = false;
+        throw new CloudflareProviderError(
+          "CLOUDFLARE_PROVIDER_ERROR",
+          400,
+          1004,
+        );
+      }
+      return originalCreate(phase, rule);
+    });
+
+    await expect(f.service.provision(f.profile.id)).rejects.toThrow(
+      "CLOUDFLARE_PROVIDER_ERROR_HTTP_400_CF_1004",
+    );
+    expect(f.repository.upsertCheck).toHaveBeenCalledWith({
+      profileId: f.profile.id,
+      type: "cloudflare_cache",
+      status: "failed",
+      errorCode: "CLOUDFLARE_PROVIDER_ERROR_HTTP_400_CF_1004",
+    });
+    expect(f.repository.upsertCheck).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "cloudflare_delivery",
+        status: "failed",
+      }),
+    );
+    expect(f.repository.upsertCheck).toHaveBeenCalledWith({
+      profileId: f.profile.id,
+      type: "cloudflare_delivery",
+      status: "pending",
+    });
+    expect(f.dns.createManagedCname).toHaveBeenCalledTimes(1);
+    expect(f.state.transform).toHaveLength(1);
+    expect(f.state.cache).toHaveLength(0);
+    expect(f.delivery.fetch).not.toHaveBeenCalled();
+
+    await f.service.provision(f.profile.id);
+
+    expect(f.dns.createManagedCname).toHaveBeenCalledTimes(1);
+    expect(f.state.transform).toHaveLength(1);
+    expect(f.rules.update).toHaveBeenCalledWith(
+      "http_request_transform",
+      { rulesetId: "transform-set", ruleId: "http_request_transform-rule" },
+      expect.objectContaining({
+        ref: "nodeprox_storage_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      }),
+    );
+    expect(f.state.cache).toHaveLength(1);
+    expect(f.delivery.fetch).toHaveBeenCalledTimes(1);
+    expect(f.repository.upsertCheck).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "cloudflare_delivery",
+        status: "verified",
+      }),
+    );
+    expect(f.repository.finishCloudflareAttempt).toHaveBeenLastCalledWith(
+      f.profile.id,
+      2,
+      { status: "verified" },
+    );
   });
 });
