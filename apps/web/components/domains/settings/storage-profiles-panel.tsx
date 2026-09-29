@@ -39,6 +39,33 @@ const statusTones = {
   retired: "neutral",
 } as const;
 
+export function toStorageProfileCreateInput(
+  input: Partial<StorageProfileDraftInput>,
+): StorageProfileDraftInput {
+  if (
+    input.name === undefined ||
+    input.publicHostnameLabel === undefined ||
+    input.b2Endpoint === undefined ||
+    input.b2Region === undefined ||
+    input.b2Bucket === undefined ||
+    input.b2KeyId === undefined
+  ) {
+    throw new Error("El borrador del perfil está incompleto.");
+  }
+
+  return {
+    name: input.name,
+    publicHostnameLabel: input.publicHostnameLabel,
+    b2Endpoint: input.b2Endpoint,
+    b2Region: input.b2Region,
+    b2Bucket: input.b2Bucket,
+    b2KeyId: input.b2KeyId,
+    ...(input.b2ApplicationKey === undefined
+      ? {}
+      : { b2ApplicationKey: input.b2ApplicationKey }),
+  };
+}
+
 export function StorageProfilesPanel() {
   const list = useStorageProfiles();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -85,24 +112,9 @@ export function StorageProfilesPanel() {
     if (selectedId) {
       await actions.update.mutateAsync({ id: selectedId, input });
     } else {
-      if (
-        input.name === undefined ||
-        input.publicHostnameLabel === undefined ||
-        input.b2Endpoint === undefined ||
-        input.b2Region === undefined ||
-        input.b2Bucket === undefined ||
-        input.b2KeyId === undefined
-      ) {
-        throw new Error("El borrador del perfil está incompleto.");
-      }
-      const created = await actions.create.mutateAsync({
-        name: input.name,
-        publicHostnameLabel: input.publicHostnameLabel,
-        b2Endpoint: input.b2Endpoint,
-        b2Region: input.b2Region,
-        b2Bucket: input.b2Bucket,
-        b2KeyId: input.b2KeyId,
-      });
+      const created = await actions.create.mutateAsync(
+        toStorageProfileCreateInput(input),
+      );
       setSelectedId(created.id);
       setCreating(false);
     }
