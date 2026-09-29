@@ -42,4 +42,35 @@ describe("StorageProfile editor presentation", () => {
     expect(markup).not.toContain("Eliminar");
     expect(markup).not.toContain("Nombre del bucket");
   });
+
+  it("does not render a managed profile's configured Application Key", () => {
+    const managedProfile: StorageProfileDetail = {
+      ...legacyProfile,
+      id: "managed-profile",
+      source: "managed",
+      status: "draft",
+      name: "Secondary bucket",
+      publicHostnameLabel: "secondary",
+      publicHostname: "secondary.nodeprox.org",
+      publicUrlPreview: "https://secondary.nodeprox.org",
+      credentialConfigured: true,
+      credentialVersion: 1,
+      b2Endpoint: "https://s3.us-west-004.backblazeb2.com",
+      b2Region: "us-west-004",
+      b2Bucket: "nodeprox-secondary",
+      b2KeyId: "managed-key-id",
+    };
+    const plaintext = "temporary-test-secret";
+    const markup = renderToStaticMarkup(
+      <StorageProfileEditor
+        profile={managedProfile}
+        busy={false}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(markup).not.toContain(plaintext);
+    expect(markup).not.toContain(`value="${plaintext}"`);
+    expect(markup).toContain("Application Key configurada");
+  });
 });
