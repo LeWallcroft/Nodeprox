@@ -2,6 +2,9 @@ export type ProductSettingField = {
   key: string;
   label: string;
   description: string;
+  unit: string;
+  helpText: string;
+  impact: string;
   type: "number" | "boolean" | "text" | "select";
   value: number | boolean | string;
   editable: boolean;

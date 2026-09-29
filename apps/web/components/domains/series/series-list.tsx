@@ -8,8 +8,8 @@ import {
 import { StatusBadge } from "../../ui/status-badge";
 import { SeriesCoverPreview } from "./series-cover-preview";
 
-function uploaderInitials(email: string | undefined) {
-  return email ? email.slice(0, 1).toLocaleUpperCase() : "—";
+function responsibleInitials(name: string | undefined) {
+  return name ? name.slice(0, 1).toLocaleUpperCase() : "—";
 }
 
 export function SeriesList({
@@ -52,12 +52,14 @@ export function SeriesList({
         ) : (
           items.map((series, index) => {
             const selected = selectedId === series.id;
-            const responsible = series.responsibleUser?.email;
+            const responsible = series.responsibleUser;
+              const responsibleName =
+                responsible?.discordUsername || responsible?.email;
             return (
               <tr
+                key={series.id}
                 {...getSelectableTableRowProps(() => onSelect(series.id))}
                 className={`h-[76px] cursor-pointer transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${index === items.length - 1 ? "border-b-0" : "border-b border-border"} ${selected ? "bg-primary-soft" : "hover:bg-surface-elevated"}`}
-                key={series.id}
               >
                 <td className="p-3 align-middle">
                   <button
@@ -107,15 +109,24 @@ export function SeriesList({
                   {new Date(series.updatedAt).toLocaleDateString("es-PE")}
                 </td>
                 <td className="p-3 align-middle">
-                  {responsible ? (
+                  {responsibleName ? (
                     <span className="flex min-w-36 items-center gap-2 text-sm text-muted">
                       <span
                         aria-hidden="true"
                         className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-elevated text-xs font-semibold text-text"
                       >
-                        {uploaderInitials(responsible)}
+                        {responsibleInitials(responsibleName)}
                       </span>
-                      <span className="max-w-36 truncate">{responsible}</span>
+                      <span className="grid min-w-0 max-w-40">
+                        <span className="truncate font-medium text-text">
+                          {responsibleName}
+                        </span>
+                        {responsible?.discordUsername ? (
+                          <span className="truncate text-xs text-muted">
+                            {responsible.email}
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
                   ) : (
                     <span className="text-muted">—</span>

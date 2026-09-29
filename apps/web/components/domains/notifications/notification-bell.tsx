@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   formatUnreadCount,
@@ -18,13 +18,45 @@ import { NotificationPanel } from "./notification-panel";
 
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const router = useRouter();
+  const pathname = usePathname();
+  const previousPathname = useRef(pathname);
   const unread = useNotificationUnreadCount();
   const notifications = useNotifications(open);
   const markRead = useMarkNotificationRead();
   const markAllRead = useMarkAllNotificationsRead();
   const unreadCount = unread.data?.count ?? 0;
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeWhenLeaving(event: PointerEvent | FocusEvent) {
+      if (
+        !(event.target instanceof Node) ||
+        !root.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeWhenLeaving);
+    document.addEventListener("focusin", closeWhenLeaving);
+    window.addEventListener("blur", closeWhenLeaving);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenLeaving);
+      document.removeEventListener("focusin", closeWhenLeaving);
+      window.removeEventListener("blur", closeWhenLeaving);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (previousPathname.current !== pathname) {
+      previousPathname.current = pathname;
+      setOpen(false);
+    }
+  }, [pathname]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -44,7 +76,7 @@ export function NotificationBell() {
   }
 
   return (
-    <div className="relative">
+    <div ref={root} className="relative">
       <button
         ref={trigger}
         aria-expanded={open}

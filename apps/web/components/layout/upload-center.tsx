@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { ImportBatchProjection } from "../../lib/domains/ingestion/types";
 import {
@@ -32,6 +33,9 @@ type UploadCenterItemRecord = {
 
 export function UploadCenter() {
   const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const pathname = usePathname();
+  const previousPathname = useRef(pathname);
   const [tab, setTab] = useState<UploadCenterTab>("active");
   const [dismissedCompletedBatchIds, setDismissedCompletedBatchIds] = useState<
     ReadonlySet<string>
@@ -40,6 +44,35 @@ export function UploadCenter() {
     useState<ReadonlySet<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
   const queue = useUploadQueue();
+
+  useEffect(() => {
+    if (!open) return;
+
+    function closeWhenLeaving(event: PointerEvent | FocusEvent) {
+      if (
+        !(event.target instanceof Node) ||
+        !root.current?.contains(event.target)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("pointerdown", closeWhenLeaving);
+    document.addEventListener("focusin", closeWhenLeaving);
+    window.addEventListener("blur", closeWhenLeaving);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenLeaving);
+      document.removeEventListener("focusin", closeWhenLeaving);
+      window.removeEventListener("blur", closeWhenLeaving);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (previousPathname.current !== pathname) {
+      previousPathname.current = pathname;
+      setOpen(false);
+    }
+  }, [pathname]);
 
   const records = useMemo(() => {
     const batchRecords = queue.batches.flatMap((batch) =>
@@ -81,14 +114,6 @@ export function UploadCenter() {
       );
     return [...batchRecords, ...operationRecords];
   }, [dismissedCompletedOperationIds, queue.batches, queue.operations]);
-  const counts = useMemo(
-    () => ({
-      active: records.filter(({ item }) => isActiveItem(item.status)).length,
-      completed: records.filter(({ item }) => item.status === "ready").length,
-      failed: records.filter(({ item }) => item.status === "failed").length,
-    }),
-    [records],
-  );
   const visibleBatches = useMemo(
     () =>
       queue.batches.filter(
@@ -102,15 +127,39 @@ export function UploadCenter() {
     () => new Set(visibleBatches.map((batch) => batch.batchId)),
     [visibleBatches],
   );
+  const visibleRecords = useMemo(
+    () =>
+      records.filter(({ batch, item }) => {
+        const dismissedOperation =
+          dismissedCompletedOperationIds.has(item.itemId) &&
+          item.status === "ready";
+        const dismissedBatch =
+          dismissedCompletedBatchIds.has(batch.batchId) &&
+          item.status === "ready";
+        return !dismissedOperation && !dismissedBatch;
+      }),
+    [dismissedCompletedBatchIds, dismissedCompletedOperationIds, records],
+  );
+  const counts = useMemo(
+    () => ({
+      active: visibleRecords.filter(({ item }) => isActiveItem(item.status))
+        .length,
+      completed: visibleRecords.filter(({ item }) => item.status === "ready")
+        .length,
+      failed: visibleRecords.filter(({ item }) => item.status === "failed")
+        .length,
+    }),
+    [visibleRecords],
+  );
   const tabItems = useMemo(
     () =>
-      records
+      visibleRecords
         .filter(
           ({ batch, retryable }) =>
             !retryable || visibleBatchIds.has(batch.batchId),
         )
         .filter(({ item }) => itemMatchesTab(item, tab)),
-    [records, tab, visibleBatchIds],
+    [tab, visibleBatchIds, visibleRecords],
   );
   const readyBatchIds = visibleBatches
     .filter(isReadyBatch)
@@ -140,7 +189,10 @@ export function UploadCenter() {
   }
 
   return (
-    <div className="fixed bottom-5 right-5 z-30 max-[767px]:bottom-3 max-[767px]:right-3">
+    <div
+      ref={root}
+      className="fixed bottom-5 right-5 z-30 max-[767px]:bottom-3 max-[767px]:right-3"
+    >
       {open ? (
         <section
           aria-label="Centro de cargas"

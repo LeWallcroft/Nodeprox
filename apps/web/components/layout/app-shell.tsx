@@ -15,7 +15,10 @@ export function AppShell({
   capabilities: readonly string[];
 }) {
   return (
-    <UploadQueueProvider>
+    <UploadQueueProvider
+      key={user?.id ?? "anonymous"}
+      userId={user?.id ?? null}
+    >
       <div className="dashboard-theme flex h-dvh overflow-hidden bg-background">
         <Sidebar capabilities={capabilities} />
         <div className="flex h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden">

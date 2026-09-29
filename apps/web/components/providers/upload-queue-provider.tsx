@@ -49,6 +49,10 @@ import {
 const STORAGE_KEY = "nodeprox:upload-queue:v1";
 const TRACKED_BATCH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+export function uploadQueueStorageKey(userId: string | null) {
+  return `${STORAGE_KEY}:${userId ?? "anonymous"}`;
+}
+
 type TrackedBatch = PersistedTrackedBatch;
 
 export type UploadCenterBatch = TrackedBatch & {
@@ -103,7 +107,13 @@ type UploadQueueContextValue = {
 
 const UploadQueueContext = createContext<UploadQueueContextValue | null>(null);
 
-export function UploadQueueProvider({ children }: { children: ReactNode }) {
+export function UploadQueueProvider({
+  children,
+  userId = null,
+}: {
+  children: ReactNode;
+  userId?: string | null;
+}) {
   const settings = useProductSettings();
   const queryClient = useQueryClient();
   const [tracked, setTracked] = useState<TrackedBatch[]>([]);
@@ -133,8 +143,9 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   }, [settings.data]);
 
   const operationsQuery = useQuery({
-    queryKey: queryKeys.uploads.operations,
+    queryKey: queryKeys.uploads.operationsForUser(userId ?? "anonymous"),
     queryFn: listBackgroundUploadOperations,
+    enabled: Boolean(userId),
     refetchInterval: (query) =>
       query.state.data?.items.some((item) =>
         [
@@ -153,8 +164,9 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
 
   const batchQueries = useQueries({
     queries: tracked.map((batch) => ({
-      queryKey: queryKeys.ingestion.batch(batch.batchId),
+      queryKey: queryKeys.ingestion.batch(batch.batchId, userId ?? "anonymous"),
       queryFn: () => getImportBatch(batch.batchId),
+      enabled: Boolean(userId),
       retry: false,
       refetchOnMount: "always" as const,
       refetchInterval: (
@@ -181,13 +193,14 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
 
   const refreshBatch = useCallback(
     async (batchId: string) => {
+      if (!userId) return;
       await queryClient.fetchQuery({
-        queryKey: queryKeys.ingestion.batch(batchId),
+        queryKey: queryKeys.ingestion.batch(batchId, userId ?? "anonymous"),
         queryFn: () => getImportBatch(batchId),
         staleTime: 0,
       });
     },
-    [queryClient],
+    [queryClient, userId],
   );
 
   const refresh = useCallback(async () => {
@@ -249,21 +262,24 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const persisted = JSON.parse(
-        window.localStorage.getItem(STORAGE_KEY) ?? "[]",
+        window.localStorage.getItem(uploadQueueStorageKey(userId)) ?? "[]",
       ) as unknown;
       const cutoff = Date.now() - TRACKED_BATCH_MAX_AGE_MS;
       setTracked(sanitizeTrackedBatches(persisted, cutoff));
     } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(uploadQueueStorageKey(userId));
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     if (!hydrated) return;
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(tracked));
-  }, [hydrated, tracked]);
+    window.localStorage.setItem(
+      uploadQueueStorageKey(userId),
+      JSON.stringify(tracked),
+    );
+  }, [hydrated, tracked, userId]);
 
   useEffect(() => {
     for (const batch of tracked) {
@@ -331,7 +347,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
         trackedAt: Date.now(),
       });
       queryClient.setQueryData(
-        queryKeys.ingestion.batch(batch.batchId),
+        queryKeys.ingestion.batch(batch.batchId, userId ?? "anonymous"),
         projection,
       );
       await Promise.all(
@@ -370,7 +386,7 @@ export function UploadQueueProvider({ children }: { children: ReactNode }) {
       }
       return batch;
     },
-    [enqueue, queryClient, track],
+    [enqueue, queryClient, track, userId],
   );
 
   const retryWithFile = useCallback(
