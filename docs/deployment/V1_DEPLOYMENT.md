@@ -1,6 +1,6 @@
 # NodeProx V1 production deployment
 
-This runbook prepares one Linux VPS for NodeProx containers. It does not configure external providers automatically. Run the commands from the repository root on the VPS and keep `.env.production` outside version control.
+This runbook prepares one Linux VPS for NodeProx containers. A deployment by itself does not mutate external providers. After deployment, the StorageProfile control plane can reconcile B2 and Cloudflare only when `STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED=true` and an administrator explicitly runs the corresponding action. Run the commands from the repository root on the VPS and keep `.env.production` outside version control.
 
 ## A. VPS prerequisites
 
@@ -36,6 +36,16 @@ chmod 600 .env.production
 ```
 
 Edit `.env.production` and replace every `replace-with-...` value. `DATABASE_URL` and `REDIS_URL` must reference the Compose service names `postgres` and `redis`, never `localhost`. Production requires `STORAGE_PROVIDER=b2` and all B2 variables; the application fails closed if B2 configuration is incomplete.
+
+Keep these Cloudflare credentials separate by responsibility:
+
+- `CLOUDFLARE_PURGE_API_TOKEN` is used at runtime to invalidate/purge media.
+- `CLOUDFLARE_PROVISIONING_API_TOKEN` is used for managed StorageProfile DNS and Transform Rule operations.
+- `CLOUDFLARE_CACHE_RULES_API_TOKEN` is used for the managed Cache Rule.
+
+Do not combine or substitute these tokens. `STORAGE_PROFILE_MASTER_KEY` must be valid base64 encoding exactly 32 bytes, remain stable, and be available to both API and Worker. The API encrypts/decrypts managed credentials; the Worker decrypts them when resolving a managed profile for processing. Keep a secure external backup: losing this key makes existing encrypted managed credentials unreadable. CFG-STORAGE-1F does not include master-key rotation. Never place its value or provider secrets in repository files, logs, tickets, or reports.
+
+Configure `STORAGE_BROWSER_UPLOAD_ORIGINS` as exact Web origins separated by commas, for example `https://app.nodeprox.org`. Never use `*`, and do not add the CDN/media hostname unless it actually serves the Web application. Managed provider operations must start with `STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED=false`.
 
 ### B2 write-credential hardening gate
 
@@ -103,6 +113,83 @@ curl -fsS https://app.nodeprox.org/api/health
 ```
 
 Then open `https://app.nodeprox.org`, verify login, dashboard navigation, and an authorized B2 direct-upload browser flow.
+
+## Managed StorageProfile rollout (CFG-STORAGE-1F)
+
+The production rollout is deliberately staged. Do not enable managed operations as part of the first deploy, and do not automatically activate a managed profile.
+
+### 1F-1 — Fail-closed production deploy
+
+Before deployment:
+
+- Take and verify a PostgreSQL backup using the procedure below.
+- Confirm the reviewed release tag/commit and the exact migration set.
+- Keep `.env.production` outside Git with permissions `600` (`chmod 600 .env.production`).
+- Confirm `STORAGE_PROFILE_MASTER_KEY` is backed up in secure external storage and is available to API and Worker. Do not rotate it as part of CFG-STORAGE-1F.
+- Confirm required provider secrets are present without printing or copying their values into logs or reports.
+- Preserve the current legacy B2 environment credentials; they remain the legacy profile's credentials and support operational rollback.
+- Keep `STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED=false`.
+
+Use the normal release order: enable maintenance when appropriate; build images; confirm PostgreSQL and Redis are healthy; run migrations once; start API, Worker, Discord bot, Web, and reverse proxy; validate health and UI; then disable maintenance. Never automate rollback of database migrations. This runbook's deployment commands above describe the corresponding build, health, migration, startup, and validation steps.
+
+### Production baseline gate
+
+Before enabling managed operations, verify all of the following:
+
+- API `/health`, Web, login, and Settings are operational.
+- The legacy StorageProfile is visible and read-only, and it is the current active profile.
+- Normal uploads and existing public media continue to work.
+- Worker is operational.
+- Managed provider mutations and managed activation remain disabled.
+
+At this point do not run B2 provision, Cloudflare provision, or profile activation.
+
+With the flag `false`, persisted profile/readiness reads remain available, while provider mutations and managed-profile activation are blocked. Setting it to `true` enables the already-authorized administrative operations; it does not activate a profile or trigger provider changes automatically.
+
+### HUMAN GATE A — enable managed operations
+
+Only after the baseline gate passes, an operator may change:
+
+```text
+STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED=true
+```
+
+Restart API so it loads the new control-plane flag. Do not activate a profile yet. If a change also affects a secret consumed by Worker, treat that as a separate coordinated runtime change; CFG-STORAGE-1F does not rotate the master key.
+
+### Managed readiness order
+
+For the selected managed profile, explicitly verify B2 first:
+
+1. Credentials.
+2. Existing bucket and public access.
+3. Browser-upload CORS.
+4. Lifecycle cleanup policy.
+5. Storage read/write probe.
+6. Direct browser PUT probe.
+
+The lifecycle policy applies to `uploads/` and must never affect `Media/`. Then explicitly verify Cloudflare DNS, Transform Rule, Cache Rule, and public delivery. Do not use the CDN hostname for temporary PUT probes; browser upload goes directly to B2.
+
+### HUMAN GATE B — activate for new work
+
+Activation is allowed only after readiness reports `activation.eligible = true`. An operator must explicitly choose **Usar para cargas nuevas**. Do not automate or infer this action from successful provisioning.
+
+Activation changes routing for new physical work only. Existing objects are not moved, copied, or repointed; their persisted StorageProfile ownership remains unchanged.
+
+### Post-activation canary
+
+Run one controlled new upload and record its resource ID, StorageProfile ID, and public hostname (never secrets). Verify that the new upload is pinned to the newly active profile; Worker can decrypt the managed credential and writes the result to managed B2; and the public media hostname works. Also verify that an existing old-media object still resolves through its historical profile and hostname.
+
+### Operational profile rollback
+
+This is distinct from rolling back application code. If a managed profile fails after activation:
+
+1. Keep its credentials and configuration intact for diagnosis and any already-pinned objects.
+2. While provider operations remain enabled, use the existing control-plane contract to reactivate the legacy profile, provided readiness permits it.
+3. Verify that new work is pinned to legacy again.
+4. Optionally set `STORAGE_MANAGED_PROFILE_OPERATIONS_ENABLED=false` and restart API to freeze further administrative provider operations.
+5. Do not delete objects written to managed B2, repoint historical records, or manually change `storage_profile_id`.
+
+Objects already pinned to a profile continue to belong to that profile regardless of which profile is active for new work.
 
 ## M. DNS and Cloudflare actions performed by a human
 

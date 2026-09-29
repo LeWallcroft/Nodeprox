@@ -1,18 +1,28 @@
 # Quality gates
 
-TD-3 closes the historical TypeScript and formatting debt. A clean checkout must
-pass every command below without error-count allowances or ignored exit codes:
+The required repository-wide quality gates run without error-count allowances
+or ignored exit codes:
 
 ```text
 pnpm install --frozen-lockfile
 pnpm lint
-pnpm format:check
 pnpm typecheck
 pnpm test
 pnpm test:integration
 pnpm build
 pnpm test:e2e
 ```
+
+CI formatting is a required changed-files ratchet: Biome formats only files
+changed against the event's base revision (the pull request base SHA for PRs,
+the previous commit for pushes to `main`, or `HEAD^` for manual/fallback runs).
+A PR that introduces incorrectly formatted files fails the `static` job, while
+pre-existing formatting debt outside the change is tolerated temporarily.
+`pnpm format:check` remains a whole-repository formatting-debt diagnostic; it
+is not the current CI formatter and a clean `main` is not claimed to pass it.
+The ratchet evaluates only changed files supported by Biome. A change with no
+supported files satisfies the format gate without an unmatched-file error;
+any supported changed file that violates formatting still fails the PR.
 
 The [Quality Gates workflow](../../.github/workflows/quality-gates.yml) runs on
 pull requests targeting `main` and pushes to `main`. It uses Node 24 and

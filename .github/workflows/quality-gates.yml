@@ -53,7 +53,7 @@ jobs:
 
           echo "sha=$format_base" >> "$GITHUB_OUTPUT"
       - name: Format changed files against baseline
-        run: pnpm exec biome format --changed --since=${{ steps.format-baseline.outputs.sha }}
+        run: pnpm exec biome format --changed --since=${{ steps.format-baseline.outputs.sha }} --no-errors-on-unmatched
       - run: pnpm typecheck
 
   unit:
