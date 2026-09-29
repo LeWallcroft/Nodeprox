@@ -24,7 +24,7 @@ describe("managed Cloudflare rules", () => {
       },
     });
   });
-  it("builds one exact-host cache rule with Origin in its key", () => {
+  it("excludes query strings using the Rulesets API contract without overriding Origin", () => {
     expect(
       managedCacheExpression([
         "b.nodeprox.org",
@@ -32,7 +32,26 @@ describe("managed Cloudflare rules", () => {
         "a.nodeprox.org",
       ]),
     ).toBe('http.host in { "a.nodeprox.org" "b.nodeprox.org" }');
-    expect(JSON.stringify(managedCacheParameters())).toContain("origin");
+    const parameters = managedCacheParameters() as {
+      cache: boolean;
+      edge_ttl: { mode: string; default: number };
+      browser_ttl: { mode: string; default: number };
+      cache_key: {
+        custom_key: {
+          query_string: { exclude: { all: boolean } };
+          header?: { include?: string[] };
+          exclude_origin?: boolean;
+        };
+      };
+    };
+    expect(parameters).toMatchObject({
+      cache: true,
+      edge_ttl: { mode: "override_origin", default: 31_536_000 },
+      browser_ttl: { mode: "override_origin", default: 7_200 },
+      cache_key: { custom_key: { query_string: { exclude: { all: true } } } },
+    });
+    expect(parameters.cache_key.custom_key.header).toBeUndefined();
+    expect(parameters.cache_key.custom_key.exclude_origin).toBeUndefined();
   });
   it("treats broad or ambiguous foreign rewrite expressions as conflicts while preserving exact legacy host", () => {
     const legacy = {
