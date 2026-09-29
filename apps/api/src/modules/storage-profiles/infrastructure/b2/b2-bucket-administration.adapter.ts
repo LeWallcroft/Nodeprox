@@ -22,6 +22,8 @@ import {
   NODEPROX_LIFECYCLE_RULE_ID,
 } from "../../domain/b2-readiness-policy.js";
 
+const NODEPROX_LIFECYCLE_MARKER_RULE_ID = `${NODEPROX_LIFECYCLE_RULE_ID}_marker`;
+
 type Fetcher = typeof fetch;
 type NativeAuthorization = {
   accountId: string;
@@ -43,6 +45,74 @@ type S3Sender = {
       | PutBucketLifecycleConfigurationCommand,
   ): Promise<unknown>;
 };
+
+function lifecyclePrefix(rule: LifecycleRule): string {
+  return rule.Filter && "Prefix" in rule.Filter
+    ? (rule.Filter.Prefix ?? "")
+    : (rule.Prefix ?? "");
+}
+
+function semanticLifecycle(rule: LifecycleRule): B2LifecycleRule {
+  return {
+    id: rule.ID ?? "",
+    prefix: lifecyclePrefix(rule),
+    expirationDays: rule.Expiration?.Days ?? null,
+    noncurrentDays: rule.NoncurrentVersionExpiration?.NoncurrentDays ?? null,
+    abortMultipartDays:
+      rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation ?? null,
+  };
+}
+
+function normalizeLifecycleRules(rules: readonly LifecycleRule[]): {
+  foreign: B2LifecycleRule[];
+  nodeProx: B2LifecycleRule | null;
+  markerValid: boolean;
+} {
+  const base = rules.find((rule) => rule.ID === NODEPROX_LIFECYCLE_RULE_ID);
+  const marker = rules.find(
+    (rule) => rule.ID === NODEPROX_LIFECYCLE_MARKER_RULE_ID,
+  );
+  const foreign = rules
+    .filter(
+      (rule) =>
+        rule.ID !== NODEPROX_LIFECYCLE_RULE_ID &&
+        rule.ID !== NODEPROX_LIFECYCLE_MARKER_RULE_ID &&
+        rule.Status === "Enabled",
+    )
+    .map(semanticLifecycle);
+
+  return {
+    foreign,
+    nodeProx: base?.Status === "Enabled" ? semanticLifecycle(base) : null,
+    markerValid:
+      marker?.Status === "Enabled" &&
+      marker.Expiration?.ExpiredObjectDeleteMarker === true &&
+      lifecyclePrefix(marker) === desiredNodeProxLifecycle().prefix,
+  };
+}
+
+function nodeProxLifecycleRules(desired: B2LifecycleRule): LifecycleRule[] {
+  return [
+    {
+      ID: desired.id,
+      Status: "Enabled",
+      Filter: { Prefix: desired.prefix },
+      Expiration: { Days: desired.expirationDays ?? undefined },
+      NoncurrentVersionExpiration: {
+        NoncurrentDays: desired.noncurrentDays ?? undefined,
+      },
+      AbortIncompleteMultipartUpload: {
+        DaysAfterInitiation: desired.abortMultipartDays ?? undefined,
+      },
+    },
+    {
+      ID: NODEPROX_LIFECYCLE_MARKER_RULE_ID,
+      Status: "Enabled",
+      Filter: { Prefix: desired.prefix },
+      Expiration: { ExpiredObjectDeleteMarker: true },
+    },
+  ];
+}
 
 export class B2AdministrationError extends Error {
   constructor(readonly code: string) {
@@ -267,35 +337,23 @@ export class B2BucketAdministrationAdapter
       desiredLifecycleConfiguration: JSON.stringify(desired),
     };
     const raw = await this.lifecycle(input.credentials);
-    const current: B2LifecycleRule[] = raw
-      .filter((rule) => rule.Status === "Enabled")
-      .map((rule) => ({
-        id: rule.ID ?? "",
-        prefix:
-          rule.Filter && "Prefix" in rule.Filter
-            ? (rule.Filter.Prefix ?? "")
-            : (rule.Prefix ?? ""),
-        expirationDays: rule.Expiration?.Days ?? null,
-        noncurrentDays:
-          rule.NoncurrentVersionExpiration?.NoncurrentDays ?? null,
-        abortMultipartDays:
-          rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation ?? null,
-      }));
-    if (harmfulMediaLifecycle(current))
+    const normalized = normalizeLifecycleRules(raw);
+    if (harmfulMediaLifecycle(normalized.foreign))
       throw new B2AdministrationError("B2_MEDIA_LIFECYCLE_CONFLICT");
-    if (current.some((rule) => equivalentLifecycle(rule, desired)))
+    if (
+      normalized.nodeProx &&
+      equivalentLifecycle(normalized.nodeProx, desired) &&
+      normalized.markerValid
+    )
       return { status: "verified", metadata };
     if (input.recheckOnly) return { status: "manual_required", metadata };
     const merged: LifecycleRule[] = [
-      ...raw.filter((rule) => rule.ID !== NODEPROX_LIFECYCLE_RULE_ID),
-      {
-        ID: desired.id,
-        Status: "Enabled",
-        Filter: { Prefix: desired.prefix },
-        Expiration: { Days: 1 },
-        NoncurrentVersionExpiration: { NoncurrentDays: 1 },
-        AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
-      },
+      ...raw.filter(
+        (rule) =>
+          rule.ID !== NODEPROX_LIFECYCLE_RULE_ID &&
+          rule.ID !== NODEPROX_LIFECYCLE_MARKER_RULE_ID,
+      ),
+      ...nodeProxLifecycleRules(desired),
     ];
     try {
       await this.s3Factory(input.credentials).send(
@@ -312,18 +370,16 @@ export class B2BucketAdministrationAdapter
         };
       throw new B2AdministrationError("B2_PROVIDER_ERROR");
     }
-    const verified = (await this.lifecycle(input.credentials)).map((rule) => ({
-      id: rule.ID ?? "",
-      prefix:
-        rule.Filter && "Prefix" in rule.Filter
-          ? (rule.Filter.Prefix ?? "")
-          : (rule.Prefix ?? ""),
-      expirationDays: rule.Expiration?.Days ?? null,
-      noncurrentDays: rule.NoncurrentVersionExpiration?.NoncurrentDays ?? null,
-      abortMultipartDays:
-        rule.AbortIncompleteMultipartUpload?.DaysAfterInitiation ?? null,
-    }));
-    if (!verified.some((rule) => equivalentLifecycle(rule, desired)))
+    const verified = normalizeLifecycleRules(
+      await this.lifecycle(input.credentials),
+    );
+    if (harmfulMediaLifecycle(verified.foreign))
+      throw new B2AdministrationError("B2_MEDIA_LIFECYCLE_CONFLICT");
+    if (
+      !verified.nodeProx ||
+      !equivalentLifecycle(verified.nodeProx, desired) ||
+      !verified.markerValid
+    )
       throw new B2AdministrationError("B2_LIFECYCLE_VERIFICATION_FAILED");
     return { status: "verified", metadata };
   }

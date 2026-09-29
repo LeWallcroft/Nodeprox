@@ -28,7 +28,8 @@ describe("B2 readiness policy", () => {
     ).toThrow();
   });
   it("limits lifecycle to uploads and blocks broad Media expiration", () => {
-    expect(desiredNodeProxLifecycle()).toMatchObject({
+    expect(desiredNodeProxLifecycle()).toEqual({
+      id: "nodeprox-uploads-v1",
       prefix: "uploads/",
       expirationDays: 1,
       noncurrentDays: 1,
