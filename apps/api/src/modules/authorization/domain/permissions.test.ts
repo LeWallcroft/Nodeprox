@@ -27,4 +27,9 @@ describe("central role permissions", () => {
     );
     expect(ROLE_PERMISSIONS.gestor).not.toContain(PERMISSIONS.SERIES_DELETE);
   });
+
+  it("allows Uploader Series edit permission while leaving deletion unavailable", () => {
+    expect(ROLE_PERMISSIONS.uploader).toContain(PERMISSIONS.SERIES_EDIT);
+    expect(ROLE_PERMISSIONS.uploader).not.toContain(PERMISSIONS.SERIES_DELETE);
+  });
 });

@@ -601,6 +601,23 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(200);
+    const uploaderCapabilities = await app.inject({
+      method: "GET",
+      url: `/series/${seriesId}/capabilities`,
+      headers: { cookie: uploaderCookie },
+    });
+    expect(uploaderCapabilities.statusCode).toBe(200);
+    expect(uploaderCapabilities.json().capabilities).toContain("series.edit");
+    const uploaderEdit = await app.inject({
+      method: "PATCH",
+      url: `/series/${seriesId}`,
+      headers: { cookie: uploaderCookie },
+      payload: {
+        title: "Assigned series updated",
+        description: "Updated by responsible Uploader",
+      },
+    });
+    expect(uploaderEdit.statusCode).toBe(200);
     expect(
       (
         await app.inject({
@@ -611,6 +628,13 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(200);
+    const formerResponsibleEdit = await app.inject({
+      method: "PATCH",
+      url: `/series/${otherSeriesId}`,
+      headers: { cookie: secondUploaderCookie },
+      payload: { title: "Unauthorized update" },
+    });
+    expect(formerResponsibleEdit.statusCode).toBe(403);
     expect(
       (
         await app.inject({

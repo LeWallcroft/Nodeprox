@@ -67,6 +67,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   gestor: gestorPermissions,
   uploader: [
     PERMISSIONS.SERIES_READ,
+    PERMISSIONS.SERIES_EDIT,
     PERMISSIONS.CHAPTERS_READ,
     PERMISSIONS.CHAPTERS_CREATE,
     PERMISSIONS.CHAPTERS_EDIT,

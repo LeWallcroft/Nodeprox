@@ -74,7 +74,7 @@ describe("M2-A authorization policy", () => {
       }),
     ).resolves.toMatchObject({
       allowed: false,
-      reason: "permission-denied",
+      reason: "resource-context-unavailable",
     });
   });
 
