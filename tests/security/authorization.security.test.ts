@@ -55,7 +55,7 @@ describe("M2-A authorization security boundary", () => {
     );
     expect(decision).toMatchObject({
       allowed: false,
-      reason: "permission-denied",
+      reason: "resource-context-unavailable",
     });
   });
 });
