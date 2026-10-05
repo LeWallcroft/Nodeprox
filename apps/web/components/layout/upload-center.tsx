@@ -1,5 +1,6 @@
 "use client";
 
+import type { MediaWarning } from "@nodeprox/types";
 import {
   Check,
   CheckCheck,
@@ -26,6 +27,7 @@ import {
   type UploadCenterBatch,
   useUploadQueue,
 } from "../providers/upload-queue-provider";
+import { AppDialog } from "../ui/app-dialog";
 import { Button } from "../ui/button";
 import { ProgressBar } from "../ui/progress-bar";
 
@@ -35,6 +37,7 @@ type UploadCenterItemRecord = {
   item: ImportBatchProjection["items"][number];
   retryable: boolean;
   kind: "chapter_import" | "chapter_upload" | "chapter_replacement" | null;
+  warningCount: number;
 };
 
 export function UploadCenter() {
@@ -49,7 +52,89 @@ export function UploadCenter() {
   const [dismissedCompletedOperationIds, setDismissedCompletedOperationIds] =
     useState<ReadonlySet<string>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
+  const [notice, setNotice] = useState<{
+    title: string;
+    body: string;
+    seriesId: string;
+    operationId: string;
+  } | null>(null);
+  const previousStatuses = useRef<Map<string, string> | null>(null);
+  const announcedTransitions = useRef(new Set<string>());
   const queue = useUploadQueue();
+
+  useEffect(() => {
+    const current = new Map(
+      queue.operations.map((operation) => [operation.id, operation.status]),
+    );
+    if (previousStatuses.current) {
+      for (const operation of queue.operations) {
+        const previous = previousStatuses.current.get(operation.id);
+        const rejected = operation.status === "rejected";
+        const warned =
+          operation.status === "ready" && operation.warningCount > 0;
+        if (
+          !previous ||
+          previous === operation.status ||
+          (!rejected && !warned)
+        )
+          continue;
+        const key = `${operation.id}:${operation.status}:${operation.warningCount}`;
+        if (announcedTransitions.current.has(key)) continue;
+        announcedTransitions.current.add(key);
+        const body = rejected
+          ? `${operation.filename}: el ZIP no superó la validación.`
+          : `Carga completada. Se detectaron ${operation.warningCount} advertencias; no bloquearon el procesamiento.`;
+        setNotice({
+          title: rejected
+            ? "Carga rechazada"
+            : "Carga completada con advertencias",
+          body,
+          seriesId: operation.seriesId,
+          operationId: operation.id,
+        });
+        if (
+          rejected &&
+          ["chapter_import", "chapter_upload", "chapter_replacement"].includes(
+            operation.kind,
+          )
+        ) {
+          const kind = operation.kind as
+            | "chapter_import"
+            | "chapter_upload"
+            | "chapter_replacement";
+          void getUploadValidationReport(kind, operation.id)
+            .then((report) => {
+              const details = report.issues
+                .map(
+                  (issue) =>
+                    `${issue.filename ?? operation.filename} — ${validationIssueLabel(issue.code)}${issue.actual ? ` · Actual: ${Object.values(issue.actual).join(", ")}` : ""}${issue.expected ? ` · Máximo: ${Object.values(issue.expected).join(", ")}` : ""}`,
+                )
+                .join("\n");
+              setNotice((currentNotice) =>
+                currentNotice?.operationId === operation.id
+                  ? {
+                      ...currentNotice,
+                      body: `${body}${details ? `\n${details}` : ""}${report.requestId ? `\nRequest ID: ${report.requestId}` : ""}`,
+                    }
+                  : currentNotice,
+              );
+            })
+            .catch(() => {
+              setNotice((currentNotice) =>
+                currentNotice?.operationId === operation.id
+                  ? {
+                      ...currentNotice,
+                      body: `${body}\nNo se pudo cargar el detalle. Consulta el Centro de cargas.`,
+                    }
+                  : currentNotice,
+              );
+            });
+        }
+        break;
+      }
+    }
+    previousStatuses.current = current;
+  }, [queue.operations]);
 
   useEffect(() => {
     if (!open) return;
@@ -88,6 +173,7 @@ export function UploadCenter() {
             item,
             retryable: isRetryableImportFailure(item.errorCode),
             kind: "chapter_import" as const,
+            warningCount: item.warnings.length,
           }))
         : [],
     );
@@ -118,6 +204,7 @@ export function UploadCenter() {
           },
           retryable: false,
           kind: operation.kind === "image_replacement" ? null : operation.kind,
+          warningCount: operation.warningCount,
         }),
       );
     return [...batchRecords, ...operationRecords];
@@ -197,170 +284,201 @@ export function UploadCenter() {
   }
 
   return (
-    <div
-      ref={root}
-      className="fixed bottom-5 right-5 z-30 max-[767px]:bottom-3 max-[767px]:right-3"
-    >
-      {open ? (
-        <section
-          aria-label="Centro de cargas"
-          className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(44rem,calc(100dvh-7rem))] w-[min(38rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
-        >
-          <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid size-9 shrink-0 place-items-center rounded-control bg-accent-soft text-primary">
-                <UploadCloud aria-hidden="true" className="size-5" />
-              </span>
-              <div>
-                <h2 className="m-0 text-base font-semibold text-text">
-                  Centro de cargas
-                </h2>
-                <p className="m-0 text-sm text-secondary">
-                  Seguimiento de cargas en segundo plano.
+    <>
+      <AppDialog
+        open={Boolean(notice)}
+        onOpenChange={(next) => {
+          if (!next) setNotice(null);
+        }}
+        title={notice?.title ?? "Carga"}
+      >
+        <p className="m-0 whitespace-pre-line text-sm text-secondary">
+          {notice?.body}
+        </p>
+        {notice?.title === "Carga rechazada" ? (
+          <button
+            className="mt-3 text-sm text-primary underline"
+            type="button"
+            onClick={() => {
+              setNotice(null);
+              setOpen(true);
+              setTab("failed");
+            }}
+          >
+            Ver en Centro de cargas
+          </button>
+        ) : null}
+      </AppDialog>
+      <div
+        ref={root}
+        className="fixed bottom-5 right-5 z-30 max-[767px]:bottom-3 max-[767px]:right-3"
+      >
+        {open ? (
+          <section
+            aria-label="Centro de cargas"
+            className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(44rem,calc(100dvh-7rem))] w-[min(38rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-control bg-accent-soft text-primary">
+                  <UploadCloud aria-hidden="true" className="size-5" />
+                </span>
+                <div>
+                  <h2 className="m-0 text-base font-semibold text-text">
+                    Centro de cargas
+                  </h2>
+                  <p className="m-0 text-sm text-secondary">
+                    Seguimiento de cargas en segundo plano.
+                  </p>
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <IconButton
+                  label="Minimizar centro de cargas"
+                  onClick={() => setOpen(false)}
+                >
+                  <Minus aria-hidden="true" className="size-4" />
+                </IconButton>
+                <IconButton
+                  label="Cerrar centro de cargas"
+                  onClick={() => setOpen(false)}
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </IconButton>
+              </div>
+            </header>
+
+            <div
+              aria-label="Estado de cargas"
+              className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)] px-3 pt-2"
+              role="tablist"
+            >
+              <CenterTab
+                active={tab === "active"}
+                count={counts.active}
+                label="En progreso"
+                onClick={() => setTab("active")}
+              />
+              <CenterTab
+                active={tab === "completed"}
+                count={counts.completed}
+                label="Completadas"
+                onClick={() => setTab("completed")}
+              />
+              <CenterTab
+                active={tab === "failed"}
+                count={counts.failed}
+                label="Con errores"
+                tone="danger"
+                onClick={() => setTab("failed")}
+              />
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+              {tabItems.length ? (
+                <div className="divide-y divide-[var(--border-subtle)]">
+                  {tabItems.map(
+                    ({ batch, item, retryable, kind, warningCount }) => (
+                      <UploadCenterItem
+                        key={`${batch.batchId}:${item.itemId}`}
+                        batch={batch}
+                        item={item}
+                        retryable={retryable}
+                        kind={kind}
+                        warningCount={warningCount}
+                      />
+                    ),
+                  )}
+                </div>
+              ) : (
+                <EmptyTab tab={tab} />
+              )}
+            </div>
+
+            {tab === "active" && counts.active ? (
+              <div className="mx-4 mb-4 flex gap-3 rounded-control border border-[var(--border-subtle)] bg-primary-soft px-3 py-3 text-sm text-secondary">
+                <CircleAlert
+                  aria-hidden="true"
+                  className="mt-0.5 size-4 shrink-0 text-primary"
+                />
+                <p className="m-0">
+                  Puedes cerrar este panel y seguir navegando. Si cierras el
+                  navegador, una transferencia directa puede requerir reintento.
                 </p>
               </div>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <IconButton
-                label="Minimizar centro de cargas"
-                onClick={() => setOpen(false)}
-              >
-                <Minus aria-hidden="true" className="size-4" />
-              </IconButton>
-              <IconButton
-                label="Cerrar centro de cargas"
-                onClick={() => setOpen(false)}
-              >
-                <X aria-hidden="true" className="size-4" />
-              </IconButton>
-            </div>
-          </header>
+            ) : null}
 
-          <div
-            aria-label="Estado de cargas"
-            className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)] px-3 pt-2"
-            role="tablist"
-          >
-            <CenterTab
-              active={tab === "active"}
-              count={counts.active}
-              label="En progreso"
-              onClick={() => setTab("active")}
-            />
-            <CenterTab
-              active={tab === "completed"}
-              count={counts.completed}
-              label="Completadas"
-              onClick={() => setTab("completed")}
-            />
-            <CenterTab
-              active={tab === "failed"}
-              count={counts.failed}
-              label="Con errores"
-              tone="danger"
-              onClick={() => setTab("failed")}
-            />
-          </div>
-
-          <div className="min-h-0 flex-1 overflow-y-auto p-4">
-            {tabItems.length ? (
-              <div className="divide-y divide-[var(--border-subtle)]">
-                {tabItems.map(({ batch, item, retryable, kind }) => (
-                  <UploadCenterItem
-                    key={`${batch.batchId}:${item.itemId}`}
-                    batch={batch}
-                    item={item}
-                    retryable={retryable}
-                    kind={kind}
-                  />
-                ))}
-              </div>
-            ) : (
-              <EmptyTab tab={tab} />
-            )}
-          </div>
-
-          {tab === "active" && counts.active ? (
-            <div className="mx-4 mb-4 flex gap-3 rounded-control border border-[var(--border-subtle)] bg-primary-soft px-3 py-3 text-sm text-secondary">
-              <CircleAlert
-                aria-hidden="true"
-                className="mt-0.5 size-4 shrink-0 text-primary"
-              />
-              <p className="m-0">
-                Puedes cerrar este panel y seguir navegando. Si cierras el
-                navegador, una transferencia directa puede requerir reintento.
-              </p>
-            </div>
-          ) : null}
-
-          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-4 py-3">
-            <Button
-              aria-label="Actualizar cargas"
-              type="button"
-              variant="secondary"
-              size="sm"
-              disabled={refreshing}
-              onClick={() => void refresh()}
-              icon={
-                <RefreshCw
-                  aria-hidden="true"
-                  className={`size-4 ${refreshing ? "animate-spin" : ""}`}
-                />
-              }
-            >
-              Actualizar
-            </Button>
-            {tab === "completed" ? (
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-4 py-3">
               <Button
+                aria-label="Actualizar cargas"
                 type="button"
                 variant="secondary"
                 size="sm"
-                disabled={!counts.completed}
-                onClick={() => {
-                  setDismissedCompletedBatchIds(
-                    (current) => new Set([...current, ...readyBatchIds]),
-                  );
-                  setDismissedCompletedOperationIds(
-                    (current) =>
-                      new Set([
-                        ...current,
-                        ...records
-                          .filter(
-                            ({ item, retryable }) =>
-                              !retryable && item.status === "ready",
-                          )
-                          .map(({ item }) => item.itemId),
-                      ]),
-                  );
-                }}
-                icon={<CheckCheck aria-hidden="true" className="size-4" />}
+                disabled={refreshing}
+                onClick={() => void refresh()}
+                icon={
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={`size-4 ${refreshing ? "animate-spin" : ""}`}
+                  />
+                }
               >
-                Limpiar completadas
+                Actualizar
               </Button>
-            ) : null}
-          </footer>
-        </section>
-      ) : null}
-
-      <button
-        aria-label={open ? "Cerrar centro de cargas" : "Abrir centro de cargas"}
-        aria-expanded={open}
-        className="relative grid size-12 place-items-center rounded-full border border-primary/40 bg-primary text-primary-foreground shadow-panel transition-colors hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-      >
-        {queue.activeTransfers ? (
-          <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
-        ) : (
-          <Upload aria-hidden="true" className="size-5" />
-        )}
-        {counts.active ? (
-          <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground ring-2 ring-background">
-            {counts.active}
-          </span>
+              {tab === "completed" ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!counts.completed}
+                  onClick={() => {
+                    setDismissedCompletedBatchIds(
+                      (current) => new Set([...current, ...readyBatchIds]),
+                    );
+                    setDismissedCompletedOperationIds(
+                      (current) =>
+                        new Set([
+                          ...current,
+                          ...records
+                            .filter(
+                              ({ item, retryable }) =>
+                                !retryable && item.status === "ready",
+                            )
+                            .map(({ item }) => item.itemId),
+                        ]),
+                    );
+                  }}
+                  icon={<CheckCheck aria-hidden="true" className="size-4" />}
+                >
+                  Limpiar completadas
+                </Button>
+              ) : null}
+            </footer>
+          </section>
         ) : null}
-      </button>
-    </div>
+
+        <button
+          aria-label={
+            open ? "Cerrar centro de cargas" : "Abrir centro de cargas"
+          }
+          aria-expanded={open}
+          className="relative grid size-12 place-items-center rounded-full border border-primary/40 bg-primary text-primary-foreground shadow-panel transition-colors hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+        >
+          {queue.activeTransfers ? (
+            <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
+          ) : (
+            <Upload aria-hidden="true" className="size-5" />
+          )}
+          {counts.active ? (
+            <span className="absolute -right-1 -top-1 grid min-w-5 place-items-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground ring-2 ring-background">
+              {counts.active}
+            </span>
+          ) : null}
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -485,29 +603,44 @@ function UploadCenterItem({
   item,
   retryable,
   kind,
+  warningCount,
 }: UploadCenterItemRecord) {
   const queue = useUploadQueue();
   const input = useRef<HTMLInputElement>(null);
   const [report, setReport] = useState<UploadValidationReport | null>(null);
+  const [reportState, setReportState] = useState<
+    "idle" | "loading" | "loaded" | "error"
+  >("idle");
   const [retrying, setRetrying] = useState(false);
   const [retryError, setRetryError] = useState<string | null>(null);
   useEffect(() => {
-    if (item.status !== "rejected" || !kind) {
+    const needsReport =
+      item.status === "rejected" ||
+      (item.status === "ready" && warningCount > 0);
+    if (!needsReport || !kind) {
       setReport(null);
+      setReportState("idle");
       return;
     }
     let active = true;
+    setReportState("loading");
     void getUploadValidationReport(kind, item.itemId)
       .then((value) => {
-        if (active) setReport(value);
+        if (active) {
+          setReport(value);
+          setReportState("loaded");
+        }
       })
       .catch(() => {
-        if (active) setReport(null);
+        if (active) {
+          setReport(null);
+          setReportState("error");
+        }
       });
     return () => {
       active = false;
     };
-  }, [item.status, item.itemId, kind]);
+  }, [item.status, warningCount, item.itemId, kind]);
   const progress = queue.progressFor(batch.batchId, item.itemId);
   const canRetry = retryable && item.status === "failed";
   const requiresReplacement = requiresChapterReplacement(item.errorCode);
@@ -586,7 +719,9 @@ function UploadCenterItem({
         {isCompleted ? (
           <p className="mt-2 flex items-center gap-1.5 text-xs text-secondary">
             <Check aria-hidden="true" className="size-3.5 text-success" />
-            Completada
+            {warningCount > 0
+              ? `Completada con ${warningCount} advertencias`
+              : "Completada"}
           </p>
         ) : null}
         {item.errorCode ? (
@@ -594,22 +729,57 @@ function UploadCenterItem({
             {errorLabel(item.errorCode)}
           </p>
         ) : null}
-        {item.status === "rejected" ? (
-          <div className="mt-2 space-y-1 text-xs text-destructive-text">
-            <p>Carga rechazada</p>
-            {report?.issues.map((issue) => (
-              <p key={issue.id}>
-                {issue.filename ??
-                  (issue.fileIndex ? `Archivo ${issue.fileIndex}` : "ZIP")}{" "}
-                — {issue.code}
-                {issue.actual
-                  ? ` · Actual: ${Object.values(issue.actual).join(", ")}`
-                  : ""}
-                {issue.expected
-                  ? ` · Máximo: ${Object.values(issue.expected).join(", ")}`
-                  : ""}
+        {item.status === "rejected" || (isCompleted && warningCount > 0) ? (
+          <div
+            className={`mt-2 space-y-1 text-xs ${item.status === "rejected" ? "text-destructive-text" : "text-secondary"}`}
+          >
+            {item.status === "rejected" ? <p>Carga rechazada</p> : null}
+            {item.status === "rejected"
+              ? report?.issues.map((issue) => (
+                  <p key={issue.id}>
+                    {issue.filename ??
+                      (issue.fileIndex
+                        ? `Archivo ${issue.fileIndex}`
+                        : "ZIP")}{" "}
+                    — {validationIssueLabel(issue.code)}
+                    {issue.actual
+                      ? ` · Actual: ${Object.values(issue.actual).join(", ")}`
+                      : ""}
+                    {issue.expected
+                      ? ` · Máximo: ${Object.values(issue.expected).join(", ")}`
+                      : ""}
+                  </p>
+                ))
+              : null}
+            {report?.warnings.map((warning) => (
+              <p key={JSON.stringify(warning)} className="text-warning">
+                {mediaWarningLabel(warning)}
               </p>
             ))}
+            {reportState === "loading" ? (
+              <p>Cargando informe de validación…</p>
+            ) : null}
+            {reportState === "error" ? (
+              <p role="alert">
+                No se pudo cargar el detalle.{" "}
+                <button
+                  className="underline"
+                  type="button"
+                  onClick={() => {
+                    if (!kind) return;
+                    setReportState("loading");
+                    void getUploadValidationReport(kind, item.itemId)
+                      .then((value) => {
+                        setReport(value);
+                        setReportState("loaded");
+                      })
+                      .catch(() => setReportState("error"));
+                  }}
+                >
+                  Reintentar detalle
+                </button>
+              </p>
+            ) : null}
             {report?.requestId ? <p>Request ID: {report.requestId}</p> : null}
           </div>
         ) : null}
@@ -722,6 +892,39 @@ function statusLabel(status: string) {
       terminal_failed: "Error de configuración",
     }[status] ?? status
   );
+}
+
+function mediaWarningLabel(warning: MediaWarning): string {
+  switch (warning.code) {
+    case "large-file":
+      return `${warning.filename}: archivo grande`;
+    case "wide-image":
+      return `${warning.filename}: imagen muy ancha`;
+    case "tall-image":
+      return `${warning.filename}: imagen muy alta`;
+  }
+}
+
+function validationIssueLabel(code: string): string {
+  const labels: Record<string, string> = {
+    ZIP_INVALID: "ZIP inválido",
+    ZIP_INVALID_PATH: "Ruta no permitida",
+    ZIP_INVALID_LAYOUT: "Estructura inválida",
+    ZIP_ENTRY_LIMIT_EXCEEDED: "Demasiados archivos",
+    ZIP_TOTAL_SIZE_EXCEEDED: "Tamaño total excedido",
+    ZIP_COMPRESSION_RATIO_EXCEEDED: "Compresión ZIP excesiva",
+    IMAGE_FILENAME_INVALID: "Nombre de imagen inválido",
+    IMAGE_DUPLICATE_FILENAME: "Nombre duplicado",
+    IMAGE_DUPLICATE_SORT_ORDER: "Orden duplicado",
+    IMAGE_EXTENSION_UNSUPPORTED: "Extensión no compatible",
+    IMAGE_MAGIC_MISMATCH: "Contenido incompatible con la extensión",
+    IMAGE_SIZE_EXCEEDED: "Tamaño máximo excedido",
+    IMAGE_WIDTH_EXCEEDED: "Ancho máximo excedido",
+    IMAGE_HEIGHT_EXCEEDED: "Altura máxima excedida",
+    IMAGE_PIXELS_EXCEEDED: "Píxeles máximos excedidos",
+    IMAGE_DIMENSIONS_UNREADABLE: "Dimensiones ilegibles",
+  };
+  return labels[code] ?? code;
 }
 
 export function errorLabel(code: string) {

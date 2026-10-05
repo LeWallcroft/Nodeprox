@@ -78,6 +78,32 @@ export class ProductSettingsService {
         throw new ProductSettingsValidationError();
       normalized.set(change.key, change.value);
     }
+    const relevantKeys = PRODUCT_SETTINGS_REGISTRY.map(({ key }) => key);
+    const current = await this.repository.read(relevantKeys);
+    const effective = new Map<string, number>();
+    for (const definition of PRODUCT_SETTINGS_REGISTRY) {
+      const value =
+        normalized.get(definition.key) ??
+        current.get(definition.key) ??
+        definition.defaultValue;
+      if (typeof value === "number") effective.set(definition.key, value);
+    }
+    const pairs = [
+      ["upload_warning_image_size_mb", "upload_max_image_size_mb"],
+      ["upload_warning_width_px", "upload_max_width_px"],
+      ["upload_warning_height_px", "upload_max_height_px"],
+    ] as const;
+    for (const [warningKey, hardKey] of pairs) {
+      const warning = effective.get(warningKey);
+      const hard = effective.get(hardKey);
+      if (
+        warning !== undefined &&
+        hard !== undefined &&
+        hard > 0 &&
+        warning > hard
+      )
+        throw new ProductSettingsValidationError();
+    }
     await this.repository.writeWithAudit({
       changes: [...normalized.entries()],
       actorId: context.userId,

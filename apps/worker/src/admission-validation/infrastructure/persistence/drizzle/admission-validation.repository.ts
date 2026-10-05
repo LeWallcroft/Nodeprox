@@ -1,16 +1,18 @@
+import { sanitizeAuditMetadata } from "@nodeprox/types";
 import { and, eq, sql } from "drizzle-orm";
-import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import { transitionChapterState } from "../../../../../../../database/chapter-state-transition.js";
+import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
+  auditLogs,
   chapterImportItems,
   chapterReplacementOperations,
   chapterReplacementProcessingOutbox,
   chapters,
   processingOutbox,
+  uploads,
   uploadValidationEntries,
   uploadValidationIssues,
   uploadValidationRuns,
-  uploads,
 } from "../../../../../../../database/schema/index.js";
 import type {
   AdmissionClaim,
@@ -298,7 +300,7 @@ export class DrizzleAdmissionValidationRepository
       issues.find((issue) => issue.severity === "error")?.code ?? "ZIP_INVALID";
     if (run.uploadId) {
       const [upload] = await tx
-        .select({ chapterId: uploads.chapterId })
+        .select({ chapterId: uploads.chapterId, actorId: uploads.createdBy })
         .from(uploads)
         .where(eq(uploads.id, run.uploadId))
         .limit(1)
@@ -321,8 +323,27 @@ export class DrizzleAdmissionValidationRepository
         .update(chapterImportItems)
         .set({ status: "rejected", errorCode, updatedAt: new Date() })
         .where(eq(chapterImportItems.uploadId, run.uploadId));
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, upload.chapterId))
+        .limit(1);
+      await tx.insert(auditLogs).values({
+        actorId: upload.actorId,
+        action: "chapter.upload.admission.rejected",
+        resourceType: "chapter",
+        resourceId: upload.chapterId,
+        result: "rejected",
+        reasonCode: errorCode,
+        ...(run.requestId ? { requestId: run.requestId } : {}),
+        metadata: sanitizeAuditMetadata({
+          chapterId: upload.chapterId,
+          uploadId: run.uploadId,
+          seriesId: chapter?.seriesId,
+        }),
+      });
     } else if (run.replacementId) {
-      await tx
+      const [replacement] = await tx
         .update(chapterReplacementOperations)
         .set({
           status: "rejected",
@@ -334,7 +355,32 @@ export class DrizzleAdmissionValidationRepository
             eq(chapterReplacementOperations.id, run.replacementId),
             eq(chapterReplacementOperations.status, "validating"),
           ),
-        );
+        )
+        .returning({
+          chapterId: chapterReplacementOperations.chapterId,
+          actorId: chapterReplacementOperations.requestedByUserId,
+        });
+      if (!replacement)
+        throw new Error("admission-replacement-transition-conflict");
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, replacement.chapterId))
+        .limit(1);
+      await tx.insert(auditLogs).values({
+        actorId: replacement.actorId,
+        action: "chapter.replacement.admission.rejected",
+        resourceType: "chapter",
+        resourceId: replacement.chapterId,
+        result: "rejected",
+        reasonCode: errorCode,
+        ...(run.requestId ? { requestId: run.requestId } : {}),
+        metadata: sanitizeAuditMetadata({
+          chapterId: replacement.chapterId,
+          replacementId: run.replacementId,
+          seriesId: chapter?.seriesId,
+        }),
+      });
     }
   }
 }

@@ -88,6 +88,15 @@ describe("Upload Center presentation", () => {
     expect(center).toContain("visibleRecords.filter");
     expect(center).toContain("previousPathname.current !== pathname");
     expect(center).toContain(
+      "Completada con \u0024{warningCount} advertencias",
+    );
+    expect(center).toContain("Carga rechazada");
+    expect(center).toContain("Carga completada con advertencias");
+    expect(center).toContain("no bloquearon el procesamiento");
+    expect(center).toContain("No se pudo cargar el detalle.");
+    expect(center).toContain("Reintentar detalle");
+    expect(center).toContain("validationIssueLabel(issue.code)");
+    expect(center).toContain(
       'addEventListener("pointerdown", closeWhenLeaving)',
     );
     expect(provider).toContain('operationsForUser(userId ?? "anonymous")');

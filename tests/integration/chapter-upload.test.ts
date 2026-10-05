@@ -10,20 +10,20 @@ import {
   it,
 } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
-import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
-import { DrizzleRetryUploadOperationRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
-import { RetryUploadOperationService } from "../../apps/api/src/modules/uploads/application/services/retry-upload-operation.service.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
+import { RetryUploadOperationService } from "../../apps/api/src/modules/uploads/application/services/retry-upload-operation.service.js";
+import { DrizzleRetryUploadOperationRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
+import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapters,
-  uploadValidationOutbox,
-  uploadValidationRuns,
-  uploadValidationIssues,
   processingOutbox,
   series,
   uploads,
+  uploadValidationIssues,
+  uploadValidationOutbox,
+  uploadValidationRuns,
   users,
 } from "../../database/schema/index.js";
 import {
@@ -355,6 +355,31 @@ describe("direct chapter upload transfer", () => {
         filename: "bad.gif",
       }),
     ]);
+    expect(
+      await database.db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.requestId, "request-rejected")),
+    ).toEqual([
+      expect.objectContaining({
+        action: "chapter.upload.admission.rejected",
+        resourceId: chapterId,
+        result: "rejected",
+        reasonCode: "IMAGE_FILENAME_INVALID",
+        requestId: "request-rejected",
+      }),
+    ]);
+    const report = await new DrizzleRetryUploadOperationRepository(
+      database.db,
+    ).report("chapter_upload", uploadId);
+    expect(report).toEqual(
+      expect.objectContaining({
+        status: "rejected",
+        requestId: "request-rejected",
+        issues: [expect.objectContaining({ code: "IMAGE_FILENAME_INVALID" })],
+        warnings: [],
+      }),
+    );
     expect(transfer.objects.has(upload.storageKey)).toBe(true);
   });
 
@@ -397,7 +422,13 @@ describe("direct chapter upload transfer", () => {
           sortOrder: 1,
           sizeBytes: 10,
           checksumSha256: "a".repeat(64),
-          warnings: [],
+          warnings: [
+            {
+              code: "large-file",
+              filename: "01.gif",
+              sizeBytes: 9 * 1024 * 1024,
+            },
+          ],
         },
       ],
     });
@@ -424,6 +455,29 @@ describe("direct chapter upload transfer", () => {
         .from(processingOutbox)
         .where(eq(processingOutbox.uploadId, uploadId)),
     ).toHaveLength(1);
+    const report = await new DrizzleRetryUploadOperationRepository(
+      database.db,
+    ).report("chapter_upload", uploadId);
+    expect(report?.warnings).toEqual([
+      { code: "large-file", filename: "01.gif", sizeBytes: 9 * 1024 * 1024 },
+    ]);
+    const projection = await app.inject({
+      method: "GET",
+      url: "/me/upload-operations",
+      headers: { cookie },
+    });
+    expect(projection.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: uploadId, warningCount: 1 }),
+      ]),
+    );
+    const reportResponse = await app.inject({
+      method: "GET",
+      url: `/me/upload-operations/chapter_upload/${uploadId}/validation-report`,
+      headers: { cookie },
+    });
+    expect(reportResponse.statusCode).toBe(200);
+    expect(reportResponse.json().warnings).toEqual(report?.warnings);
   });
 
   it("requeues exhausted Admission without another user transfer", async () => {

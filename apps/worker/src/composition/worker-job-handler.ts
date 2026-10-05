@@ -1,4 +1,4 @@
-import { UnrecoverableError, type Job } from "bullmq";
+import { type Job, UnrecoverableError } from "bullmq";
 import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
 import { ProcessingPermanentFailure } from "../processing/application/chapter-processing.service.js";
 import type { WorkerDependencies } from "./create-worker-dependencies.js";
@@ -7,7 +7,7 @@ export type WorkerJobHandlerDependencies = Pick<
   WorkerDependencies,
   | "logger"
   | "deletion"
-  | "loadImageProcessingWarnings"
+  | "loadUploadProcessingPolicy"
   | "createExtractor"
   | "createChapterProcessing"
   | "createReplacementProcessing"
@@ -33,15 +33,15 @@ export function createWorkerJobHandler(
       dependencies.logger.info(correlation, "Worker job completed");
       return;
     }
-    const warnings = await dependencies.loadImageProcessingWarnings();
     if (job.name === "chapter.upload.validate") {
+      const policy = await dependencies.loadUploadProcessingPolicy();
       const finalAttempt =
         job.attemptsMade + 1 >= Number(job.opts.attempts ?? 1);
       try {
         const owner = job.data as { uploadId?: string; replacementId?: string };
         if (!owner.uploadId && !owner.replacementId)
           throw new UnrecoverableError("admission-owner-missing");
-        await dependencies.createAdmissionValidation(warnings).validate({
+        await dependencies.createAdmissionValidation(policy).validate({
           ...(owner.uploadId
             ? { uploadId: owner.uploadId }
             : { replacementId: owner.replacementId as string }),
@@ -63,7 +63,8 @@ export function createWorkerJobHandler(
       dependencies.logger.info(correlation, "Worker job completed");
       return;
     }
-    const extractor = dependencies.createExtractor(warnings);
+    const policy = await dependencies.loadUploadProcessingPolicy();
+    const extractor = dependencies.createExtractor(policy.warnings);
     if (job.name === "chapter.replacement.process")
       await dependencies
         .createReplacementProcessing(extractor)
