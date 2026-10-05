@@ -1,6 +1,8 @@
 import type { Job } from "bullmq";
 import { describe, expect, it, vi } from "vitest";
 import { createWorkerJobHandler } from "./worker-job-handler.js";
+import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
+import { UnrecoverableError } from "bullmq";
 import { createWorkerRuntime } from "./create-worker-runtime.js";
 
 function fakeJob(name: string, attemptsMade = 0): Job {
@@ -14,6 +16,53 @@ function fakeJob(name: string, attemptsMade = 0): Job {
 }
 
 describe("Worker composition", () => {
+  it("completes an expected Admission rejection without a second BullMQ attempt", async () => {
+    const validate = vi.fn().mockResolvedValue(undefined);
+    const handler = createWorkerJobHandler({
+      logger: { info: vi.fn() },
+      deletion: { execute: vi.fn() },
+      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      createExtractor: vi.fn(),
+      createChapterProcessing: vi.fn(),
+      createReplacementProcessing: vi.fn(),
+      createAdmissionValidation: () => ({ validate }),
+    } as never);
+    await expect(
+      handler({
+        ...fakeJob("chapter.upload.validate"),
+        data: { uploadId: "upload-1" },
+      } as Job),
+    ).resolves.toBeUndefined();
+    expect(validate).toHaveBeenCalledOnce();
+  });
+
+  it("marks a permanent Admission technical failure unrecoverable", async () => {
+    const handler = createWorkerJobHandler({
+      logger: { info: vi.fn() },
+      deletion: { execute: vi.fn() },
+      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      createExtractor: vi.fn(),
+      createChapterProcessing: vi.fn(),
+      createReplacementProcessing: vi.fn(),
+      createAdmissionValidation: () => ({
+        validate: vi
+          .fn()
+          .mockRejectedValue(
+            new AdmissionTechnicalFailure(
+              false,
+              "STORAGE_AUTHENTICATION_FAILED",
+            ),
+          ),
+      }),
+    } as never);
+    await expect(
+      handler({
+        ...fakeJob("chapter.upload.validate"),
+        data: { uploadId: "upload-1" },
+      } as Job),
+    ).rejects.toBeInstanceOf(UnrecoverableError);
+  });
+
   it("routes each queue job to its existing handler and computes finalAttempt in the handler", async () => {
     const deletion = vi.fn();
     const processing = vi.fn();
@@ -70,7 +119,10 @@ describe("Worker composition", () => {
       },
     } as Job;
     await handler(job);
-    expect(replacement).toHaveBeenCalledWith(job.data);
+    expect(replacement).toHaveBeenCalledWith(job.data, false, {
+      jobId: "job-1",
+      jobAttempt: 1,
+    });
     expect(info).toHaveBeenCalledWith(
       expect.objectContaining({
         jobId: "job-1",

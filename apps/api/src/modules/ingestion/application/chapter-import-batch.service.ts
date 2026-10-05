@@ -314,8 +314,14 @@ function projectBatchStatus(
   items: readonly { status: string }[],
 ): "pending" | "running" | "completed" | "completed_with_errors" {
   if (items.every((item) => item.status === "ready")) return "completed";
-  const final = items.every(
-    (item) => item.status === "ready" || item.status === "failed",
+  const final = items.every((item) =>
+    [
+      "ready",
+      "failed",
+      "rejected",
+      "retry_exhausted",
+      "terminal_failed",
+    ].includes(item.status),
   );
   if (final) return "completed_with_errors";
   if (items.every((item) => item.status === "pending")) return "pending";

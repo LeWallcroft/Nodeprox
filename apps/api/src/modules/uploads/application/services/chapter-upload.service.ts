@@ -32,6 +32,7 @@ export class ChapterUploadService {
     private readonly activeProfile: ActiveStorageProfilePort,
     private readonly audit: UploadAuditPort,
     private readonly maxSizeBytes: number,
+    private readonly logger?: { error(context: object, message: string): void },
   ) {}
 
   async initiate(input: {
@@ -90,7 +91,16 @@ export class ChapterUploadService {
         transfer: grant,
       };
     } catch (error) {
-      await this.uploads.removePending(uploadId).catch(() => false);
+      await this.uploads
+        .removePending(uploadId)
+        .catch((cleanupError: unknown) => {
+          this.logOperationalFailure(
+            "upload-pending-cleanup-failed",
+            uploadId,
+            cleanupError,
+          );
+          return false;
+        });
       await this.safeAudit(
         input.context.userId,
         "chapter.upload.failed",
@@ -124,7 +134,7 @@ export class ChapterUploadService {
       );
       verified = await transfer.verify({ key: upload.storageKey });
     } catch (error) {
-      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      await this.releaseCompletion(upload.id);
       if (error instanceof UploadTransferObjectNotFoundError) {
         await this.safeAudit(
           input.context.userId,
@@ -147,7 +157,7 @@ export class ChapterUploadService {
         normalizeContentType(verified.contentType) !==
           normalizeContentType(upload.contentType));
     if (mismatch) {
-      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      await this.releaseCompletion(upload.id);
       throw new UploadedObjectMismatchError();
     }
 
@@ -165,11 +175,11 @@ export class ChapterUploadService {
           : {}),
       });
     } catch (error) {
-      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+      await this.releaseCompletion(upload.id);
       throw error;
     }
-    if (finalization.outcome !== "uploaded") {
-      await this.uploads.releaseCompletion(upload.id).catch(() => undefined);
+    if (finalization.outcome !== "validating") {
+      await this.releaseCompletion(upload.id);
       if (finalization.outcome === "denied") throw new UploadDeniedError();
       throw new UploadConflictError();
     }
@@ -183,7 +193,7 @@ export class ChapterUploadService {
     return {
       chapterId: input.chapterId,
       uploadId: upload.id,
-      status: "uploaded",
+      status: "validating",
       filename: upload.originalFilename,
       sizeBytes: verified.sizeBytes,
     };
@@ -209,7 +219,7 @@ export class ChapterUploadService {
       );
       await transfer.abort({ key: upload.storageKey });
     } catch (error) {
-      await this.uploads.releaseAbort(upload.id).catch(() => undefined);
+      await this.releaseAbort(upload.id);
       if (error instanceof UploadTransferProviderError)
         throw new UploadProviderUnavailableError();
       throw error;
@@ -247,8 +257,13 @@ export class ChapterUploadService {
           upload.chapterId,
           "expired",
         );
-      } catch {
-        await this.uploads.releaseAbort(upload.id).catch(() => undefined);
+      } catch (error) {
+        this.logOperationalFailure(
+          "stale-upload-cleanup-failed",
+          upload.id,
+          error,
+        );
+        await this.releaseAbort(upload.id);
       }
     }
     return cleaned;
@@ -287,9 +302,44 @@ export class ChapterUploadService {
         ...(requestId ? { requestId } : {}),
         metadata: { result },
       });
-    } catch {
-      // Audit persistence must not leak provider or credential details.
+    } catch (error) {
+      this.logOperationalFailure("upload-audit-failed", chapterId, error);
     }
+  }
+
+  private async releaseCompletion(uploadId: string) {
+    await this.uploads.releaseCompletion(uploadId).catch((error: unknown) => {
+      this.logOperationalFailure(
+        "upload-completion-release-failed",
+        uploadId,
+        error,
+      );
+    });
+  }
+
+  private async releaseAbort(uploadId: string) {
+    await this.uploads.releaseAbort(uploadId).catch((error: unknown) => {
+      this.logOperationalFailure(
+        "upload-abort-release-failed",
+        uploadId,
+        error,
+      );
+    });
+  }
+
+  private logOperationalFailure(
+    event: string,
+    uploadId: string,
+    error: unknown,
+  ) {
+    this.logger?.error(
+      {
+        event,
+        uploadId,
+        errorName: error instanceof Error ? error.name : "unknown",
+      },
+      "Upload operational failure",
+    );
   }
 }
 

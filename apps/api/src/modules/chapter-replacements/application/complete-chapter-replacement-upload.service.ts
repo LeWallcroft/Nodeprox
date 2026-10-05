@@ -81,7 +81,7 @@ export class CompleteChapterReplacementUploadService {
     )
       throw new ChapterReplacementUploadInvalidError();
 
-    operation = await this.repository.markUploadedAndEnqueue({
+    operation = await this.repository.markValidatingAndEnqueue({
       replacementId: operation.id,
       chapterId: operation.chapterId,
       ...(input.originRequestId

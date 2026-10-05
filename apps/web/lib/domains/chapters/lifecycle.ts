@@ -9,7 +9,7 @@ const ACTIVE_CHAPTER_STATUSES = new Set<ChapterStatus>([
 
 const ACTIVE_IMPORT_ITEM_STATUSES = new Set<
   ImportBatchProjection["items"][number]["status"]
->(["uploading", "uploaded", "processing"]);
+>(["uploading", "validating", "uploaded", "processing"]);
 
 export function isChapterLifecycleActive(status: ChapterStatus): boolean {
   return ACTIVE_CHAPTER_STATUSES.has(status);

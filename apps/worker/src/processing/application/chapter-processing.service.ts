@@ -1,5 +1,7 @@
 import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { ProcessChapterInput } from "@nodeprox/types";
+import type { ValidatedChapterManifest } from "../../admission-validation/domain/admission-validation.types.js";
+import type { ValidatedImage } from "../domain/image-policy.js";
 import { buildPermanentImageStorageKey } from "../domain/image-policy.js";
 import type {
   ProcessingAuditPort,
@@ -14,10 +16,11 @@ export class ChapterProcessingService {
     private readonly storageExecution: StorageExecutionResolver,
     private readonly extractor: ZipExtractorPort,
     private readonly audit: ProcessingAuditPort,
+    private readonly logger?: { error(context: object, message: string): void },
   ) {}
   async process(
     input: ProcessChapterInput,
-    removeSourceOnFailure = false,
+    finalAttempt = false,
     invocation?: { jobId: string; jobAttempt: number },
   ): Promise<void> {
     const upload = await this.repository.findUpload(input.uploadId);
@@ -33,7 +36,6 @@ export class ChapterProcessingService {
       upload.storageProfileId,
     );
     if (upload.chapterStatus === "ready") {
-      await storage.delete(input.sourceStorageKey).catch(() => undefined);
       return;
     }
     const claim = await this.repository.claimChapter({
@@ -48,6 +50,11 @@ export class ChapterProcessingService {
     try {
       const source = await storage.get(input.sourceStorageKey);
       const images = await this.extractor.inspect(source);
+      const manifest = await this.repository.loadLatestAcceptedManifest(
+        input.uploadId,
+      );
+      if (!manifestMatches(manifest, images))
+        throw new ProcessingPermanentFailure("VALIDATION_MANIFEST_MISMATCH");
       const records = [];
       for (const image of images) {
         const storageKey = buildPermanentImageStorageKey({
@@ -63,7 +70,7 @@ export class ChapterProcessingService {
         const write = await putIfAbsentOrVerifyEquivalent({
           storage,
           key: storageKey,
-          body: this.extractor.readImage(image),
+          body: this.extractor.replayableImage(image),
           contentType: image.contentType,
           sizeBytes: image.sizeBytes,
           checksum: image.checksum,
@@ -107,33 +114,29 @@ export class ChapterProcessingService {
             imageCount: records.length,
           },
         })
-        .catch(() => undefined);
-
-      await storage.delete(input.sourceStorageKey).catch(async () => {
-        await this.audit
-          .append({
-            actorId: upload.createdBy,
-            action: "chapter.processing.source-cleanup.failed",
-            resourceType: "chapter",
-            resourceId: input.chapterId,
-            result: "failed",
-            reasonCode: "source-cleanup-failed",
-            ...(input.originRequestId
-              ? { requestId: input.originRequestId }
-              : {}),
-            metadata: { uploadId: input.uploadId, attemptId: attempt.id },
-          })
-          .catch(() => undefined);
-      });
+        .catch((error: unknown) => {
+          this.logger?.error(
+            {
+              event: "processing-audit-failed",
+              attemptId: attempt.id,
+              errorName: error instanceof Error ? error.name : "unknown",
+            },
+            "Processing completion audit failed",
+          );
+        });
     } catch (error) {
       const classification = classifyProcessingError(error);
-      const terminal = !classification.retryable || removeSourceOnFailure;
+      const disposition = !classification.retryable
+        ? "terminal"
+        : finalAttempt
+          ? "retry_exhausted"
+          : "retryable";
       await this.repository.markFailed(
         input.chapterId,
         input.uploadId,
         attempt.id,
         {
-          terminal,
+          disposition,
           errorCode: classification.code,
           errorMessage: classification.message,
         },
@@ -144,13 +147,19 @@ export class ChapterProcessingService {
           try {
             await storage.delete(key);
             await this.repository.markCandidate(attempt.id, key, "cleaned");
-          } catch {
-            // The durable cleanup_pending row is handled by reconciliation.
+          } catch (cleanupError) {
+            this.logger?.error(
+              {
+                event: "processing-candidate-cleanup-failed",
+                attemptId: attempt.id,
+                errorName:
+                  cleanupError instanceof Error ? cleanupError.name : "unknown",
+              },
+              "Candidate cleanup deferred to reconciliation",
+            );
           }
         }),
       );
-      if (terminal)
-        await storage.delete(input.sourceStorageKey).catch(() => undefined);
       await this.audit
         .append({
           actorId: upload.createdBy,
@@ -166,13 +175,58 @@ export class ChapterProcessingService {
             result: "failed",
             attemptId: attempt.id,
             attemptNumber: attempt.attemptNumber,
-            retryable: !terminal,
+            disposition,
           },
         })
-        .catch(() => undefined);
+        .catch((auditError: unknown) => {
+          this.logger?.error(
+            {
+              event: "processing-audit-failed",
+              attemptId: attempt.id,
+              errorName:
+                auditError instanceof Error ? auditError.name : "unknown",
+            },
+            "Processing failure audit failed",
+          );
+        });
+      if (disposition === "terminal")
+        throw new ProcessingPermanentFailure(classification.code);
       throw error;
     } finally {
-      await this.extractor.dispose().catch(() => undefined);
+      await this.extractor.dispose().catch((error: unknown) => {
+        this.logger?.error(
+          {
+            event: "processing-temp-cleanup-failed",
+            attemptId: attempt.id,
+            errorName: error instanceof Error ? error.name : "unknown",
+          },
+          "Processing temporary cleanup failed",
+        );
+      });
     }
   }
+}
+
+export class ProcessingPermanentFailure extends Error {
+  constructor(readonly code: string) {
+    super(code);
+  }
+}
+
+function manifestMatches(
+  manifest: ValidatedChapterManifest | null,
+  images: readonly ValidatedImage[],
+): boolean {
+  if (!manifest || manifest.length !== images.length) return false;
+  const byOrder = new Map(manifest.map((entry) => [entry.sortOrder, entry]));
+  return images.every((image) => {
+    const entry = byOrder.get(image.sortOrder);
+    return (
+      entry?.filename === image.filename &&
+      entry.sortOrder === image.sortOrder &&
+      entry.sizeBytes === image.sizeBytes &&
+      entry.checksumSha256 === image.checksum &&
+      entry.contentType === image.contentType
+    );
+  });
 }

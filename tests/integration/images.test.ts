@@ -98,7 +98,7 @@ beforeAll(async () => {
   ]);
   await storage.put({
     key: storageKey,
-    body: Readable.from([content]),
+    body: { sizeBytes: content.length, open: () => Readable.from([content]) },
     contentType: "image/jpeg",
     sizeBytes: content.length,
   });

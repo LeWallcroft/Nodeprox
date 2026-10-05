@@ -12,6 +12,8 @@ const allowed = [
   ["failed", "start-upload", "uploading"],
   ["uploading", "complete-upload", "uploaded"],
   ["uploading", "abort-upload", "draft"],
+  ["uploading", "reject-upload", "draft"],
+  ["uploading", "fail-upload", "draft"],
   ["uploaded", "start-processing", "processing"],
   ["failed", "retry-processing", "processing"],
   ["processing", "processing-retry", "uploaded"],

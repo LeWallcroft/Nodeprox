@@ -164,6 +164,7 @@ export function registerUploadPlugin(
     activeProfile,
     repository,
     storageConfig.uploadMaxSizeBytes,
+    app.log,
   );
   const session = requireSession(
     authentication.service,

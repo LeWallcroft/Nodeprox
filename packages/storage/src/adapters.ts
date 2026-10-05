@@ -4,6 +4,8 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  type GetObjectCommandOutput,
+  type PutObjectCommandOutput,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { NodeProxStorageConfig } from "@nodeprox/config";
@@ -13,10 +15,16 @@ import { dirname, isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
+  mapStorageProviderError,
+  StorageIntegrityError,
+  StorageObjectNotFoundError,
+} from "./errors.js";
+import {
   UploadTransferObjectNotFoundError,
   UploadTransferProviderError,
   StorageObjectAlreadyExistsError,
   type StoragePort,
+  type ReplayableObjectBody,
   type StoredObjectMetadata,
   type StoredObject,
   type UploadTransferPort,
@@ -54,13 +62,14 @@ export class B2Storage implements StoragePort {
         accessKeyId: config.B2_KEY_ID,
         secretAccessKey: config.B2_APPLICATION_KEY,
       },
+      maxAttempts: 1,
     });
     this.bucket = config.B2_BUCKET;
   }
 
   async put(input: {
     key: string;
-    body: NodeJS.ReadableStream;
+    body: ReplayableObjectBody;
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
@@ -68,17 +77,32 @@ export class B2Storage implements StoragePort {
     // B2 does not document conditional PutObject writes. Chapter processing
     // serializes logical writers in PostgreSQL; this read prevents a retry
     // from replacing a key already present in B2.
+    if (input.body.sizeBytes !== input.sizeBytes)
+      throw new StorageIntegrityError();
     if (await this.exists(input.key))
       throw new StorageObjectAlreadyExistsError();
-    const result = await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key: input.key,
-        Body: input.body as never,
-        ContentType: input.contentType,
-        ContentLength: input.sizeBytes,
-      }),
-    );
+    let result: PutObjectCommandOutput | undefined;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        result = await this.client.send(
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: input.key,
+            Body: input.body.open() as never,
+            ContentType: input.contentType,
+            ContentLength: input.sizeBytes,
+          }),
+        );
+        break;
+      } catch (error) {
+        const mapped = mapStorageProviderError(error);
+        if (!mapped.retryable || attempt === 3) throw mapped;
+        await new Promise((resolve) =>
+          setTimeout(resolve, 100 * 2 ** (attempt - 1)),
+        );
+      }
+    }
+    if (!result) throw new StorageIntegrityError();
     const etag = result.ETag?.replaceAll('"', "");
     return {
       key: input.key,
@@ -89,20 +113,29 @@ export class B2Storage implements StoragePort {
   }
 
   async get(key: string): Promise<Readable> {
-    const result = await this.client.send(
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
-    if (!result.Body) throw new Error("storage-object-body-missing");
+    let result: GetObjectCommandOutput;
+    try {
+      result = await this.client.send(
+        new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch (error) {
+      throw mapStorageProviderError(error);
+    }
+    if (!result.Body) throw new StorageIntegrityError();
     if (result.Body instanceof Readable) return result.Body;
     if (Symbol.asyncIterator in Object(result.Body))
       return Readable.from(result.Body as unknown as AsyncIterable<Uint8Array>);
-    throw new Error("storage-object-body-not-readable");
+    throw new StorageIntegrityError();
   }
 
   async delete(key: string): Promise<void> {
-    await this.client.send(
-      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
-    );
+    try {
+      await this.client.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch (error) {
+      throw mapStorageProviderError(error);
+    }
   }
 
   async exists(key: string): Promise<boolean> {
@@ -114,15 +147,15 @@ export class B2Storage implements StoragePort {
       const result = await this.client.send(
         new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
       );
-      if (result.ContentLength === undefined)
-        throw new Error("storage-object-size-missing");
+      if (result.ContentLength === undefined) throw new StorageIntegrityError();
       return {
         sizeBytes: result.ContentLength,
         ...(result.ContentType ? { contentType: result.ContentType } : {}),
       };
     } catch (error) {
-      if (isNotFound(error)) return null;
-      throw error;
+      const mapped = mapStorageProviderError(error);
+      if (mapped instanceof StorageObjectNotFoundError) return null;
+      throw mapped;
     }
   }
 }
@@ -136,11 +169,13 @@ export class FilesystemStorage implements StoragePort {
 
   async put(input: {
     key: string;
-    body: NodeJS.ReadableStream;
+    body: ReplayableObjectBody;
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
     requirePositiveSize(input.sizeBytes);
+    if (input.body.sizeBytes !== input.sizeBytes)
+      throw new StorageIntegrityError();
     const target = this.safePath(input.key);
     await mkdir(dirname(target), { recursive: true });
     let sizeBytes = 0;
@@ -156,7 +191,7 @@ export class FilesystemStorage implements StoragePort {
       createdByThisWrite = true;
     });
     try {
-      await pipeline(input.body, counter, output);
+      await pipeline(input.body.open(), counter, output);
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -170,7 +205,7 @@ export class FilesystemStorage implements StoragePort {
     }
     if (sizeBytes !== input.sizeBytes) {
       await rm(target, { force: true });
-      throw new Error("storage-size-mismatch");
+      throw new StorageIntegrityError();
     }
     return { key: input.key, sizeBytes, contentType: input.contentType };
   }

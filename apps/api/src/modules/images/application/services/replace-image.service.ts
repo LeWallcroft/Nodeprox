@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { StoragePort } from "@nodeprox/storage/port";
+import { spoolReplayableBody } from "@nodeprox/storage/replayable-body";
 import type {
   ActiveStorageProfilePort,
   StorageExecutionResolver,
@@ -83,10 +84,11 @@ export class ReplaceImageService {
       contentType,
     });
     let objectWritten = false;
+    const replayable = await spoolReplayableBody(input.body, input.sizeBytes);
     try {
       const stored = await storage.put({
         key: candidateKey,
-        body: input.body,
+        body: replayable.body,
         contentType,
         sizeBytes: input.sizeBytes,
       });
@@ -140,6 +142,8 @@ export class ReplaceImageService {
       if (error instanceof ImageCandidateActivationNotFoundError)
         throw new ImageReplacementNotFoundError();
       throw error;
+    } finally {
+      await replayable.dispose();
     }
   }
 }

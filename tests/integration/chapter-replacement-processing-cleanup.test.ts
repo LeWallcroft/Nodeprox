@@ -58,18 +58,14 @@ const processing = new DrizzleChapterReplacementProcessingWorkerRepository(
 const cleanup = new DrizzleStorageCleanupRepository(database.db);
 
 describe("CHR3 durable storage cleanup", () => {
-  it("CHR3-CLN-01 terminal invalid ZIP schedules source cleanup", async () => {
+  it("CHR3-CLN-01 terminal invalid ZIP retains the source", async () => {
     const candidate = await target();
     await processing.markFailed(candidate.replacementId, "invalid-zip-path");
     const rows = await database.db
       .select()
       .from(storageCleanupOutbox)
       .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      storageKey: candidate.sourceStorageKey,
-      reason: "replacement_source_zip",
-    });
+    expect(rows).toHaveLength(0);
   });
 
   it("CHR3-CLN-02 partial failure schedules every planned candidate", async () => {
@@ -82,13 +78,13 @@ describe("CHR3 durable storage cleanup", () => {
       .select()
       .from(storageCleanupOutbox)
       .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
-    expect(rows).toHaveLength(4);
+    expect(rows).toHaveLength(3);
     expect(
       rows.filter((row) => row.reason === "replacement_failed_candidate"),
     ).toHaveLength(3);
   });
 
-  it("persists the origin on source and candidate cleanup after failure", async () => {
+  it("persists the origin on candidate cleanup after failure", async () => {
     const candidate = await target(2, true);
     await processing.markFailed(
       candidate.replacementId,
@@ -99,7 +95,7 @@ describe("CHR3 durable storage cleanup", () => {
       .select()
       .from(storageCleanupOutbox)
       .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
     expect(
       rows.every((row) => row.originRequestId === "request-complete"),
     ).toBe(true);
@@ -189,8 +185,8 @@ describe("CHR3 durable storage cleanup", () => {
   });
 
   it("CHR3-CLN-07 cleanup rows require no fake imageId", async () => {
-    const candidate = await target();
-    await processing.markFailed(candidate.replacementId, "invalid-zip-layout");
+    const candidate = await target(1, true);
+    await processing.markReady(candidate.replacementId);
     const [row] = await database.db
       .select()
       .from(storageCleanupOutbox)
@@ -207,6 +203,6 @@ describe("CHR3 durable storage cleanup", () => {
       .select()
       .from(storageCleanupOutbox)
       .where(eq(storageCleanupOutbox.replacementId, candidate.replacementId));
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
   });
 });

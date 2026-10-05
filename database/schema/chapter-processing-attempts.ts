@@ -13,11 +13,18 @@ import {
 } from "drizzle-orm/pg-core";
 import { chapters } from "./chapters.js";
 import { uploads } from "./uploads.js";
+import { uploadValidationRuns } from "./upload-validation.js";
 import { storageProfiles } from "./storage-profiles.js";
 
 export const chapterProcessingAttemptStatusEnum = pgEnum(
   "chapter_processing_attempt_status",
-  ["processing", "retryable_failed", "terminal_failed", "succeeded"],
+  [
+    "processing",
+    "retryable_failed",
+    "retry_exhausted",
+    "terminal_failed",
+    "succeeded",
+  ],
 );
 
 export const chapterProcessingAttempts = pgTable(
@@ -30,6 +37,10 @@ export const chapterProcessingAttempts = pgTable(
     uploadId: uuid("upload_id").references(() => uploads.id, {
       onDelete: "set null",
     }),
+    validationRunId: uuid("validation_run_id").references(
+      () => uploadValidationRuns.id,
+      { onDelete: "set null" },
+    ),
     storageProfileId: uuid("storage_profile_id")
       .notNull()
       .references(() => storageProfiles.id, { onDelete: "restrict" }),

@@ -12,6 +12,10 @@ import type {
 } from "../../apps/worker/src/processing/application/ports.js";
 import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
 import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
+import { DrizzleRetryUploadOperationRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
+import { RetryUploadOperationService } from "../../apps/api/src/modules/uploads/application/services/retry-upload-operation.service.js";
+import { DrizzleUploadOperationReadRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/upload-operation-read.repository.js";
+import { StorageProviderUnavailableError } from "@nodeprox/storage/errors";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
@@ -22,6 +26,10 @@ import {
   imageVersions,
   series,
   uploads,
+  uploadValidationEntries,
+  uploadValidationRuns,
+  storageCleanupOutbox,
+  processingOutbox,
   users,
 } from "../../database/schema/index.js";
 import { FilesystemStorage } from "@nodeprox/storage";
@@ -53,6 +61,10 @@ function extractorFor(inspect: ZipExtractorPort["inspect"]): ZipExtractorPort {
   return {
     inspect,
     readImage: () => Readable.from([Buffer.from("img")]),
+    replayableImage: () => ({
+      sizeBytes: 3,
+      open: () => Readable.from([Buffer.from("img")]),
+    }),
     dispose: async () => undefined,
   };
 }
@@ -83,6 +95,26 @@ async function createFixture() {
     sizeBytes: 3,
     createdBy: userId,
     status: "uploaded",
+  });
+  const [validation] = await database.db
+    .insert(uploadValidationRuns)
+    .values({
+      uploadId,
+      attemptNumber: 1,
+      status: "accepted",
+      finishedAt: new Date(),
+    })
+    .returning({ id: uploadValidationRuns.id });
+  if (!validation) throw new Error("validation-fixture-create-failed");
+  await database.db.insert(uploadValidationEntries).values({
+    runId: validation.id,
+    filename: image.filename,
+    extension: image.extension,
+    contentType: image.contentType,
+    sortOrder: image.sortOrder,
+    sizeBytes: image.sizeBytes,
+    checksumSha256: image.checksum,
+    warnings: [],
   });
   return { chapterId, uploadId, storageKey };
 }
@@ -145,7 +177,7 @@ describe("M4-B processing integration", () => {
     });
     await storage.put({
       key: storageKey,
-      body: Readable.from([Buffer.from("img")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("img")]) },
       contentType: "image/jpeg",
       sizeBytes: 3,
     });
@@ -239,7 +271,7 @@ describe("M4-B processing integration", () => {
       fixture.uploadId,
       resumed.attempt.id,
       {
-        terminal: false,
+        disposition: "retryable",
         errorCode: "PROCESSING_UNKNOWN",
         errorMessage: "temporary",
       },
@@ -260,7 +292,7 @@ describe("M4-B processing integration", () => {
     const storage = new FilesystemStorage(storageRoot);
     await storage.put({
       key: fixture.storageKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });
@@ -319,7 +351,16 @@ describe("M4-B processing integration", () => {
       .where(eq(chapterProcessingObjects.attemptId, attempt.id));
     expect(candidates).toHaveLength(1);
     expect(candidates[0]?.storageProfileId).toBe(legacyStorageProfileId);
-    await expect(storage.exists(fixture.storageKey)).resolves.toBe(false);
+    await expect(storage.exists(fixture.storageKey)).resolves.toBe(true);
+    const cleanup = await database.db
+      .select()
+      .from(storageCleanupOutbox)
+      .where(eq(storageCleanupOutbox.uploadId, fixture.uploadId));
+    expect(cleanup).toHaveLength(1);
+    expect(cleanup[0]).toMatchObject({
+      reason: "chapter_source_zip",
+      status: "pending",
+    });
   });
 
   it("allows a retry after a transient failure without duplicating metadata", async () => {
@@ -327,7 +368,7 @@ describe("M4-B processing integration", () => {
     const storage = new FilesystemStorage(storageRoot);
     await storage.put({
       key: fixture.storageKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });
@@ -388,12 +429,149 @@ describe("M4-B processing integration", () => {
     ]);
   });
 
+  it("retains the source after exhausted transient attempts and requeues the same upload", async () => {
+    const fixture = await createFixture();
+    const storage = new FilesystemStorage(storageRoot);
+    await storage.put({
+      key: fixture.storageKey,
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
+      contentType: "application/zip",
+      sizeBytes: 3,
+    });
+    const repository = new DrizzleProcessingRepository(database.db);
+    const failed = new ChapterProcessingService(
+      repository,
+      legacyStorageExecution(storage),
+      extractorFor(async () => {
+        throw new StorageProviderUnavailableError({ httpStatus: 503 });
+      }),
+      audit,
+    );
+    const input = {
+      chapterId: fixture.chapterId,
+      seriesId,
+      uploadId: fixture.uploadId,
+      sourceStorageKey: fixture.storageKey,
+    };
+    for (let attempt = 1; attempt <= 3; attempt += 1)
+      await expect(failed.process(input, attempt === 3)).rejects.toMatchObject({
+        code: "STORAGE_PROVIDER_UNAVAILABLE",
+      });
+    const attempts = await database.db
+      .select({ status: chapterProcessingAttempts.status })
+      .from(chapterProcessingAttempts)
+      .where(eq(chapterProcessingAttempts.uploadId, fixture.uploadId))
+      .orderBy(asc(chapterProcessingAttempts.attemptNumber));
+    expect(attempts.map((attempt) => attempt.status)).toEqual([
+      "retryable_failed",
+      "retryable_failed",
+      "retry_exhausted",
+    ]);
+    const [before] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, fixture.chapterId));
+    expect(before?.status).toBe("uploaded");
+    expect(await storage.exists(fixture.storageKey)).toBe(true);
+    expect(
+      await database.db
+        .select()
+        .from(storageCleanupOutbox)
+        .where(eq(storageCleanupOutbox.uploadId, fixture.uploadId)),
+    ).toHaveLength(0);
+    const projected = await new DrizzleUploadOperationReadRepository(
+      database.db,
+    ).listForUser({ userId, limit: 100 });
+    expect(
+      projected.find((operation) => operation.id === fixture.uploadId),
+    ).toMatchObject({
+      kind: "chapter_upload",
+      status: "retry_exhausted",
+      failureStage: "processing",
+    });
+
+    const retry = new RetryUploadOperationService(
+      {
+        check: async () => ({ allowed: true, reason: "assigned", seriesId }),
+      } as never,
+      new DrizzleRetryUploadOperationRepository(database.db),
+      legacyStorageExecution(storage),
+    );
+    await expect(
+      retry.retryUploadOperation({
+        context: { userId, sessionId: randomUUID() },
+        kind: "chapter_upload",
+        operationId: fixture.uploadId,
+        requestId: "manual-retry",
+      }),
+    ).resolves.toEqual({ status: "uploaded", stage: "processing" });
+    const intents = await database.db
+      .select()
+      .from(processingOutbox)
+      .where(eq(processingOutbox.uploadId, fixture.uploadId));
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.storageKey).toBe(fixture.storageKey);
+    await new ChapterProcessingService(
+      repository,
+      legacyStorageExecution(storage),
+      extractorFor(async () => [image]),
+      audit,
+    ).process(input);
+    const [after] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, fixture.chapterId));
+    expect(after?.status).toBe("ready");
+  });
+
+  it("rejects a changed source manifest before writing permanent media", async () => {
+    const fixture = await createFixture();
+    const storage = new FilesystemStorage(storageRoot);
+    await storage.put({
+      key: fixture.storageKey,
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
+      contentType: "application/zip",
+      sizeBytes: 3,
+    });
+    const changed = { ...image, checksum: "f".repeat(64) };
+    await expect(
+      new ChapterProcessingService(
+        new DrizzleProcessingRepository(database.db),
+        legacyStorageExecution(storage),
+        extractorFor(async () => [changed]),
+        audit,
+      ).process({
+        chapterId: fixture.chapterId,
+        seriesId,
+        uploadId: fixture.uploadId,
+        sourceStorageKey: fixture.storageKey,
+      }),
+    ).rejects.toThrow("VALIDATION_MANIFEST_MISMATCH");
+    expect(
+      await database.db
+        .select()
+        .from(images)
+        .where(eq(images.chapterId, fixture.chapterId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(chapterProcessingObjects)
+        .where(
+          eq(
+            chapterProcessingObjects.storageKey,
+            `Media/m4b-${seriesId}/${chapterIds.length}/01.jpg`,
+          ),
+        ),
+    ).toHaveLength(0);
+  });
+
   it("persists terminal provenance for a non-retryable ZIP failure", async () => {
     const fixture = await createFixture();
     const storage = new FilesystemStorage(storageRoot);
     await storage.put({
       key: fixture.storageKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });
@@ -413,7 +591,7 @@ describe("M4-B processing integration", () => {
         uploadId: fixture.uploadId,
         sourceStorageKey: fixture.storageKey,
       }),
-    ).rejects.toThrow("invalid-zip-layout");
+    ).rejects.toThrow("ZIP_INVALID");
     const [chapter] = await database.db
       .select({ status: chapters.status })
       .from(chapters)
@@ -435,7 +613,7 @@ describe("M4-B processing integration", () => {
     const storage = new FilesystemStorage(storageRoot);
     await storage.put({
       key: fixture.storageKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });
@@ -473,7 +651,7 @@ describe("M4-B processing integration", () => {
     });
     await storage.put({
       key: retrySourceKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });
@@ -509,7 +687,7 @@ describe("M4-B processing integration", () => {
     const storage = new FilesystemStorage(storageRoot);
     await storage.put({
       key: fixture.storageKey,
-      body: Readable.from([Buffer.from("zip")]),
+      body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
       contentType: "application/zip",
       sizeBytes: 3,
     });

@@ -137,7 +137,7 @@ export function buildApp(
       authentication.cookies,
     );
     registerChapterReplacementPlugin(app, {
-      ...services.createChapterReplacementServices(chapterPermissions),
+      ...services.createChapterReplacementServices(chapterPermissions, app.log),
       sessionGuard,
     });
     const uploadService = registerUploadPlugin(
@@ -151,6 +151,8 @@ export function buildApp(
     );
     registerUploadCenterPlugin(app, {
       service: services.createUploadCenterService(),
+      operations:
+        services.createRetryUploadOperationService(chapterPermissions),
       sessionGuard,
     });
     registerImportBatchPlugin(

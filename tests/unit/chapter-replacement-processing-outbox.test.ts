@@ -48,6 +48,7 @@ describe("CHR3 replacement processing outbox", () => {
     expect(target.queue.enqueueChapterReplacement).toHaveBeenCalledWith({
       replacementId: "replacement",
       chapterId: "chapter",
+      outboxId: "intent",
     });
     expect(target.replacements.markEnqueued).toHaveBeenCalledWith("intent");
   });
@@ -64,16 +65,28 @@ describe("CHR3 replacement processing outbox", () => {
     expect(target.queue.enqueueChapterReplacement).toHaveBeenCalledWith({
       replacementId: "replacement",
       chapterId: "chapter",
+      outboxId: "intent",
       originRequestId: "request-complete",
     });
     expect(replacementProcessingJobId({ replacementId: "replacement" })).toBe(
-      "chapter-replacement-replacement",
+      "chapter-replacement-replacement-initial",
     );
   });
 
-  it("derives deterministic BullMQ job identity from replacementId", () => {
+  it("derives deterministic BullMQ job identity from each durable outbox request", () => {
     expect(replacementProcessingJobId({ replacementId: "replacement" })).toBe(
-      "chapter-replacement-replacement",
+      "chapter-replacement-replacement-initial",
+    );
+    expect(
+      replacementProcessingJobId({
+        replacementId: "replacement",
+        outboxId: "retry-2",
+      }),
+    ).not.toBe(
+      replacementProcessingJobId({
+        replacementId: "replacement",
+        outboxId: "intent",
+      }),
     );
   });
 });

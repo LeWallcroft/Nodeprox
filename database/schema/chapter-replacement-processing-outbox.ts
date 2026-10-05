@@ -4,7 +4,6 @@ import {
   pgEnum,
   pgTable,
   timestamp,
-  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -45,7 +44,7 @@ export const chapterReplacementProcessingOutbox = pgTable(
       .defaultNow(),
   },
   (table) => [
-    uniqueIndex("chapter_replacement_processing_outbox_replacement_unique").on(
+    index("chapter_replacement_processing_outbox_replacement_idx").on(
       table.replacementId,
     ),
     index("chapter_replacement_processing_outbox_pending_idx").on(

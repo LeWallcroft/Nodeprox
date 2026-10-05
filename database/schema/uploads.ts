@@ -18,8 +18,12 @@ import { storageProfiles } from "./storage-profiles.js";
 export const uploadStatusEnum = pgEnum("upload_status", [
   "pending",
   "verifying",
+  "validating",
+  "retry_exhausted",
   "aborting",
   "uploaded",
+  "rejected",
+  "terminal_failed",
 ]);
 
 export const uploads = pgTable(
@@ -53,7 +57,9 @@ export const uploads = pgTable(
     uniqueIndex("uploads_storage_key_unique").on(table.storageKey),
     uniqueIndex("uploads_active_chapter_unique")
       .on(table.chapterId)
-      .where(sql`${table.status} <> 'uploaded'`),
+      .where(
+        sql`${table.status} in ('pending', 'verifying', 'validating', 'retry_exhausted', 'aborting')`,
+      ),
     index("uploads_chapter_id_idx").on(table.chapterId),
     index("uploads_storage_profile_id_idx").on(table.storageProfileId),
   ],

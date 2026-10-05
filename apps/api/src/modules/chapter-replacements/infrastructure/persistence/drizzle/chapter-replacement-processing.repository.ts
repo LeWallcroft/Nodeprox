@@ -5,6 +5,7 @@ import {
   chapterReplacementProcessingOutbox,
   chapters,
   imageReplacementOperations,
+  uploadValidationOutbox,
 } from "../../../../../../../../database/schema/index.js";
 import type {
   ChapterReplacementProcessingOutboxPort,
@@ -101,9 +102,9 @@ export class DrizzleChapterReplacementProcessingRepository
     return operation ? completedResult(operation) : null;
   }
 
-  async markUploadedAndEnqueue(
+  async markValidatingAndEnqueue(
     input: Parameters<
-      ChapterReplacementUploadRepository["markUploadedAndEnqueue"]
+      ChapterReplacementUploadRepository["markValidatingAndEnqueue"]
     >[0],
   ) {
     return this.db.transaction(async (tx) => {
@@ -121,10 +122,10 @@ export class DrizzleChapterReplacementProcessingRepository
       if (!current) return null;
       if (current.status !== "pending_upload") return current;
       const now = new Date();
-      const [uploaded] = await tx
+      const [validating] = await tx
         .update(chapterReplacementOperations)
         .set({
-          status: "uploaded",
+          status: "validating",
           ...(input.etag ? { etag: input.etag } : {}),
           updatedAt: now,
         })
@@ -135,18 +136,17 @@ export class DrizzleChapterReplacementProcessingRepository
           ),
         )
         .returning();
-      if (!uploaded) throw new Error("chapter-replacement-upload-conflict");
+      if (!validating) throw new Error("chapter-replacement-upload-conflict");
       await tx
-        .insert(chapterReplacementProcessingOutbox)
+        .insert(uploadValidationOutbox)
         .values({
-          replacementId: uploaded.id,
-          chapterId: uploaded.chapterId,
+          replacementId: validating.id,
           ...(input.originRequestId
             ? { originRequestId: input.originRequestId }
             : {}),
         })
         .onConflictDoNothing();
-      return uploaded;
+      return validating;
     });
   }
 

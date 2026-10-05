@@ -14,7 +14,8 @@ function setup() {
     put: vi.fn(async (input) => {
       if (stored) throw new StorageObjectAlreadyExistsError();
       const chunks: Buffer[] = [];
-      for await (const chunk of input.body) chunks.push(Buffer.from(chunk));
+      for await (const chunk of input.body.open())
+        chunks.push(Buffer.from(chunk));
       stored = Buffer.concat(chunks);
       contentType = input.contentType;
       return {
@@ -45,7 +46,7 @@ function setup() {
     putIfAbsentOrVerifyEquivalent({
       storage,
       key: "smoke-tests/example/object.txt",
-      body: Readable.from([body]),
+      body: { sizeBytes: body.length, open: () => Readable.from([body]) },
       contentType: type,
       sizeBytes: body.length,
       checksum: createHash("sha256").update(body).digest("hex"),

@@ -17,7 +17,18 @@ import { uploads } from "./uploads.js";
 
 export const chapterImportItemStatusEnum = pgEnum(
   "chapter_import_item_status",
-  ["pending", "uploading", "uploaded", "processing", "ready", "failed"],
+  [
+    "pending",
+    "uploading",
+    "validating",
+    "uploaded",
+    "processing",
+    "ready",
+    "rejected",
+    "retry_exhausted",
+    "terminal_failed",
+    "failed",
+  ],
 );
 
 export const chapterImportTargetResolutionEnum = pgEnum(

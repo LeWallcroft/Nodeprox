@@ -10,11 +10,17 @@ import {
   it,
 } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
+import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
+import { DrizzleRetryUploadOperationRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
+import { RetryUploadOperationService } from "../../apps/api/src/modules/uploads/application/services/retry-upload-operation.service.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapters,
+  uploadValidationOutbox,
+  uploadValidationRuns,
+  uploadValidationIssues,
   processingOutbox,
   series,
   uploads,
@@ -279,6 +285,254 @@ afterAll(async () => {
 });
 
 describe("direct chapter upload transfer", () => {
+  it("rejects invalid Admission without creating a processing intent", async () => {
+    const cookie = await login();
+    const chapterId = await createChapter(cookie, 1001);
+    const started = await initiate(cookie, chapterId);
+    const uploadId = started.json().uploadId as string;
+    const [upload] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (!upload) throw new Error("upload missing");
+    transfer.objects.set(upload.storageKey, {
+      key: upload.storageKey,
+      sizeBytes: 4,
+      contentType: "application/zip",
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+          headers: { cookie },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const admission = new DrizzleAdmissionValidationRepository(database.db);
+    const claim = await admission.begin({
+      uploadId,
+      jobId: randomUUID(),
+      jobAttempt: 1,
+      requestId: "request-rejected",
+    });
+    if (!claim) throw new Error("admission claim missing");
+    await admission.settle(claim.runId, {
+      outcome: "rejected",
+      issues: [
+        {
+          code: "IMAGE_FILENAME_INVALID",
+          severity: "error",
+          fileIndex: 1,
+          filename: "bad.gif",
+        },
+      ],
+    });
+    const [state] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, chapterId));
+    const [result] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(state?.status).toBe("draft");
+    expect(result?.status).toBe("rejected");
+    expect(
+      await database.db
+        .select()
+        .from(processingOutbox)
+        .where(eq(processingOutbox.uploadId, uploadId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(uploadValidationIssues)
+        .where(eq(uploadValidationIssues.runId, claim.runId)),
+    ).toEqual([
+      expect.objectContaining({
+        code: "IMAGE_FILENAME_INVALID",
+        filename: "bad.gif",
+      }),
+    ]);
+    expect(transfer.objects.has(upload.storageKey)).toBe(true);
+  });
+
+  it("accepts Admission and creates processing intent in the same lifecycle transition", async () => {
+    const cookie = await login();
+    const chapterId = await createChapter(cookie, 1002);
+    const started = await initiate(cookie, chapterId);
+    const uploadId = started.json().uploadId as string;
+    const [upload] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (!upload) throw new Error("upload missing");
+    transfer.objects.set(upload.storageKey, {
+      key: upload.storageKey,
+      sizeBytes: 4,
+      contentType: "application/zip",
+    });
+    await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+      headers: { cookie },
+    });
+    const admission = new DrizzleAdmissionValidationRepository(database.db);
+    const claim = await admission.begin({
+      uploadId,
+      jobId: randomUUID(),
+      jobAttempt: 1,
+      requestId: "request-accepted",
+    });
+    if (!claim) throw new Error("admission claim missing");
+    await admission.settle(claim.runId, {
+      outcome: "accepted",
+      issues: [],
+      manifest: [
+        {
+          filename: "01.gif",
+          extension: "gif",
+          contentType: "image/gif",
+          sortOrder: 1,
+          sizeBytes: 10,
+          checksumSha256: "a".repeat(64),
+          warnings: [],
+        },
+      ],
+    });
+    const [state] = await database.db
+      .select({ status: chapters.status })
+      .from(chapters)
+      .where(eq(chapters.id, chapterId));
+    const [result] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    const [run] = await database.db
+      .select({ status: uploadValidationRuns.status })
+      .from(uploadValidationRuns)
+      .where(eq(uploadValidationRuns.id, claim.runId));
+    expect([state?.status, result?.status, run?.status]).toEqual([
+      "uploaded",
+      "uploaded",
+      "accepted",
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(processingOutbox)
+        .where(eq(processingOutbox.uploadId, uploadId)),
+    ).toHaveLength(1);
+  });
+
+  it("requeues exhausted Admission without another user transfer", async () => {
+    const cookie = await login();
+    const chapterId = await createChapter(cookie, 1003);
+    const started = await initiate(cookie, chapterId);
+    const uploadId = started.json().uploadId as string;
+    const [upload] = await database.db
+      .select()
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (!upload) throw new Error("upload missing");
+    transfer.objects.set(upload.storageKey, {
+      key: upload.storageKey,
+      sizeBytes: 4,
+      contentType: "application/zip",
+    });
+    await app.inject({
+      method: "POST",
+      url: `/chapters/${chapterId}/uploads/${uploadId}/complete`,
+      headers: { cookie },
+    });
+    const admission = new DrizzleAdmissionValidationRepository(database.db);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const claim = await admission.begin({
+        uploadId,
+        jobId: "admission-retry-job",
+        jobAttempt: attempt,
+      });
+      if (!claim) throw new Error("admission claim missing");
+      await admission.fail(claim.runId, {
+        disposition: attempt === 3 ? "retry_exhausted" : "retryable",
+        code: "STORAGE_PROVIDER_UNAVAILABLE",
+        providerCode: "InternalError",
+      });
+    }
+    const [exhausted] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(exhausted?.status).toBe("retry_exhausted");
+    expect(transfer.objects.has(upload.storageKey)).toBe(true);
+    const projected = await app.inject({
+      method: "GET",
+      url: "/me/upload-operations",
+      headers: { cookie },
+    });
+    expect(projected.statusCode).toBe(200);
+    expect(projected.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: uploadId,
+          kind: "chapter_upload",
+          status: "retry_exhausted",
+          failureStage: "admission",
+        }),
+      ]),
+    );
+    const retry = new RetryUploadOperationService(
+      { check: async () => ({ allowed: true, reason: "assigned" }) } as never,
+      new DrizzleRetryUploadOperationRepository(database.db),
+      {
+        storageFor: async () => ({
+          exists: async (key: string) => transfer.objects.has(key),
+        }),
+      } as never,
+    );
+    await expect(
+      retry.retryUploadOperation({
+        context: { userId, sessionId: randomUUID() },
+        kind: "chapter_upload",
+        operationId: uploadId,
+        requestId: "manual-admission-retry",
+      }),
+    ).resolves.toEqual({ status: "validating", stage: "admission" });
+    const claims = await database.db
+      .select()
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.uploadId, uploadId));
+    expect(claims).toHaveLength(2);
+    const resumed = await admission.begin({
+      uploadId,
+      jobId: "manual-admission-retry",
+      jobAttempt: 1,
+    });
+    if (!resumed) throw new Error("resumed admission claim missing");
+    await admission.settle(resumed.runId, {
+      outcome: "accepted",
+      issues: [],
+      manifest: [
+        {
+          filename: "01.gif",
+          extension: "gif",
+          contentType: "image/gif",
+          sortOrder: 1,
+          sizeBytes: 10,
+          checksumSha256: "b".repeat(64),
+          warnings: [],
+        },
+      ],
+    });
+    const [final] = await database.db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    expect(final?.status).toBe("uploaded");
+    expect(transfer.objects.has(upload.storageKey)).toBe(true);
+  });
+
   it("validates metadata and authorization before issuing a grant", async () => {
     const unauthenticated = await app.inject({
       method: "POST",
@@ -453,7 +707,7 @@ describe("direct chapter upload transfer", () => {
     });
     expect(completed.statusCode).toBe(200);
     expect(completed.json()).toMatchObject({
-      status: "uploaded",
+      status: "validating",
       sizeBytes: 4,
     });
     const completedAudits = await database.db
@@ -490,8 +744,8 @@ describe("direct chapter upload transfer", () => {
     ).toHaveLength(1);
     const [intent] = await database.db
       .select()
-      .from(processingOutbox)
-      .where(eq(processingOutbox.uploadId, uploadId));
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.uploadId, uploadId));
     expect(intent).toMatchObject({ uploadId, status: "pending" });
   });
 
@@ -735,7 +989,7 @@ describe("direct chapter upload transfer", () => {
       outboxLocked = resolve;
     });
     const blocker = database.sql.begin(async (tx) => {
-      await tx`lock table processing_outbox in access exclusive mode`;
+      await tx`lock table upload_validation_outbox in access exclusive mode`;
       outboxLocked();
       await held;
     });
@@ -752,7 +1006,7 @@ describe("direct chapter upload transfer", () => {
           select 1
           from pg_locks locks
           join pg_class relation on relation.oid = locks.relation
-          where relation.relname = 'processing_outbox'
+          where relation.relname = 'upload_validation_outbox'
             and locks.granted = false
         ) as waiting
       `;
@@ -777,7 +1031,7 @@ describe("direct chapter upload transfer", () => {
       .select({ status: uploads.status })
       .from(uploads)
       .where(eq(uploads.id, prepared.uploadId));
-    expect(upload?.status).toBe("uploaded");
+    expect(upload?.status).toBe("validating");
     const noLongerVisible = await app.inject({
       method: "GET",
       url: `/series/${await seriesIdForChapter(prepared.chapterId)}`,

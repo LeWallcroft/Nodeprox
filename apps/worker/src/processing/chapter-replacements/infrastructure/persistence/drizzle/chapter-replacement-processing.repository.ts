@@ -1,14 +1,17 @@
-import { aliasedTable, and, asc, eq, isNull, sql } from "drizzle-orm";
+import { aliasedTable, and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterReplacementItems,
   chapterReplacementOperations,
+  chapterReplacementProcessingAttempts,
   chapters,
   domainEventOutbox,
   images,
   imageVersions,
   series,
   storageCleanupOutbox,
+  uploadValidationEntries,
+  uploadValidationRuns,
 } from "../../../../../../../../database/schema/index.js";
 import type {
   ChapterReplacementManifestItem,
@@ -19,6 +22,95 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
   implements ChapterReplacementProcessingRepositoryPort
 {
   constructor(private readonly db: NodeProxDatabase) {}
+
+  async loadAdmissionManifest(replacementId: string) {
+    const [run] = await this.db
+      .select({ id: uploadValidationRuns.id })
+      .from(uploadValidationRuns)
+      .where(
+        and(
+          eq(uploadValidationRuns.replacementId, replacementId),
+          eq(uploadValidationRuns.status, "accepted"),
+        ),
+      )
+      .orderBy(desc(uploadValidationRuns.startedAt))
+      .limit(1);
+    if (!run) return null;
+    const entries = await this.db
+      .select()
+      .from(uploadValidationEntries)
+      .where(eq(uploadValidationEntries.runId, run.id));
+    return entries.map((entry) => ({
+      filename: entry.filename,
+      extension: entry.extension,
+      contentType: entry.contentType,
+      sortOrder: entry.sortOrder,
+      sizeBytes: entry.sizeBytes,
+      checksumSha256: entry.checksumSha256,
+      ...(entry.widthPx !== null ? { widthPx: entry.widthPx } : {}),
+      ...(entry.heightPx !== null ? { heightPx: entry.heightPx } : {}),
+      warnings: entry.warnings,
+    }));
+  }
+
+  async markRetryExhausted(
+    replacementId: string,
+    errorCode: string,
+  ): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(chapterReplacementOperations)
+        .set({
+          status: "retry_exhausted",
+          lastErrorCode: errorCode.slice(0, 100),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(chapterReplacementOperations.id, replacementId),
+            eq(chapterReplacementOperations.status, "processing"),
+          ),
+        )
+        .returning({ id: chapterReplacementOperations.id });
+      if (!updated) return false;
+      await tx
+        .update(chapterReplacementProcessingAttempts)
+        .set({
+          status: "retry_exhausted",
+          errorCode: errorCode.slice(0, 100),
+          finishedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(
+              chapterReplacementProcessingAttempts.replacementId,
+              replacementId,
+            ),
+            eq(chapterReplacementProcessingAttempts.status, "processing"),
+          ),
+        );
+      return true;
+    });
+  }
+
+  async markRetryableFailed(
+    replacementId: string,
+    errorCode: string,
+  ): Promise<void> {
+    await this.db
+      .update(chapterReplacementProcessingAttempts)
+      .set({
+        status: "retryable_failed",
+        errorCode: errorCode.slice(0, 100),
+        finishedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(chapterReplacementProcessingAttempts.replacementId, replacementId),
+          eq(chapterReplacementProcessingAttempts.status, "processing"),
+        ),
+      );
+  }
 
   async claimForProcessing(
     input: Parameters<
@@ -85,6 +177,39 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         operation.status === "failed"
       )
         return { outcome: "noop" as const };
+      if (operation.status === "processing") {
+        const [active] = await tx
+          .select()
+          .from(chapterReplacementProcessingAttempts)
+          .where(
+            and(
+              eq(
+                chapterReplacementProcessingAttempts.replacementId,
+                operation.replacementId,
+              ),
+              eq(chapterReplacementProcessingAttempts.status, "processing"),
+            ),
+          )
+          .orderBy(desc(chapterReplacementProcessingAttempts.attemptNumber))
+          .limit(1)
+          .for("update");
+        if (active) {
+          if (
+            !input.jobId ||
+            active.jobId !== input.jobId ||
+            (input.jobAttempt ?? 0) <= (active.jobAttempt ?? 0)
+          )
+            return { outcome: "noop" as const };
+          await tx
+            .update(chapterReplacementProcessingAttempts)
+            .set({
+              status: "retryable_failed",
+              errorCode: "JOB_REDELIVERED",
+              finishedAt: new Date(),
+            })
+            .where(eq(chapterReplacementProcessingAttempts.id, active.id));
+        }
+      }
       if (operation.status === "uploaded") {
         const [claimed] = await tx
           .update(chapterReplacementOperations)
@@ -100,6 +225,40 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
       } else if (operation.status !== "processing") {
         return { outcome: "noop" as const };
       }
+      const [validation] = await tx
+        .select({ id: uploadValidationRuns.id })
+        .from(uploadValidationRuns)
+        .where(
+          and(
+            eq(uploadValidationRuns.replacementId, operation.replacementId),
+            eq(uploadValidationRuns.status, "accepted"),
+          ),
+        )
+        .orderBy(desc(uploadValidationRuns.startedAt))
+        .limit(1);
+      if (!validation)
+        throw new Error("replacement-admission-manifest-missing");
+      const [sequence] = await tx
+        .select({
+          next: sql<number>`coalesce(max(${chapterReplacementProcessingAttempts.attemptNumber}), 0) + 1`.mapWith(
+            Number,
+          ),
+        })
+        .from(chapterReplacementProcessingAttempts)
+        .where(
+          eq(
+            chapterReplacementProcessingAttempts.replacementId,
+            operation.replacementId,
+          ),
+        );
+      await tx.insert(chapterReplacementProcessingAttempts).values({
+        replacementId: operation.replacementId,
+        validationRunId: validation.id,
+        attemptNumber: sequence?.next ?? 1,
+        ...(input.jobId ? { jobId: input.jobId } : {}),
+        ...(input.jobAttempt ? { jobAttempt: input.jobAttempt } : {}),
+        ...(input.originRequestId ? { requestId: input.originRequestId } : {}),
+      });
       return {
         outcome: "process" as const,
         context: {
@@ -245,6 +404,18 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         )
         .returning({ id: chapterReplacementOperations.id });
       if (!ready) return false;
+      await tx
+        .update(chapterReplacementProcessingAttempts)
+        .set({ status: "succeeded", finishedAt: new Date() })
+        .where(
+          and(
+            eq(
+              chapterReplacementProcessingAttempts.replacementId,
+              replacementId,
+            ),
+            eq(chapterReplacementProcessingAttempts.status, "processing"),
+          ),
+        );
       await tx.insert(domainEventOutbox).values({
         eventType: "chapter.replacement.ready",
         aggregateType: "chapter_replacement",
@@ -313,6 +484,22 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
         )
         .returning({ id: chapterReplacementOperations.id });
       if (!failed) return false;
+      await tx
+        .update(chapterReplacementProcessingAttempts)
+        .set({
+          status: "terminal_failed",
+          errorCode: errorCode.slice(0, 100),
+          finishedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(
+              chapterReplacementProcessingAttempts.replacementId,
+              replacementId,
+            ),
+            eq(chapterReplacementProcessingAttempts.status, "processing"),
+          ),
+        );
       await tx.insert(domainEventOutbox).values({
         eventType: "upload.failed",
         aggregateType: "chapter_replacement",
@@ -325,25 +512,19 @@ export class DrizzleChapterReplacementProcessingWorkerRepository
           errorCode,
         },
       });
-      await tx
-        .insert(storageCleanupOutbox)
-        .values([
-          {
-            replacementId,
-            storageProfileId: operation.storageProfileId,
-            storageKey: operation.sourceStorageKey,
-            reason: "replacement_source_zip" as const,
-            ...(originRequestId ? { originRequestId } : {}),
-          },
-          ...items.map((item) => ({
-            replacementId,
-            storageProfileId: item.storageProfileId,
-            storageKey: item.storageKey,
-            reason: "replacement_failed_candidate" as const,
-            ...(originRequestId ? { originRequestId } : {}),
-          })),
-        ])
-        .onConflictDoNothing();
+      if (items.length > 0)
+        await tx
+          .insert(storageCleanupOutbox)
+          .values(
+            items.map((item) => ({
+              replacementId,
+              storageProfileId: item.storageProfileId,
+              storageKey: item.storageKey,
+              reason: "replacement_failed_candidate" as const,
+              ...(originRequestId ? { originRequestId } : {}),
+            })),
+          )
+          .onConflictDoNothing();
       return true;
     });
   }

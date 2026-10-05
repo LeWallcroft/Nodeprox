@@ -13,6 +13,7 @@ import {
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
 import type { ZipExtractorPort } from "../../apps/worker/src/processing/application/ports.js";
 import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
 import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
@@ -58,12 +59,13 @@ class MemoryStorage implements StoragePort {
   readonly objects = new Map<string, Buffer>();
   async put(input: {
     key: string;
-    body: NodeJS.ReadableStream;
+    body: { sizeBytes: number; open(): NodeJS.ReadableStream };
     sizeBytes: number;
     contentType: string;
   }) {
     const chunks: Buffer[] = [];
-    for await (const chunk of input.body) chunks.push(Buffer.from(chunk));
+    for await (const chunk of input.body.open())
+      chunks.push(Buffer.from(chunk));
     this.keys.add(input.key);
     this.objects.set(input.key, Buffer.concat(chunks));
     return {
@@ -989,11 +991,15 @@ describe("ChapterImportBatch metadata orchestration", () => {
       async inspect() {
         if (failNext) {
           failNext = false;
-          throw new Error("invalid-test-zip");
+          throw new Error("invalid-zip-layout");
         }
         return [processedImage];
       },
       readImage: () => Readable.from([Buffer.from("img!")]),
+      replayableImage: () => ({
+        sizeBytes: 4,
+        open: () => Readable.from([Buffer.from("img!")]),
+      }),
       dispose: async () => undefined,
     };
     const processor = new ChapterProcessingService(
@@ -1023,6 +1029,28 @@ describe("ChapterImportBatch metadata orchestration", () => {
         .from(uploads)
         .where(eq(uploads.id, item.uploadId));
       if (!upload) throw new Error("upload missing");
+      const admission = new DrizzleAdmissionValidationRepository(database.db);
+      const claim = await admission.begin({
+        uploadId: item.uploadId,
+        jobId: randomUUID(),
+        jobAttempt: 1,
+      });
+      if (!claim) throw new Error("admission claim missing");
+      await admission.settle(claim.runId, {
+        outcome: "accepted",
+        issues: [],
+        manifest: [
+          {
+            filename: processedImage.filename,
+            extension: processedImage.extension,
+            contentType: processedImage.contentType,
+            sortOrder: processedImage.sortOrder,
+            sizeBytes: processedImage.sizeBytes,
+            checksumSha256: processedImage.checksum,
+            warnings: [],
+          },
+        ],
+      });
       failNext = shouldFail;
       const processing = processor.process(
         {
@@ -1033,8 +1061,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
         },
         shouldFail,
       );
-      if (shouldFail)
-        await expect(processing).rejects.toThrow("invalid-test-zip");
+      if (shouldFail) await expect(processing).rejects.toThrow("ZIP_INVALID");
       else await processing;
     }
 
@@ -1064,7 +1091,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
         expect.objectContaining({
           clientId: "item-0.5",
           status: "failed",
-          errorCode: "ZIP_READ_FAILED",
+          errorCode: "ZIP_INVALID",
         }),
         expect.objectContaining({ clientId: "item-30", status: "ready" }),
       ]),

@@ -17,6 +17,16 @@
       "import": "./dist/port.js",
       "default": "./dist/port.js"
     },
+    "./errors": {
+      "types": "./dist/errors.d.ts",
+      "import": "./dist/errors.js",
+      "default": "./dist/errors.js"
+    },
+    "./replayable-body": {
+      "types": "./dist/replayable-body.d.ts",
+      "import": "./dist/replayable-body.js",
+      "default": "./dist/replayable-body.js"
+    },
     "./adapters": {
       "types": "./dist/adapters.d.ts",
       "import": "./dist/adapters.js",

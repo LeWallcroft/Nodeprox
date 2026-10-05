@@ -20,11 +20,15 @@ export const chapterReplacementOperationStatusEnum = pgEnum(
   [
     "pending_upload",
     "uploaded",
+    "validating",
+    "retry_exhausted",
     "processing",
     "ready",
     "completing",
     "completed",
     "failed",
+    "rejected",
+    "terminal_failed",
   ],
 );
 
@@ -99,7 +103,7 @@ export const chapterReplacementOperations = pgTable(
     uniqueIndex("chapter_replacement_operations_active_chapter_unique")
       .on(table.chapterId)
       .where(
-        sql`${table.status} in ('pending_upload', 'uploaded', 'processing', 'ready', 'completing')`,
+        sql`${table.status} in ('pending_upload', 'validating', 'retry_exhausted', 'uploaded', 'processing', 'ready', 'completing')`,
       ),
     index("chapter_replacement_operations_chapter_idx").on(table.chapterId),
     index("chapter_replacement_operations_status_idx").on(table.status),

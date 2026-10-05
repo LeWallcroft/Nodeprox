@@ -23,6 +23,7 @@ type RuntimeDependencies = Pick<
   | "createExtractor"
   | "createChapterProcessing"
   | "createReplacementProcessing"
+  | "createAdmissionValidation"
 >;
 
 export function createWorkerRuntime(

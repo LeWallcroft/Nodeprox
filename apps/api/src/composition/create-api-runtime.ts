@@ -19,6 +19,7 @@ import { DrizzleNotificationRepository } from "../modules/notifications/infrastr
 import { ProcessingOutboxDispatcher } from "../modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { BullMQProcessingQueue } from "../modules/processing/infrastructure/queue/bullmq.processing.queue.js";
 import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
+import { DrizzleAdmissionOutboxRepository } from "../modules/uploads/infrastructure/persistence/drizzle/admission-outbox.repository.js";
 import type { ApiDependencies } from "./create-api-dependencies.js";
 
 type ProcessingConfig = ReturnType<
@@ -51,6 +52,8 @@ export function createApiRuntime(input: {
     new DrizzleChapterDeletionOutboxRepository(database),
     1000,
     new DrizzleChapterReplacementProcessingRepository(database),
+    new DrizzleAdmissionOutboxRepository(database),
+    logger,
   );
   const eventDispatcher = new DomainEventDispatcher(
     new DrizzleDomainEventOutboxRepository(database),

@@ -73,7 +73,7 @@ function harness() {
       return row && row.chapterId === scope ? row : null;
     }),
     getCompletedResult: vi.fn().mockResolvedValue(null),
-    markUploadedAndEnqueue: vi.fn(async ({ replacementId, etag }) => {
+    markValidatingAndEnqueue: vi.fn(async ({ replacementId, etag }) => {
       const row = operations.get(replacementId);
       if (!row) return null;
       if (row.status !== "pending_upload") return row;
@@ -252,7 +252,7 @@ describe("CHR3 replacement upload services", () => {
       replacementId: result.replacementId,
       originRequestId: "request-complete",
     });
-    expect(target.repository.markUploadedAndEnqueue).toHaveBeenCalledWith({
+    expect(target.repository.markValidatingAndEnqueue).toHaveBeenCalledWith({
       replacementId: result.replacementId,
       chapterId,
       etag: "zip-etag",

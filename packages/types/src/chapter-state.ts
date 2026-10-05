@@ -13,6 +13,8 @@ export type ChapterState = (typeof CHAPTER_STATES)[number];
 export const CHAPTER_TRANSITIONS = [
   "start-upload",
   "complete-upload",
+  "reject-upload",
+  "fail-upload",
   "abort-upload",
   "start-processing",
   "retry-processing",
@@ -57,6 +59,8 @@ const transitionTargets: Partial<
   draft: { "start-upload": "uploading", "request-deletion": "deleting" },
   uploading: {
     "complete-upload": "uploaded",
+    "reject-upload": "draft",
+    "fail-upload": "draft",
     "abort-upload": "draft",
     "request-deletion": "deleting",
   },
