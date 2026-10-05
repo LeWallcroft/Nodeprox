@@ -199,10 +199,11 @@ export class ChapterImportBatchService {
     contentType: string;
     sizeBytes: number;
   }) {
+    // Retry the logical import item with a new transfer, not its previous job.
     const access = await this.access.check(input.actor, input.seriesId);
     if (access === "denied") throw new ImportBatchDeniedError();
     if (access === "not-found") throw new ImportBatchNotFoundError();
-    const claim = await this.repository.claimRetry(input);
+    const claim = await this.repository.claimResubmission(input);
     if (claim.outcome === "not-found") throw new ImportBatchNotFoundError();
     if (claim.outcome === "conflict") throw new ImportBatchConflictError();
     if (claim.outcome !== "claimed") throw new ImportBatchConflictError();

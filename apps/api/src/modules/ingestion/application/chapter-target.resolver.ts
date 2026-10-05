@@ -42,12 +42,12 @@ function resolveExisting(
   target: ImportChapterTarget,
   retryChapterId?: string | null,
 ): ChapterTargetResolution {
-  if (
-    target.status === "failed" &&
+  const canReuseRetryTarget =
     target.chapterId === retryChapterId &&
+    (target.status === "draft" || target.status === "failed") &&
     !target.hasActiveUpload &&
-    !target.hasMedia
-  )
+    !target.hasMedia;
+  if (canReuseRetryTarget)
     return { kind: "reused", chapterId: target.chapterId };
   const reason = conflictReason(target);
   return reason

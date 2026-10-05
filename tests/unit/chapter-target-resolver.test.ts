@@ -115,6 +115,73 @@ describe("ChapterTargetResolver", () => {
     });
   });
 
+  it("reuses a rejected upload's draft Chapter only for its matching item resubmission", async () => {
+    const draftWithHistory = target({ hasUpload: true });
+    const resolve = resolver(async () => draftWithHistory);
+    await expect(
+      resolve.resolve({
+        actor,
+        seriesId: "series-1",
+        chapterNumber: 1,
+        retryChapterId: draftWithHistory.chapterId,
+      }),
+    ).resolves.toEqual({ kind: "reused", chapterId: "chapter-1" });
+    for (const retryChapterId of [undefined, "different-chapter"]) {
+      await expect(
+        resolve.resolve({
+          actor,
+          seriesId: "series-1",
+          chapterNumber: 1,
+          ...(retryChapterId ? { retryChapterId } : {}),
+        }),
+      ).resolves.toEqual({
+        kind: "conflict",
+        chapterId: "chapter-1",
+        reason: "chapter-uploaded",
+      });
+    }
+  });
+
+  it.each(["validating", "retry_exhausted"])(
+    "rejects reuse while the Chapter has an active %s upload",
+    async () => {
+      const active = target({ hasUpload: true, hasActiveUpload: true });
+      await expect(
+        resolver(async () => active).resolve({
+          actor,
+          seriesId: "series-1",
+          chapterNumber: 1,
+          retryChapterId: active.chapterId,
+        }),
+      ).resolves.toEqual({
+        kind: "conflict",
+        chapterId: "chapter-1",
+        reason: "chapter-upload-active",
+      });
+    },
+  );
+
+  it.each([
+    [target({ status: "ready", hasUpload: true }), "chapter-ready"],
+    [target({ hasUpload: true, hasMedia: true }), "chapter-media-exists"],
+  ] as const)(
+    "does not reuse a ready or populated target during resubmission",
+    async (snapshot, reason) => {
+      await expect(
+        resolver(async () => snapshot).resolve({
+          actor,
+          seriesId: "series-1",
+          chapterNumber: 1,
+          retryChapterId: snapshot.chapterId,
+        }),
+      ).resolves.toEqual({
+        kind: "conflict",
+        chapterId: snapshot.chapterId,
+        reason,
+      });
+    },
+  );
+
   it("rereads exactly once after losing the create race", async () => {
     const findTarget = vi
       .fn<ImportChapterLookupPort["findTarget"]>()

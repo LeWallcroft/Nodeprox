@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
+import type { StoragePort, UploadTransferPort } from "@nodeprox/storage/port";
 import { eq, inArray, sql } from "drizzle-orm";
 import {
   afterAll,
@@ -12,8 +13,9 @@ import {
 } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
-import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import { DrizzleImportBatchRepository } from "../../apps/api/src/modules/ingestion/infrastructure/persistence/drizzle/import-batch.repository.js";
 import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
+import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
 import type { ZipExtractorPort } from "../../apps/worker/src/processing/application/ports.js";
 import type { ValidatedImage } from "../../apps/worker/src/processing/domain/image-policy.js";
 import { DrizzleProcessingRepository } from "../../apps/worker/src/processing/infrastructure/persistence/drizzle/processing.repository.js";
@@ -30,7 +32,6 @@ import {
   uploads,
   users,
 } from "../../database/schema/index.js";
-import type { StoragePort, UploadTransferPort } from "@nodeprox/storage/port";
 import {
   FakeDiscordSeriesChannelGateway,
   withM2DSeriesFixtures,
@@ -417,6 +418,141 @@ async function seedActiveBatch(seriesId: string, count: number) {
 }
 
 describe("ChapterImportBatch metadata orchestration", () => {
+  it("claims failed and rejected items with compare-and-set and clears their prior error", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Resubmission claim states");
+    const batchId = randomUUID();
+    await database.db.insert(chapterImportBatches).values({
+      id: batchId,
+      seriesId,
+      createdBy: ownerId,
+    });
+    const statuses = [
+      "failed",
+      "rejected",
+      "retry_exhausted",
+      "terminal_failed",
+      "ready",
+      "processing",
+      "validating",
+    ] as const;
+    const items = await database.db
+      .insert(chapterImportItems)
+      .values(
+        statuses.map((status, index) => ({
+          batchId,
+          clientId: `claim-${status}`,
+          chapterNumber: index + 1,
+          filename: `${index + 1}.zip`,
+          status,
+          errorCode: "prior-error",
+        })),
+      )
+      .returning({
+        id: chapterImportItems.id,
+        status: chapterImportItems.status,
+      });
+    const repository = new DrizzleImportBatchRepository(database.db);
+    for (const item of items) {
+      const claimed = await repository.claimResubmission({
+        seriesId,
+        batchId,
+        itemId: item.id,
+      });
+      if (item.status === "failed" || item.status === "rejected") {
+        expect(claimed).toMatchObject({
+          outcome: "claimed",
+          previousStatus: item.status,
+        });
+        const [persisted] = await database.db
+          .select({
+            status: chapterImportItems.status,
+            uploadId: chapterImportItems.uploadId,
+            errorCode: chapterImportItems.errorCode,
+          })
+          .from(chapterImportItems)
+          .where(eq(chapterImportItems.id, item.id));
+        expect(persisted).toEqual({
+          status: "pending",
+          uploadId: null,
+          errorCode: null,
+        });
+      } else expect(claimed).toEqual({ outcome: "conflict" });
+    }
+  });
+
+  it("allows only one concurrent resubmission claim", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(
+      cookie,
+      "Concurrent resubmission claim",
+    );
+    const batchId = randomUUID();
+    await database.db.insert(chapterImportBatches).values({
+      id: batchId,
+      seriesId,
+      createdBy: ownerId,
+    });
+    const [item] = await database.db
+      .insert(chapterImportItems)
+      .values({
+        batchId,
+        clientId: "concurrent-rejected",
+        chapterNumber: 1,
+        filename: "1.zip",
+        status: "rejected",
+      })
+      .returning({ id: chapterImportItems.id });
+    if (!item) throw new Error("item missing");
+    const repository = new DrizzleImportBatchRepository(database.db);
+    const input = { seriesId, batchId, itemId: item.id };
+    const results = await Promise.all([
+      repository.claimResubmission(input),
+      repository.claimResubmission(input),
+    ]);
+    expect(results.map((result) => result.outcome).sort()).toEqual([
+      "claimed",
+      "conflict",
+    ]);
+  });
+
+  it.each(["validating", "retry_exhausted"] as const)(
+    "finds %s as an active upload for target resolution",
+    async (status) => {
+      const cookie = await login(ownerEmail);
+      const seriesId = await createSeries(cookie, `Active target ${status}`);
+      const chapter = await createChapter(cookie, seriesId, 1);
+      const initiated = await app.inject({
+        method: "POST",
+        url: `/chapters/${chapter.id}/uploads/initiate`,
+        headers: { cookie },
+        payload: {
+          filename: "1.zip",
+          contentType: "application/zip",
+          sizeBytes: 4,
+        },
+      });
+      expect(initiated.statusCode).toBe(201);
+      const [persistedUpload] = await database.db
+        .select({ id: uploads.id, chapterId: uploads.chapterId })
+        .from(uploads)
+        .where(eq(uploads.id, initiated.json().uploadId));
+      expect(persistedUpload?.chapterId).toBe(chapter.id);
+      await database.db
+        .update(uploads)
+        .set({ status })
+        .where(eq(uploads.id, initiated.json().uploadId));
+      const target = await new DrizzleImportBatchRepository(
+        database.db,
+      ).findTarget(seriesId, 1);
+      expect(target).toMatchObject({
+        chapterId: chapter.id,
+        hasUpload: true,
+        hasActiveUpload: true,
+      });
+    },
+  );
+
   it("persists created, reused and conflict resolutions independently", async () => {
     const ownerCookie = await login(ownerEmail);
     const seriesId = await createSeries(ownerCookie, "Smart Bulk Raven");
@@ -1023,7 +1159,7 @@ describe("ChapterImportBatch metadata orchestration", () => {
         url: `/chapters/${item.chapterId}/uploads/${item.uploadId}/complete`,
         headers: { cookie: ownerCookie },
       });
-      expect(complete.statusCode).toBe(200);
+      expect(complete.statusCode, complete.body).toBe(200);
       const [upload] = await database.db
         .select({ storageKey: uploads.storageKey })
         .from(uploads)

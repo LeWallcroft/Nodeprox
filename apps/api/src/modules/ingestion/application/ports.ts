@@ -104,13 +104,14 @@ export interface ImportBatchRepositoryPort {
     seriesId: string;
     items: readonly ImportItemProjection[];
   } | null>;
-  claimRetry(input: {
+  claimResubmission(input: {
     seriesId: string;
     batchId: string;
     itemId: string;
   }): Promise<
     | {
         outcome: "claimed";
+        previousStatus: "failed" | "rejected";
         item: {
           id: string;
           clientId: string;
