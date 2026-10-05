@@ -17,6 +17,32 @@ describe("audit metadata boundary", () => {
     ).toEqual({ requestId: "req-1", result: "denied" });
   });
 
+  it("allows bounded admission rejection summary metadata", () => {
+    expect(
+      sanitizeAuditMetadata({
+        validationRunId: "run-1",
+        issueCount: 2,
+        issueCodes: ["ZIP_INVALID", "IMAGE_MAGIC_MISMATCH"],
+      }),
+    ).toEqual({
+      validationRunId: "run-1",
+      issueCount: 2,
+      issueCodes: ["ZIP_INVALID", "IMAGE_MAGIC_MISMATCH"],
+    });
+  });
+
+  it("rejects non-string issue codes and unapproved array metadata", () => {
+    expect(() =>
+      sanitizeAuditMetadata({ issueCodes: ["ZIP_INVALID", 4] }),
+    ).toThrow(InvalidAuditMetadataError);
+    expect(() => sanitizeAuditMetadata({ issueCount: ["1"] })).toThrow(
+      InvalidAuditMetadataError,
+    );
+    expect(() => sanitizeAuditMetadata({ arbitrary: ["value"] })).toThrow(
+      InvalidAuditMetadataError,
+    );
+  });
+
   it.each([
     "password",
     "sessionToken",

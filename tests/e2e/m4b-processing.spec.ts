@@ -878,6 +878,7 @@ test.describe("M4-B real upload processing", () => {
         code: "large-file",
         filename: "01.jpg",
         sizeBytes: oversizedJpeg.length,
+        thresholdBytes: 1024 * 1024,
       });
       const projected = await api.get("/me/upload-operations");
       expect((await projected.json()).items).toContainEqual(

@@ -319,7 +319,11 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
     if (!claim) throw new Error("replacement-admission-claim-missing");
     await admission.settle(claim.runId, {
       outcome: "rejected",
-      issues: [{ code: "ZIP_INVALID_LAYOUT", severity: "error" }],
+      issues: [
+        { code: "ZIP_INVALID_LAYOUT", severity: "error" },
+        { code: "ZIP_INVALID_LAYOUT", severity: "error" },
+        { code: "IMAGE_MAGIC_MISMATCH", severity: "error" },
+      ],
     });
     const [operation] = await database.db
       .select({ status: chapterReplacementOperations.status })
@@ -337,7 +341,12 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
         .select()
         .from(uploadValidationIssues)
         .where(eq(uploadValidationIssues.runId, claim.runId)),
-    ).toEqual([expect.objectContaining({ code: "ZIP_INVALID_LAYOUT" })]);
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "ZIP_INVALID_LAYOUT" }),
+        expect.objectContaining({ code: "IMAGE_MAGIC_MISMATCH" }),
+      ]),
+    );
     expect(
       await database.db
         .select()
@@ -350,6 +359,11 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
         result: "rejected",
         reasonCode: "ZIP_INVALID_LAYOUT",
         requestId,
+        metadata: expect.objectContaining({
+          validationRunId: claim.runId,
+          issueCount: 3,
+          issueCodes: ["ZIP_INVALID_LAYOUT", "IMAGE_MAGIC_MISMATCH"],
+        }),
       }),
     ]);
     expect(

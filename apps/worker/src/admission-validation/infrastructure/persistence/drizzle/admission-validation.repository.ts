@@ -328,6 +328,7 @@ export class DrizzleAdmissionValidationRepository
         .from(chapters)
         .where(eq(chapters.id, upload.chapterId))
         .limit(1);
+      const issueCodes = rejectionIssueCodes(issues);
       await tx.insert(auditLogs).values({
         actorId: upload.actorId,
         action: "chapter.upload.admission.rejected",
@@ -338,8 +339,11 @@ export class DrizzleAdmissionValidationRepository
         ...(run.requestId ? { requestId: run.requestId } : {}),
         metadata: sanitizeAuditMetadata({
           chapterId: upload.chapterId,
+          validationRunId: run.id,
           uploadId: run.uploadId,
           seriesId: chapter?.seriesId,
+          issueCount: issues.length,
+          issueCodes,
         }),
       });
     } else if (run.replacementId) {
@@ -367,6 +371,7 @@ export class DrizzleAdmissionValidationRepository
         .from(chapters)
         .where(eq(chapters.id, replacement.chapterId))
         .limit(1);
+      const issueCodes = rejectionIssueCodes(issues);
       await tx.insert(auditLogs).values({
         actorId: replacement.actorId,
         action: "chapter.replacement.admission.rejected",
@@ -377,8 +382,11 @@ export class DrizzleAdmissionValidationRepository
         ...(run.requestId ? { requestId: run.requestId } : {}),
         metadata: sanitizeAuditMetadata({
           chapterId: replacement.chapterId,
+          validationRunId: run.id,
           replacementId: run.replacementId,
           seriesId: chapter?.seriesId,
+          issueCount: issues.length,
+          issueCodes,
         }),
       });
     }
@@ -386,6 +394,16 @@ export class DrizzleAdmissionValidationRepository
 }
 
 type Tx = Parameters<Parameters<NodeProxDatabase["transaction"]>[0]>[0];
+
+function rejectionIssueCodes(issues: readonly ValidationIssue[]): string[] {
+  return [
+    ...new Set(
+      issues
+        .filter((issue) => issue.severity === "error")
+        .map((issue) => issue.code),
+    ),
+  ].slice(0, 20);
+}
 
 async function createOrResumeRun(
   tx: Tx,

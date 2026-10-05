@@ -93,7 +93,7 @@ export function UploadCenter() {
           operationId: operation.id,
         });
         if (
-          rejected &&
+          (rejected || warned) &&
           ["chapter_import", "chapter_upload", "chapter_replacement"].includes(
             operation.kind,
           )
@@ -104,17 +104,24 @@ export function UploadCenter() {
             | "chapter_replacement";
           void getUploadValidationReport(kind, operation.id)
             .then((report) => {
-              const details = report.issues
-                .map(
-                  (issue) =>
-                    `${issue.filename ?? operation.filename} — ${validationIssueLabel(issue.code)}${issue.actual ? ` · Actual: ${Object.values(issue.actual).join(", ")}` : ""}${issue.expected ? ` · Máximo: ${Object.values(issue.expected).join(", ")}` : ""}`,
-                )
-                .join("\n");
+              const details = rejected
+                ? report.issues
+                    .map((issue) => {
+                      const measurement = validationIssueMeasurement(issue);
+                      return `${issue.filename ?? operation.filename} — ${validationIssueLabel(issue.code)}${measurement.actual ? `\nActual: ${measurement.actual}` : ""}${measurement.expected ? `\nMáximo: ${measurement.expected}` : ""}\nCódigo: ${issue.code}`;
+                    })
+                    .join("\n")
+                : report.warnings
+                    .map((warning) => {
+                      const presentation = mediaWarningPresentation(warning);
+                      return `${warning.filename}\n${presentation.title}\nActual: ${presentation.actual}${presentation.threshold ? `\nUmbral recomendado: ${presentation.threshold}` : ""}`;
+                    })
+                    .join("\n");
               setNotice((currentNotice) =>
                 currentNotice?.operationId === operation.id
                   ? {
                       ...currentNotice,
-                      body: `${body}${details ? `\n${details}` : ""}${report.requestId ? `\nRequest ID: ${report.requestId}` : ""}`,
+                      body: `${body}${details ? `\n${details}` : ""}${rejected && report.requestId ? `\nRequest ID: ${report.requestId}` : ""}`,
                     }
                   : currentNotice,
               );
@@ -742,18 +749,28 @@ function UploadCenterItem({
                         ? `Archivo ${issue.fileIndex}`
                         : "ZIP")}{" "}
                     — {validationIssueLabel(issue.code)}
-                    {issue.actual
-                      ? ` · Actual: ${Object.values(issue.actual).join(", ")}`
+                    {validationIssueMeasurement(issue).actual
+                      ? ` · Actual: ${validationIssueMeasurement(issue).actual}`
                       : ""}
-                    {issue.expected
-                      ? ` · Máximo: ${Object.values(issue.expected).join(", ")}`
+                    {validationIssueMeasurement(issue).expected
+                      ? ` · Máximo: ${validationIssueMeasurement(issue).expected}`
                       : ""}
+                    {` · Código: ${issue.code}`}
                   </p>
                 ))
               : null}
             {report?.warnings.map((warning) => (
               <p key={JSON.stringify(warning)} className="text-warning">
-                {mediaWarningLabel(warning)}
+                <span>
+                  {warning.filename} — {mediaWarningPresentation(warning).title}
+                </span>
+                <span>Actual: {mediaWarningPresentation(warning).actual}</span>
+                {mediaWarningPresentation(warning).threshold ? (
+                  <span>
+                    Umbral recomendado:{" "}
+                    {mediaWarningPresentation(warning).threshold}
+                  </span>
+                ) : null}
               </p>
             ))}
             {reportState === "loading" ? (
@@ -894,15 +911,101 @@ function statusLabel(status: string) {
   );
 }
 
-function mediaWarningLabel(warning: MediaWarning): string {
+export function mediaWarningPresentation(warning: MediaWarning): {
+  title: string;
+  actual: string;
+  threshold?: string;
+} {
   switch (warning.code) {
     case "large-file":
-      return `${warning.filename}: archivo grande`;
+      return {
+        title: "Archivo grande",
+        actual: formatMiB(warning.sizeBytes),
+        ...(warning.thresholdBytes !== undefined
+          ? { threshold: formatMiB(warning.thresholdBytes) }
+          : {}),
+      };
     case "wide-image":
-      return `${warning.filename}: imagen muy ancha`;
+      return {
+        title: "Imagen muy ancha",
+        actual: `${formatInteger(warning.width)} px`,
+        ...(warning.thresholdWidth !== undefined
+          ? { threshold: `${formatInteger(warning.thresholdWidth)} px` }
+          : {}),
+      };
     case "tall-image":
-      return `${warning.filename}: imagen muy alta`;
+      return {
+        title: "Imagen muy alta",
+        actual: `${formatInteger(warning.height)} px`,
+        ...(warning.thresholdHeight !== undefined
+          ? { threshold: `${formatInteger(warning.thresholdHeight)} px` }
+          : {}),
+      };
   }
+}
+
+export function validationIssueMeasurement(issue: {
+  code: string;
+  actual?: Record<string, unknown> | null;
+  expected?: Record<string, unknown> | null;
+}): { actual?: string; expected?: string } {
+  const actual = issue.actual ?? {};
+  const expected = issue.expected ?? {};
+  const number = (record: Record<string, unknown>, ...keys: string[]) => {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  };
+  let actualValue: number | undefined;
+  let expectedValue: number | undefined;
+  let format: (value: number) => string;
+  switch (issue.code) {
+    case "IMAGE_SIZE_EXCEEDED":
+      actualValue = number(actual, "sizeBytes");
+      expectedValue = number(expected, "maxImageBytes", "maxSizeBytes");
+      format = formatMiB;
+      break;
+    case "IMAGE_WIDTH_EXCEEDED":
+      actualValue = number(actual, "widthPx", "width");
+      expectedValue = number(expected, "maxWidthPx", "widthPx");
+      format = (value) => `${formatInteger(value)} px`;
+      break;
+    case "IMAGE_HEIGHT_EXCEEDED":
+      actualValue = number(actual, "heightPx", "height");
+      expectedValue = number(expected, "maxHeightPx", "heightPx");
+      format = (value) => `${formatInteger(value)} px`;
+      break;
+    case "IMAGE_PIXELS_EXCEEDED":
+      actualValue = number(actual, "pixels");
+      expectedValue = number(expected, "maxPixels");
+      format = (value) => formatInteger(value);
+      break;
+    case "ZIP_COMPRESSION_RATIO_EXCEEDED":
+      actualValue = number(actual, "compressionRatio", "ratio");
+      expectedValue = number(expected, "maxCompressionRatio");
+      format = (value) =>
+        `${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 }).format(value)}×`;
+      break;
+    default:
+      return {};
+  }
+  return {
+    ...(actualValue !== undefined ? { actual: format(actualValue) } : {}),
+    ...(expectedValue !== undefined ? { expected: format(expectedValue) } : {}),
+  };
+}
+
+function formatMiB(bytes: number): string {
+  const value = bytes / (1024 * 1024);
+  return `${value.toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+    .format(value)
+    .replace(/,/g, " ");
 }
 
 function validationIssueLabel(code: string): string {

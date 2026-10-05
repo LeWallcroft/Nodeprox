@@ -320,12 +320,16 @@ describe("direct chapter upload transfer", () => {
     await admission.settle(claim.runId, {
       outcome: "rejected",
       issues: [
-        {
-          code: "IMAGE_FILENAME_INVALID",
-          severity: "error",
-          fileIndex: 1,
-          filename: "bad.gif",
-        },
+        ...Array.from(
+          { length: 22 },
+          (_, index) =>
+            ({
+              code: "IMAGE_FILENAME_INVALID",
+              severity: "error",
+              fileIndex: index + 1,
+              filename: `bad-${index}.gif`,
+            }) as const,
+        ),
       ],
     });
     const [state] = await database.db
@@ -349,12 +353,7 @@ describe("direct chapter upload transfer", () => {
         .select()
         .from(uploadValidationIssues)
         .where(eq(uploadValidationIssues.runId, claim.runId)),
-    ).toEqual([
-      expect.objectContaining({
-        code: "IMAGE_FILENAME_INVALID",
-        filename: "bad.gif",
-      }),
-    ]);
+    ).toHaveLength(22);
     expect(
       await database.db
         .select()
@@ -367,6 +366,11 @@ describe("direct chapter upload transfer", () => {
         result: "rejected",
         reasonCode: "IMAGE_FILENAME_INVALID",
         requestId: "request-rejected",
+        metadata: expect.objectContaining({
+          validationRunId: claim.runId,
+          issueCount: 22,
+          issueCodes: ["IMAGE_FILENAME_INVALID"],
+        }),
       }),
     ]);
     const report = await new DrizzleRetryUploadOperationRepository(
@@ -376,7 +380,9 @@ describe("direct chapter upload transfer", () => {
       expect.objectContaining({
         status: "rejected",
         requestId: "request-rejected",
-        issues: [expect.objectContaining({ code: "IMAGE_FILENAME_INVALID" })],
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: "IMAGE_FILENAME_INVALID" }),
+        ]),
         warnings: [],
       }),
     );
@@ -427,6 +433,7 @@ describe("direct chapter upload transfer", () => {
               code: "large-file",
               filename: "01.gif",
               sizeBytes: 9 * 1024 * 1024,
+              thresholdBytes: 8 * 1024 * 1024,
             },
           ],
         },
@@ -459,7 +466,12 @@ describe("direct chapter upload transfer", () => {
       database.db,
     ).report("chapter_upload", uploadId);
     expect(report?.warnings).toEqual([
-      { code: "large-file", filename: "01.gif", sizeBytes: 9 * 1024 * 1024 },
+      {
+        code: "large-file",
+        filename: "01.gif",
+        sizeBytes: 9 * 1024 * 1024,
+        thresholdBytes: 8 * 1024 * 1024,
+      },
     ]);
     const projection = await app.inject({
       method: "GET",

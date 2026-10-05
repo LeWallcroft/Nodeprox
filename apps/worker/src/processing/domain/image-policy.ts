@@ -1,5 +1,5 @@
-import type { MediaWarning } from "@nodeprox/types";
 import { buildChapterMediaStorageKey } from "@nodeprox/storage";
+import type { MediaWarning } from "@nodeprox/types";
 
 export type ImageContentType =
   | "image/jpeg"
@@ -165,18 +165,21 @@ export function mediaWarnings(input: {
       code: "large-file",
       filename: input.filename,
       sizeBytes: input.sizeBytes,
+      thresholdBytes: input.warnImageBytes,
     });
   if (input.dimensions && input.dimensions.width > input.warnWidthPx)
     warnings.push({
       code: "wide-image",
       filename: input.filename,
       width: input.dimensions.width,
+      thresholdWidth: input.warnWidthPx,
     });
   if (input.dimensions && input.dimensions.height > input.warnHeightPx)
     warnings.push({
       code: "tall-image",
       filename: input.filename,
       height: input.dimensions.height,
+      thresholdHeight: input.warnHeightPx,
     });
   return warnings;
 }

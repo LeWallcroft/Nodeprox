@@ -9,8 +9,8 @@ import {
   validateImageName,
 } from "../../../processing/domain/image-policy.js";
 import {
-  isSafeZipPath,
   type AdmissionLimits,
+  isSafeZipPath,
 } from "../../domain/admission-validation.policy.js";
 import type {
   AdmissionValidationResult,
@@ -24,6 +24,8 @@ class AdmissionLimitError extends Error {
     readonly code: ValidationIssueCode,
     readonly fileIndex?: number,
     readonly filename?: string,
+    readonly actual?: Record<string, unknown>,
+    readonly expected?: Record<string, unknown>,
   ) {
     super(code);
   }
@@ -132,6 +134,10 @@ export class ChapterZipInspector {
             "ZIP_COMPRESSION_RATIO_EXCEEDED",
             count,
             filename,
+            {
+              compressionRatio: uncompressedSize / Math.max(1, compressedSize),
+            },
+            { maxCompressionRatio: this.limits.maxCompressionRatio },
           );
         const header = Buffer.alloc(262144);
         let headerLength = 0;
@@ -152,6 +158,8 @@ export class ChapterZipInspector {
               "IMAGE_SIZE_EXCEEDED",
               count,
               filename,
+              { sizeBytes },
+              { maxImageBytes: this.limits.maxImageBytes },
             );
           const length = Math.min(bytes.length, header.length - headerLength);
           if (length > 0) bytes.copy(header, headerLength, 0, length);
@@ -249,7 +257,13 @@ export class ChapterZipInspector {
           outcome: "rejected",
           issues: [
             ...issues,
-            issue(error.code, error.fileIndex, error.filename),
+            issue(
+              error.code,
+              error.fileIndex,
+              error.filename,
+              error.actual,
+              error.expected,
+            ),
           ],
         };
       if (error instanceof StorageError) throw error;
