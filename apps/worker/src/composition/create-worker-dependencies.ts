@@ -12,6 +12,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import pino from "pino";
 import { createDatabase } from "../../../../database/client.js";
 import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
+import { AdmissionValidationService } from "../admission-validation/application/admission-validation.service.js";
+import { DrizzleAdmissionValidationRepository } from "../admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
+import { ChapterZipInspector } from "../admission-validation/infrastructure/zip/chapter-zip.inspector.js";
 import {
   storageProfiles,
   systemConfig,
@@ -104,6 +107,9 @@ export function createWorkerDependencies() {
     logger,
   );
   const repository = new DrizzleProcessingRepository(database.db);
+  const admissionRepository = new DrizzleAdmissionValidationRepository(
+    database.db,
+  );
   const replacementRepository =
     new DrizzleChapterReplacementProcessingWorkerRepository(database.db);
   return {
@@ -114,6 +120,7 @@ export function createWorkerDependencies() {
     storage,
     storageConfig,
     repository,
+    admissionRepository,
     replacementRepository,
     deletion: new ChapterDeletionService(
       new DrizzleChapterDeletionRepository(database.db),
@@ -133,12 +140,43 @@ export function createWorkerDependencies() {
         ...warnings,
       });
     },
+    createAdmissionValidation(warnings: {
+      warnImageBytes: number;
+      warnWidthPx: number;
+      warnHeightPx: number;
+    }) {
+      return new AdmissionValidationService(
+        admissionRepository,
+        storageExecution,
+        new ChapterZipInspector({
+          maxEntries: processing.PROCESSING_MAX_ENTRIES,
+          maxTotalBytes: processing.PROCESSING_MAX_TOTAL_SIZE_BYTES,
+          maxImageBytes: processing.PROCESSING_MAX_IMAGE_SIZE_BYTES,
+          ...warnings,
+          ...(processing.ADMISSION_MAX_WIDTH_PX !== undefined
+            ? { maxWidthPx: processing.ADMISSION_MAX_WIDTH_PX }
+            : {}),
+          ...(processing.ADMISSION_MAX_HEIGHT_PX !== undefined
+            ? { maxHeightPx: processing.ADMISSION_MAX_HEIGHT_PX }
+            : {}),
+          ...(processing.ADMISSION_MAX_PIXELS !== undefined
+            ? { maxPixels: processing.ADMISSION_MAX_PIXELS }
+            : {}),
+          ...(processing.ADMISSION_MAX_COMPRESSION_RATIO !== undefined
+            ? {
+                maxCompressionRatio: processing.ADMISSION_MAX_COMPRESSION_RATIO,
+              }
+            : {}),
+        }),
+      );
+    },
     createChapterProcessing(extractor: UnzipperExtractor) {
       return new ChapterProcessingService(
         repository,
         storageExecution,
         extractor,
         repository,
+        logger,
       );
     },
     createReplacementProcessing(extractor: UnzipperExtractor) {
@@ -146,6 +184,8 @@ export function createWorkerDependencies() {
         replacementRepository,
         storageExecution,
         extractor,
+        undefined,
+        logger,
       );
     },
     async loadImageProcessingWarnings() {

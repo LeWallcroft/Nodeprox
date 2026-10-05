@@ -33,6 +33,7 @@ export class PrepareChapterReplacementService {
     private readonly storageExecution: StorageExecutionResolver,
     private readonly activeProfile: ActiveStorageProfilePort,
     private readonly maxSizeBytes: number,
+    private readonly logger?: { error(context: object, message: string): void },
   ) {}
 
   async execute(input: {
@@ -92,12 +93,17 @@ export class PrepareChapterReplacementService {
         upload,
       };
     } catch (error) {
-      await this.repository
-        .markPreparationFailed(
+      try {
+        await this.repository.markPreparationFailed(
           operation.id,
           "replacement-upload-initiate-failed",
-        )
-        .catch(() => undefined);
+        );
+      } catch (markError) {
+        this.logger?.error(
+          { replacementId: operation.id, error: markError },
+          "replacement.prepare.failure_recording_failed",
+        );
+      }
       if (error instanceof UploadTransferProviderError)
         throw new ChapterReplacementPrepareProviderError();
       throw error;

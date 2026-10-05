@@ -35,9 +35,18 @@ export type PlannedChapterReplacementItem = Omit<
 >;
 
 export interface ChapterReplacementProcessingRepositoryPort {
+  loadAdmissionManifest(
+    replacementId: string,
+  ): Promise<
+    | import("../../../admission-validation/domain/admission-validation.types.js").ValidatedChapterManifest
+    | null
+  >;
   claimForProcessing(input: {
     replacementId: string;
     chapterId: string;
+    jobId?: string;
+    jobAttempt?: number;
+    originRequestId?: string;
   }): Promise<
     | { outcome: "process"; context: ChapterReplacementProcessingContext }
     | { outcome: "noop" | "not-found" }
@@ -59,4 +68,9 @@ export interface ChapterReplacementProcessingRepositoryPort {
     errorCode: string,
     originRequestId?: string,
   ): Promise<boolean>;
+  markRetryExhausted(
+    replacementId: string,
+    errorCode: string,
+  ): Promise<boolean>;
+  markRetryableFailed(replacementId: string, errorCode: string): Promise<void>;
 }

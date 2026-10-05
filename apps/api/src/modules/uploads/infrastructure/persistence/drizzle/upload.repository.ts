@@ -7,6 +7,7 @@ import {
   chapterPermissions,
   chapters,
   processingOutbox,
+  uploadValidationOutbox,
   series,
   seriesAssignments,
   uploads,
@@ -73,7 +74,7 @@ export class DrizzleUploadRepository
           .where(
             and(
               eq(uploads.chapterId, input.chapterId),
-              sql`${uploads.status} in ('pending', 'verifying', 'aborting')`,
+              sql`${uploads.status} in ('pending', 'verifying', 'validating', 'retry_exhausted', 'aborting')`,
             ),
           )
           .limit(1);
@@ -109,24 +110,17 @@ export class DrizzleUploadRepository
           expectedSeriesId: snapshot.seriesId,
         });
         if (context.outcome !== "authorized") return context;
-        const { chapter, upload } = context;
+        const { upload } = context;
         if (
           upload?.status !== "verifying" ||
           !verifiedMatchesUpload(input.verifiedObject, upload)
         )
           return { outcome: "conflict" as const };
 
-        const transition = await transitionChapterState(tx, {
-          chapterId: input.chapterId,
-          transition: "complete-upload",
-          expectedStates: [chapter.status],
-        });
-        if (!transition.transitioned) return { outcome: "conflict" as const };
-
         const [completed] = await tx
           .update(uploads)
           .set({
-            status: "uploaded",
+            status: "validating",
             sizeBytes: input.verifiedObject.sizeBytes,
             ...(input.verifiedObject.etag
               ? { etag: input.verifiedObject.etag }
@@ -144,22 +138,18 @@ export class DrizzleUploadRepository
         await tx
           .update(chapterImportItems)
           .set({
-            status: "uploaded",
+            status: "validating",
             errorCode: null,
             updatedAt: new Date(),
           })
           .where(eq(chapterImportItems.uploadId, completed.id));
-        await tx.insert(processingOutbox).values({
+        await tx.insert(uploadValidationOutbox).values({
           uploadId: completed.id,
-          chapterId: completed.chapterId,
-          seriesId: chapter.seriesId,
-          storageKey: completed.storageKey,
-          storageProfileId: completed.storageProfileId,
           ...(input.originRequestId
             ? { originRequestId: input.originRequestId }
             : {}),
         });
-        return { outcome: "uploaded" as const, upload: toRecord(completed) };
+        return { outcome: "validating" as const, upload: toRecord(completed) };
       });
     } catch (error) {
       if (error === uploadStateConflict)
@@ -254,7 +244,7 @@ export class DrizzleUploadRepository
       .where(
         and(
           eq(uploads.chapterId, chapterId),
-          sql`${uploads.status} in ('pending', 'verifying', 'aborting')`,
+          sql`${uploads.status} in ('pending', 'verifying', 'validating', 'retry_exhausted', 'aborting')`,
         ),
       )
       .limit(1);
@@ -463,6 +453,7 @@ export class DrizzleUploadRepository
       .limit(limit);
     return rows.map((row) => ({
       id: row.id,
+      outboxId: row.id,
       chapterId: row.chapterId,
       seriesId: row.seriesId,
       uploadId: row.uploadId,

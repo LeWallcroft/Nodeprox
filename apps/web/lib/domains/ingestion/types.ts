@@ -8,6 +8,10 @@ export type ImportCandidate = {
   status:
     | "pending"
     | "uploading"
+    | "validating"
+    | "rejected"
+    | "retry_exhausted"
+    | "terminal_failed"
     | "uploaded"
     | "processing"
     | "ready"

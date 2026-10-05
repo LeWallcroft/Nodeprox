@@ -60,6 +60,8 @@ import { GetPublishedChapter } from "../modules/publication/application/services
 import { DrizzlePublishedChapterRepository } from "../modules/publication/infrastructure/persistence/drizzle/published-chapter.repository.js";
 import { DrizzlePublicMediaOriginResolver } from "../modules/storage-profiles/infrastructure/persistence/drizzle/public-media-origin.resolver.js";
 import { ListUploadOperationsService } from "../modules/uploads/application/services/list-upload-operations.service.js";
+import { RetryUploadOperationService } from "../modules/uploads/application/services/retry-upload-operation.service.js";
+import { DrizzleRetryUploadOperationRepository } from "../modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
 import { DrizzleUploadOperationReadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload-operation-read.repository.js";
 import { UnavailableUploadTransfer } from "../modules/uploads/infrastructure/storage/unavailable-upload-transfer.js";
 import {
@@ -263,6 +265,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
     },
     createChapterReplacementServices(
       chapterPermissions: ChapterPermissionService,
+      logger: FastifyBaseLogger,
     ) {
       if (!database) throw new Error("api-database-required");
       const { storageExecution, activeStorageProfile } =
@@ -285,6 +288,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
           storageExecution,
           activeStorageProfile,
           storageConfig.uploadMaxSizeBytes,
+          logger,
         ),
         completeUpload: new CompleteChapterReplacementUploadService(
           processingRepository,
@@ -302,6 +306,17 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
       if (!database) throw new Error("api-database-required");
       return new ListUploadOperationsService(
         new DrizzleUploadOperationReadRepository(database),
+      );
+    },
+    createRetryUploadOperationService(
+      chapterPermissions: ChapterPermissionService,
+    ) {
+      if (!database) throw new Error("api-database-required");
+      const { storageExecution } = requireStorageRuntime();
+      return new RetryUploadOperationService(
+        chapterPermissions,
+        new DrizzleRetryUploadOperationRepository(database),
+        storageExecution,
       );
     },
     createImageServices(chapterPermissions: ChapterPermissionService) {

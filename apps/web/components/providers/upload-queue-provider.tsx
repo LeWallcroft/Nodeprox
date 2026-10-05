@@ -152,6 +152,7 @@ export function UploadQueueProvider({
           "pending",
           "pending_upload",
           "uploading",
+          "validating",
           "uploaded",
           "processing",
           "completing",
@@ -302,7 +303,14 @@ export function UploadQueueProvider({
       if (
         previous &&
         previous !== operation.status &&
-        ["ready", "completed", "failed"].includes(operation.status)
+        [
+          "ready",
+          "completed",
+          "failed",
+          "rejected",
+          "retry_exhausted",
+          "terminal_failed",
+        ].includes(operation.status)
       )
         void invalidateChapterLifecycle(queryClient, {
           seriesId: operation.seriesId,

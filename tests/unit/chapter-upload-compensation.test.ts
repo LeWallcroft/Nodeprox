@@ -65,8 +65,8 @@ function setup() {
   };
   const lifecycle: UploadLifecycleBoundaryPort = {
     finalizeIfAuthorized: vi.fn().mockResolvedValue({
-      outcome: "uploaded",
-      upload: { ...pending, status: "uploaded", etag: "etag-1" },
+      outcome: "validating",
+      upload: { ...pending, status: "validating", etag: "etag-1" },
     }),
     claimAbortIfAuthorized: vi.fn().mockResolvedValue({
       outcome: "claimed",

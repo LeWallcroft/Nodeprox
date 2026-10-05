@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { sanitizeAuditMetadata } from "@nodeprox/types";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import { transitionChapterState } from "../../../../../../../database/chapter-state-transition.js";
 import {
@@ -14,6 +14,9 @@ import {
   imageVersions,
   series,
   uploads,
+  uploadValidationRuns,
+  uploadValidationEntries,
+  storageCleanupOutbox,
 } from "../../../../../../../database/schema/index.js";
 import type {
   ImageRecordInput,
@@ -45,6 +48,35 @@ export class DrizzleProcessingRepository
       .where(eq(uploads.id, uploadId))
       .limit(1);
     return row ?? null;
+  }
+  async loadLatestAcceptedManifest(uploadId: string) {
+    const [run] = await this.db
+      .select({ id: uploadValidationRuns.id })
+      .from(uploadValidationRuns)
+      .where(
+        and(
+          eq(uploadValidationRuns.uploadId, uploadId),
+          eq(uploadValidationRuns.status, "accepted"),
+        ),
+      )
+      .orderBy(desc(uploadValidationRuns.startedAt))
+      .limit(1);
+    if (!run) return null;
+    const entries = await this.db
+      .select()
+      .from(uploadValidationEntries)
+      .where(eq(uploadValidationEntries.runId, run.id));
+    return entries.map((entry) => ({
+      filename: entry.filename,
+      extension: entry.extension,
+      contentType: entry.contentType,
+      sortOrder: entry.sortOrder,
+      sizeBytes: entry.sizeBytes,
+      checksumSha256: entry.checksumSha256,
+      ...(entry.widthPx !== null ? { widthPx: entry.widthPx } : {}),
+      ...(entry.heightPx !== null ? { heightPx: entry.heightPx } : {}),
+      warnings: entry.warnings,
+    }));
   }
   async claimChapter(
     input: Parameters<ProcessingRepositoryPort["claimChapter"]>[0],
@@ -113,6 +145,20 @@ export class DrizzleProcessingRepository
         .values({
           chapterId: input.chapterId,
           uploadId: input.uploadId,
+          validationRunId:
+            (
+              await tx
+                .select({ id: uploadValidationRuns.id })
+                .from(uploadValidationRuns)
+                .where(
+                  and(
+                    eq(uploadValidationRuns.uploadId, input.uploadId),
+                    eq(uploadValidationRuns.status, "accepted"),
+                  ),
+                )
+                .orderBy(desc(uploadValidationRuns.startedAt))
+                .limit(1)
+            )[0]?.id ?? null,
           storageProfileId: upload.storageProfileId,
           ...(input.jobId !== undefined ? { jobId: input.jobId } : {}),
           ...(input.jobAttempt !== undefined
@@ -304,13 +350,35 @@ export class DrizzleProcessingRepository
           operationKind: "chapter_import",
         },
       });
+      const [source] = await tx
+        .select({
+          storageKey: uploads.storageKey,
+          storageProfileId: uploads.storageProfileId,
+        })
+        .from(uploads)
+        .where(eq(uploads.id, uploadId))
+        .limit(1);
+      if (!source) throw new Error("processing-source-upload-missing");
+      await tx
+        .insert(storageCleanupOutbox)
+        .values({
+          uploadId,
+          storageKey: source.storageKey,
+          storageProfileId: source.storageProfileId,
+          reason: "chapter_source_zip",
+        })
+        .onConflictDoNothing();
     });
   }
   async markFailed(
     chapterId: string,
     uploadId: string,
     attemptId: string,
-    failure: { terminal: boolean; errorCode: string; errorMessage: string },
+    failure: {
+      disposition: "retryable" | "retry_exhausted" | "terminal";
+      errorCode: string;
+      errorMessage: string;
+    },
     requestedByUserId: string,
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
@@ -330,9 +398,8 @@ export class DrizzleProcessingRepository
         .limit(1)
         .for("update");
       if (!chapter) throw new Error("chapter-attempt-transition-conflict");
-      const transition = failure.terminal
-        ? "processing-failed"
-        : "processing-retry";
+      const terminal = failure.disposition === "terminal";
+      const transition = terminal ? "processing-failed" : "processing-retry";
       const stateResult = await transitionChapterState(tx, {
         chapterId,
         transition,
@@ -343,7 +410,11 @@ export class DrizzleProcessingRepository
       await tx
         .update(chapterProcessingAttempts)
         .set({
-          status: failure.terminal ? "terminal_failed" : "retryable_failed",
+          status: terminal
+            ? "terminal_failed"
+            : failure.disposition === "retry_exhausted"
+              ? "retry_exhausted"
+              : "retryable_failed",
           errorCode: failure.errorCode,
           errorMessage: failure.errorMessage,
           finishedAt: new Date(),
@@ -357,8 +428,15 @@ export class DrizzleProcessingRepository
       await tx
         .update(chapterImportItems)
         .set({
-          status: failure.terminal ? "failed" : "uploaded",
-          errorCode: failure.terminal ? failure.errorCode : null,
+          status: terminal
+            ? "failed"
+            : failure.disposition === "retry_exhausted"
+              ? "retry_exhausted"
+              : "uploaded",
+          errorCode:
+            terminal || failure.disposition === "retry_exhausted"
+              ? failure.errorCode
+              : null,
           updatedAt: new Date(),
         })
         .where(eq(chapterImportItems.uploadId, uploadId));
@@ -371,7 +449,7 @@ export class DrizzleProcessingRepository
             eq(chapterProcessingObjects.status, "created"),
           ),
         );
-      if (failure.terminal)
+      if (terminal)
         await tx.insert(domainEventOutbox).values({
           eventType: "upload.failed",
           aggregateType: "chapter_upload",
@@ -416,6 +494,7 @@ function toAttempt(
     id: row.id,
     chapterId: row.chapterId,
     uploadId: row.uploadId,
+    validationRunId: row.validationRunId,
     storageProfileId: row.storageProfileId,
     jobId: row.jobId,
     jobAttempt: row.jobAttempt,

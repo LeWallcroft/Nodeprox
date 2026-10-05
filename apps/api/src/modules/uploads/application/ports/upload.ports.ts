@@ -32,7 +32,7 @@ export interface UploadRepositoryPort {
 }
 
 export type UploadFinalizationResult =
-  | { outcome: "uploaded"; upload: UploadRecord }
+  | { outcome: "validating"; upload: UploadRecord }
   | { outcome: "denied" }
   | { outcome: "conflict" };
 

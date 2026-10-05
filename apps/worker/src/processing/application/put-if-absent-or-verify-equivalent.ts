@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   StorageObjectAlreadyExistsError,
   type StoragePort,
+  type ReplayableObjectBody,
   type StoredObject,
 } from "@nodeprox/storage/port";
 
@@ -13,7 +14,7 @@ export type EquivalentWriteOutcome =
 export async function putIfAbsentOrVerifyEquivalent(input: {
   storage: StoragePort;
   key: string;
-  body: NodeJS.ReadableStream;
+  body: ReplayableObjectBody;
   contentType: string;
   sizeBytes: number;
   checksum: string;
@@ -28,11 +29,7 @@ export async function putIfAbsentOrVerifyEquivalent(input: {
       sizeBytes: input.sizeBytes,
     });
   } catch (error) {
-    if (
-      error instanceof StorageObjectAlreadyExistsError ||
-      (error instanceof Error &&
-        error.message === "storage-object-already-exists")
-    ) {
+    if (error instanceof StorageObjectAlreadyExistsError) {
       const equivalent = await verifyEquivalent(input);
       return {
         outcome: equivalent ? "existing-equivalent" : "existing-conflict",

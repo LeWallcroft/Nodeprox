@@ -1,4 +1,5 @@
 import type { Readable } from "node:stream";
+export { StorageObjectAlreadyExistsError } from "./errors.js";
 
 export type StoredObject = {
   key: string;
@@ -12,17 +13,15 @@ export type StoredObjectMetadata = {
   contentType?: string;
 };
 
-export class StorageObjectAlreadyExistsError extends Error {
-  constructor() {
-    super("storage-object-already-exists");
-    this.name = "StorageObjectAlreadyExistsError";
-  }
+export interface ReplayableObjectBody {
+  readonly sizeBytes: number;
+  open(): NodeJS.ReadableStream;
 }
 
 export interface StoragePort {
   put(input: {
     key: string;
-    body: NodeJS.ReadableStream;
+    body: ReplayableObjectBody;
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject>;

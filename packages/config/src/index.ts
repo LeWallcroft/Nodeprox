@@ -93,6 +93,10 @@ const processingConfigSchema = z.object({
     .int()
     .positive()
     .default(67108864),
+  ADMISSION_MAX_WIDTH_PX: z.coerce.number().int().positive().optional(),
+  ADMISSION_MAX_HEIGHT_PX: z.coerce.number().int().positive().optional(),
+  ADMISSION_MAX_PIXELS: z.coerce.number().int().positive().optional(),
+  ADMISSION_MAX_COMPRESSION_RATIO: z.coerce.number().positive().optional(),
   MEDIA_WARN_IMAGE_SIZE_BYTES: z.coerce
     .number()
     .int()

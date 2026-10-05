@@ -1,5 +1,13 @@
 export { passwordResetTokens, sessions, users } from "./authentication.js";
 export {
+  uploadValidationEntries,
+  uploadValidationIssues,
+  uploadValidationOutbox,
+  uploadValidationRuns,
+  uploadValidationRunStatusEnum,
+} from "./upload-validation.js";
+
+export {
   auditLogs,
   auditResultEnum,
   discordAuthorizedRoles,
@@ -29,6 +37,10 @@ export {
   chapterReplacementProcessingOutbox,
   chapterReplacementProcessingOutboxStatusEnum,
 } from "./chapter-replacement-processing-outbox.js";
+export {
+  chapterReplacementProcessingAttempts,
+  chapterReplacementProcessingAttemptStatusEnum,
+} from "./chapter-replacement-processing-attempts.js";
 export {
   chapterPermissions,
   chapters,

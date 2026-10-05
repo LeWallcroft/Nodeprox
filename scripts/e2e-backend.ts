@@ -1,28 +1,30 @@
 import "dotenv/config";
-import type {
-  UploadTransferPort,
-  VerifiedUploadedObject,
-} from "@nodeprox/storage/port";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir, rm, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, join, resolve, sep } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { migrate } from "drizzle-orm/postgres-js/migrator";
 import {
   loadConfig,
   loadProcessingConfig,
   loadStorageConfig,
 } from "@nodeprox/config";
-import { createDatabase } from "../database/client.js";
-import { buildApp } from "../apps/api/src/app.js";
-import { BullMQProcessingQueue } from "../apps/api/src/modules/processing/infrastructure/queue/bullmq.processing.queue.js";
-import { ProcessingOutboxDispatcher } from "../apps/api/src/modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
-import { DrizzleUploadRepository } from "../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
+import type {
+  UploadTransferPort,
+  VerifiedUploadedObject,
+} from "@nodeprox/storage/port";
 import { UploadTransferObjectNotFoundError } from "@nodeprox/storage/port";
+import { migrate } from "drizzle-orm/postgres-js/migrator";
+import { buildApp } from "../apps/api/src/app.js";
+import { DrizzleChapterReplacementProcessingRepository } from "../apps/api/src/modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { DrizzleChapterDeletionOutboxRepository } from "../apps/api/src/modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
+import { ProcessingOutboxDispatcher } from "../apps/api/src/modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
+import { BullMQProcessingQueue } from "../apps/api/src/modules/processing/infrastructure/queue/bullmq.processing.queue.js";
+import { DrizzleAdmissionOutboxRepository } from "../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/admission-outbox.repository.js";
+import { DrizzleUploadRepository } from "../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
+import { createDatabase } from "../database/client.js";
 
 const env = { ...process.env, NODE_ENV: "test", API_PORT: "3101" };
 Object.assign(process.env, env);
@@ -132,6 +134,9 @@ const dispatcher = new ProcessingOutboxDispatcher(
   new DrizzleUploadRepository(database.db),
   queue,
   new DrizzleChapterDeletionOutboxRepository(database.db),
+  1000,
+  new DrizzleChapterReplacementProcessingRepository(database.db),
+  new DrizzleAdmissionOutboxRepository(database.db),
 );
 const api = buildApp(
   { logger: { level: config.LOG_LEVEL } },

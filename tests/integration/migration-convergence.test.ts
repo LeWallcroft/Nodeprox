@@ -165,8 +165,12 @@ describe("convergent migration sequence", () => {
       expect(statuses.map((row) => row.enumlabel)).toEqual([
         "pending",
         "verifying",
+        "validating",
+        "retry_exhausted",
         "aborting",
         "uploaded",
+        "rejected",
+        "terminal_failed",
       ]);
       const itemStatuses = await database.sql<{ enumlabel: string }[]>`
         SELECT enumlabel
@@ -178,9 +182,13 @@ describe("convergent migration sequence", () => {
       expect(itemStatuses.map((row) => row.enumlabel)).toEqual([
         "pending",
         "uploading",
+        "validating",
         "uploaded",
         "processing",
         "ready",
+        "rejected",
+        "retry_exhausted",
+        "terminal_failed",
         "failed",
       ]);
       const chapterStatuses = await database.sql<{ enumlabel: string }[]>`
@@ -221,7 +229,10 @@ describe("convergent migration sequence", () => {
           AND indexname = 'uploads_active_chapter_unique'
       `;
       expect(activeUploadIndex?.definition).toContain("WHERE");
-      expect(activeUploadIndex?.definition).toContain("uploaded");
+      expect(activeUploadIndex?.definition).toContain("retry_exhausted");
+      expect(activeUploadIndex?.definition).not.toContain(
+        "'uploaded'::upload_status",
+      );
       const [seriesChannelIndex] = await database.sql<
         { name: string | null }[]
       >`
@@ -461,8 +472,12 @@ describe("convergent migration sequence", () => {
       expect(statuses.map((row) => row.enumlabel)).toEqual([
         "pending",
         "verifying",
+        "validating",
+        "retry_exhausted",
         "aborting",
         "uploaded",
+        "rejected",
+        "terminal_failed",
       ]);
       const [constraint] = await database.sql<
         { convalidated: boolean; definition: string }[]

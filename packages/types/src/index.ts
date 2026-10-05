@@ -43,6 +43,7 @@ export interface OperationAuditContext {
 }
 
 export type ProcessChapterInput = {
+  outboxId?: string;
   chapterId: string;
   seriesId: string;
   uploadId: string;
@@ -54,7 +55,19 @@ export interface ProcessingQueuePort {
   enqueueChapterProcessing(input: ProcessChapterInput): Promise<void>;
 }
 
+export type ValidateUploadInput = {
+  outboxId: string;
+  uploadId?: string;
+  replacementId?: string;
+  originRequestId?: string;
+};
+
+export interface AdmissionValidationQueuePort {
+  enqueueAdmissionValidation(input: ValidateUploadInput): Promise<void>;
+}
+
 export type ProcessChapterReplacementInput = {
+  outboxId?: string;
   replacementId: string;
   chapterId: string;
   originRequestId?: string;

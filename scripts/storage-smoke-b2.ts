@@ -110,7 +110,7 @@ try {
   try {
     await storage.put({
       key,
-      body: Readable.from([body]),
+      body: { sizeBytes: body.length, open: () => Readable.from([body]) },
       contentType: "text/plain",
       sizeBytes: body.byteLength,
     });

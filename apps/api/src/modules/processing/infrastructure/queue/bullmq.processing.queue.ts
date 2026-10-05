@@ -5,13 +5,16 @@ import type {
   ProcessChapterInput,
   ProcessChapterReplacementInput,
   ProcessingQueuePort,
+  AdmissionValidationQueuePort,
+  ValidateUploadInput,
 } from "@nodeprox/types";
 import { Queue } from "bullmq";
 export class BullMQProcessingQueue
   implements
     ProcessingQueuePort,
     ChapterDeletionQueuePort,
-    ChapterReplacementQueuePort
+    ChapterReplacementQueuePort,
+    AdmissionValidationQueuePort
 {
   private readonly queue: Queue;
   constructor(redisUrl: string, queueName = "chapter-processing") {
@@ -27,6 +30,16 @@ export class BullMQProcessingQueue
   async enqueueChapterProcessing(input: ProcessChapterInput): Promise<void> {
     await this.queue.add("chapter.process", input, {
       jobId: processingJobId(input),
+      attempts: 3,
+      backoff: { type: "exponential", delay: 1000 },
+      removeOnComplete: 100,
+      removeOnFail: 100,
+    });
+  }
+
+  async enqueueAdmissionValidation(input: ValidateUploadInput): Promise<void> {
+    await this.queue.add("chapter.upload.validate", input, {
+      jobId: `upload-validation-${input.outboxId}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 1000 },
       removeOnComplete: 100,
@@ -60,13 +73,13 @@ export class BullMQProcessingQueue
 }
 
 export function replacementProcessingJobId(
-  input: Pick<ProcessChapterReplacementInput, "replacementId">,
+  input: Pick<ProcessChapterReplacementInput, "replacementId" | "outboxId">,
 ): string {
-  return `chapter-replacement-${input.replacementId}`;
+  return `chapter-replacement-${input.replacementId}-${input.outboxId ?? "initial"}`;
 }
 
 export function processingJobId(
-  input: Pick<ProcessChapterInput, "chapterId" | "uploadId">,
+  input: Pick<ProcessChapterInput, "chapterId" | "uploadId" | "outboxId">,
 ): string {
-  return `chapter-processing-${input.chapterId}-${input.uploadId}`;
+  return `chapter-processing-${input.chapterId}-${input.uploadId}-${input.outboxId ?? "initial"}`;
 }

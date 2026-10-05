@@ -34,8 +34,13 @@ function image(order: number): ValidatedImage & { bytes: Buffer } {
 }
 
 class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
-  status: "uploaded" | "processing" | "ready" | "completed" | "failed" =
-    "uploaded";
+  status:
+    | "uploaded"
+    | "processing"
+    | "ready"
+    | "completed"
+    | "failed"
+    | "retry_exhausted" = "uploaded";
   manifest: ChapterReplacementManifestItem[] = [];
   cleanup: string[] = [];
   calls: string[] = [];
@@ -47,6 +52,26 @@ class MemoryRepository implements ChapterReplacementProcessingRepositoryPort {
     logicalFilename: string;
     currentVersion: number;
   }> = [];
+  admissionManifest: Array<{
+    filename: string;
+    extension: string;
+    contentType: string;
+    sortOrder: number;
+    sizeBytes: number;
+    checksumSha256: string;
+    warnings: readonly [];
+  }> = [];
+
+  async loadAdmissionManifest() {
+    return this.admissionManifest;
+  }
+  async markRetryExhausted() {
+    this.status = "retry_exhausted";
+    return true;
+  }
+  async markRetryableFailed() {
+    return;
+  }
 
   async claimForProcessing(input: {
     replacementId: string;
@@ -143,13 +168,13 @@ class MemoryStorage implements StoragePort {
 
   async put(input: {
     key: string;
-    body: NodeJS.ReadableStream;
+    body: { sizeBytes: number; open(): NodeJS.ReadableStream };
     contentType: string;
     sizeBytes: number;
   }): Promise<StoredObject> {
     if (this.failPut) throw new Error("storage-temporary-failure");
     const chunks: Buffer[] = [];
-    for await (const chunk of input.body as Readable)
+    for await (const chunk of input.body.open() as Readable)
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     this.objects.set(input.key, Buffer.concat(chunks));
     this.puts.push(input.key);
@@ -175,6 +200,15 @@ class MemoryStorage implements StoragePort {
 function harness(count = 3) {
   const images = Array.from({ length: count }, (_, index) => image(index + 1));
   const repository = new MemoryRepository();
+  repository.admissionManifest = images.map((entry) => ({
+    filename: entry.filename,
+    extension: entry.extension,
+    contentType: entry.contentType,
+    sortOrder: entry.sortOrder,
+    sizeBytes: entry.sizeBytes,
+    checksumSha256: entry.checksum,
+    warnings: [],
+  }));
   const storage = new MemoryStorage();
   const extractor: ZipExtractorPort = {
     inspect: vi.fn().mockResolvedValue(images),
@@ -183,6 +217,13 @@ function harness(count = 3) {
         (entry) => entry.tempPath === candidate.tempPath,
       );
       return Readable.from(match?.bytes ?? Buffer.alloc(0));
+    }),
+    replayableImage: vi.fn((candidate: ValidatedImage) => {
+      const match = images.find(
+        (entry) => entry.tempPath === candidate.tempPath,
+      );
+      const bytes = match?.bytes ?? Buffer.alloc(0);
+      return { sizeBytes: bytes.length, open: () => Readable.from([bytes]) };
     }),
     dispose: vi.fn().mockResolvedValue(undefined),
   };

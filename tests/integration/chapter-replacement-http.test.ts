@@ -15,6 +15,7 @@ import {
   mediaEffectOutbox,
   series,
   users,
+  uploadValidationOutbox,
 } from "../../database/schema/index.js";
 import {
   UploadTransferObjectNotFoundError,
@@ -283,7 +284,7 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
     const cookie = await login(ownerEmail);
     const first = await uploadAndComplete(cookie, target.chapterId);
     expect(first.completed.statusCode).toBe(202);
-    expect(first.completed.json()).toMatchObject({ status: "uploaded" });
+    expect(first.completed.json()).toMatchObject({ status: "validating" });
     const second = await app.inject({
       method: "POST",
       url: `/chapters/${target.chapterId}/replacements/${first.replacementId}/complete`,
@@ -292,13 +293,8 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
     expect(second.statusCode).toBe(202);
     const intents = await database.db
       .select()
-      .from(chapterReplacementProcessingOutbox)
-      .where(
-        eq(
-          chapterReplacementProcessingOutbox.replacementId,
-          first.replacementId,
-        ),
-      );
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.replacementId, first.replacementId));
     expect(intents).toHaveLength(1);
     expect(intents[0]?.originRequestId).toBe(
       first.completed.headers["x-request-id"],

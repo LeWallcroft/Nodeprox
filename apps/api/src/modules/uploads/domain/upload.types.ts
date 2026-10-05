@@ -14,7 +14,15 @@ export type UploadRecord = {
   contentType: string;
   sizeBytes: number;
   etag: string | null;
-  status: "pending" | "verifying" | "aborting" | "uploaded";
+  status:
+    | "pending"
+    | "verifying"
+    | "validating"
+    | "retry_exhausted"
+    | "aborting"
+    | "uploaded"
+    | "rejected"
+    | "terminal_failed";
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -23,7 +31,7 @@ export type UploadRecord = {
 export type ChapterUploadResult = {
   chapterId: string;
   uploadId: string;
-  status: "uploaded";
+  status: "validating";
   filename: string;
   sizeBytes: number;
 };

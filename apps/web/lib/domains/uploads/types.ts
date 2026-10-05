@@ -1,7 +1,7 @@
 export interface UploadResult {
   chapterId: string;
   uploadId: string;
-  status: "uploaded";
+  status: "validating";
   filename: string;
   sizeBytes: number;
 }

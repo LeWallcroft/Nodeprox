@@ -18,6 +18,11 @@ import { usePathname } from "next/navigation";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { ImportBatchProjection } from "../../lib/domains/ingestion/types";
 import {
+  getUploadValidationReport,
+  retryBackgroundUploadOperation,
+  type UploadValidationReport,
+} from "../../lib/domains/uploads/background-operations";
+import {
   type UploadCenterBatch,
   useUploadQueue,
 } from "../providers/upload-queue-provider";
@@ -29,6 +34,7 @@ type UploadCenterItemRecord = {
   batch: UploadCenterBatch;
   item: ImportBatchProjection["items"][number];
   retryable: boolean;
+  kind: "chapter_import" | "chapter_upload" | "chapter_replacement" | null;
 };
 
 export function UploadCenter() {
@@ -81,6 +87,7 @@ export function UploadCenter() {
             batch,
             item,
             retryable: isRetryableImportFailure(item.errorCode),
+            kind: "chapter_import" as const,
           }))
         : [],
     );
@@ -110,6 +117,7 @@ export function UploadCenter() {
             warnings: [],
           },
           retryable: false,
+          kind: operation.kind === "image_replacement" ? null : operation.kind,
         }),
       );
     return [...batchRecords, ...operationRecords];
@@ -146,7 +154,7 @@ export function UploadCenter() {
         .length,
       completed: visibleRecords.filter(({ item }) => item.status === "ready")
         .length,
-      failed: visibleRecords.filter(({ item }) => item.status === "failed")
+      failed: visibleRecords.filter(({ item }) => isFailedItem(item.status))
         .length,
     }),
     [visibleRecords],
@@ -257,12 +265,13 @@ export function UploadCenter() {
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             {tabItems.length ? (
               <div className="divide-y divide-[var(--border-subtle)]">
-                {tabItems.map(({ batch, item, retryable }) => (
+                {tabItems.map(({ batch, item, retryable, kind }) => (
                   <UploadCenterItem
                     key={`${batch.batchId}:${item.itemId}`}
                     batch={batch}
                     item={item}
                     retryable={retryable}
+                    kind={kind}
                   />
                 ))}
               </div>
@@ -429,7 +438,13 @@ export function isReadyBatch(batch: UploadCenterBatch) {
 }
 
 export function isActiveItem(status: string) {
-  return !["ready", "failed"].includes(status);
+  return status !== "ready" && !isFailedItem(status);
+}
+
+function isFailedItem(status: string) {
+  return ["failed", "rejected", "retry_exhausted", "terminal_failed"].includes(
+    status,
+  );
 }
 
 function itemMatchesTab(
@@ -440,7 +455,7 @@ function itemMatchesTab(
     ? isActiveItem(item.status)
     : tab === "completed"
       ? item.status === "ready"
-      : item.status === "failed";
+      : isFailedItem(item.status);
 }
 
 function normalizeOperationStatus(
@@ -448,6 +463,10 @@ function normalizeOperationStatus(
     | "pending"
     | "pending_upload"
     | "uploading"
+    | "validating"
+    | "rejected"
+    | "retry_exhausted"
+    | "terminal_failed"
     | "uploaded"
     | "processing"
     | "ready"
@@ -461,9 +480,34 @@ function normalizeOperationStatus(
   return status;
 }
 
-function UploadCenterItem({ batch, item, retryable }: UploadCenterItemRecord) {
+function UploadCenterItem({
+  batch,
+  item,
+  retryable,
+  kind,
+}: UploadCenterItemRecord) {
   const queue = useUploadQueue();
   const input = useRef<HTMLInputElement>(null);
+  const [report, setReport] = useState<UploadValidationReport | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  useEffect(() => {
+    if (item.status !== "rejected" || !kind) {
+      setReport(null);
+      return;
+    }
+    let active = true;
+    void getUploadValidationReport(kind, item.itemId)
+      .then((value) => {
+        if (active) setReport(value);
+      })
+      .catch(() => {
+        if (active) setReport(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [item.status, item.itemId, kind]);
   const progress = queue.progressFor(batch.batchId, item.itemId);
   const canRetry = retryable && item.status === "failed";
   const requiresReplacement = requiresChapterReplacement(item.errorCode);
@@ -476,7 +520,7 @@ function UploadCenterItem({ batch, item, retryable }: UploadCenterItemRecord) {
       <span className="grid size-11 shrink-0 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface text-primary">
         {isCompleted ? (
           <Check aria-hidden="true" className="size-5 text-success" />
-        ) : item.status === "failed" ? (
+        ) : isFailedItem(item.status) ? (
           <CircleAlert
             aria-hidden="true"
             className="size-5 text-destructive-text"
@@ -550,6 +594,63 @@ function UploadCenterItem({ batch, item, retryable }: UploadCenterItemRecord) {
             {errorLabel(item.errorCode)}
           </p>
         ) : null}
+        {item.status === "rejected" ? (
+          <div className="mt-2 space-y-1 text-xs text-destructive-text">
+            <p>Carga rechazada</p>
+            {report?.issues.map((issue) => (
+              <p key={issue.id}>
+                {issue.filename ??
+                  (issue.fileIndex ? `Archivo ${issue.fileIndex}` : "ZIP")}{" "}
+                — {issue.code}
+                {issue.actual
+                  ? ` · Actual: ${Object.values(issue.actual).join(", ")}`
+                  : ""}
+                {issue.expected
+                  ? ` · Máximo: ${Object.values(issue.expected).join(", ")}`
+                  : ""}
+              </p>
+            ))}
+            {report?.requestId ? <p>Request ID: {report.requestId}</p> : null}
+          </div>
+        ) : null}
+        {item.status === "retry_exhausted" ? (
+          <div className="mt-2 space-y-2 text-xs text-secondary">
+            <p>
+              No se pudo continuar por un problema temporal. El archivo original
+              se conserva.
+            </p>
+            {kind ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={retrying}
+                icon={<RefreshCw aria-hidden="true" className="size-3.5" />}
+                onClick={() => {
+                  setRetrying(true);
+                  setRetryError(null);
+                  void retryBackgroundUploadOperation(kind, item.itemId)
+                    .then(() => queue.refresh())
+                    .catch(() =>
+                      setRetryError("No se pudo solicitar el reintento."),
+                    )
+                    .finally(() => setRetrying(false));
+                }}
+              >
+                Reintentar procesamiento
+              </Button>
+            ) : null}
+            {retryError ? (
+              <p className="text-destructive-text">{retryError}</p>
+            ) : null}
+          </div>
+        ) : null}
+        {item.status === "terminal_failed" ? (
+          <p className="mt-2 text-xs text-destructive-text">
+            La carga se detuvo por un error de configuración. El archivo
+            original se conserva.
+          </p>
+        ) : null}
         {canRetry ? (
           <div className="mt-2">
             <input
@@ -611,10 +712,14 @@ function statusLabel(status: string) {
     {
       pending: "En espera",
       uploading: "Subiendo archivo…",
+      validating: "Validando archivo…",
       uploaded: "Archivo subido. Procesando…",
       processing: "Procesando imágenes…",
       ready: "Completada",
       failed: "Error",
+      rejected: "Carga rechazada",
+      retry_exhausted: "Reintento necesario",
+      terminal_failed: "Error de configuración",
     }[status] ?? status
   );
 }

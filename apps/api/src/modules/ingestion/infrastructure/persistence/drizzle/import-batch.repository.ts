@@ -5,7 +5,6 @@ import {
   chapterImportItems,
   chapters,
   images,
-  uploads,
 } from "../../../../../../../../database/schema/index.js";
 import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 import type {
@@ -178,17 +177,17 @@ export class DrizzleImportBatchRepository
         chapterId: chapters.id,
         status: chapters.status,
         hasActiveUpload: sql<boolean>`exists (
-          select 1 from ${uploads}
-          where ${uploads.chapterId} = ${chapters.id}
-            and ${uploads.status} in ('pending', 'verifying', 'aborting')
+          select 1 from uploads as target_upload
+          where target_upload.chapter_id = chapters.id
+            and target_upload.status in ('pending', 'verifying', 'validating', 'retry_exhausted', 'aborting')
         )`,
         hasUpload: sql<boolean>`exists (
-          select 1 from ${uploads}
-          where ${uploads.chapterId} = ${chapters.id}
+          select 1 from uploads as target_upload
+          where target_upload.chapter_id = chapters.id
         )`,
         hasMedia: sql<boolean>`exists (
-          select 1 from ${images}
-          where ${images.chapterId} = ${chapters.id}
+          select 1 from images as target_image
+          where target_image.chapter_id = chapters.id
         )`,
       })
       .from(chapters)
@@ -264,11 +263,11 @@ export class DrizzleImportBatchRepository
     };
   }
 
-  async claimRetry(input: {
+  async claimResubmission(input: {
     seriesId: string;
     batchId: string;
     itemId: string;
-  }): ReturnType<ImportBatchRepositoryPort["claimRetry"]> {
+  }): ReturnType<ImportBatchRepositoryPort["claimResubmission"]> {
     return this.db.transaction(async (tx) => {
       const [item] = await tx
         .select({
@@ -295,20 +294,28 @@ export class DrizzleImportBatchRepository
         .limit(1)
         .for("update");
       if (!item) return { outcome: "not-found" as const };
-      if (item.status !== "failed") return { outcome: "conflict" as const };
+      if (item.status !== "failed" && item.status !== "rejected")
+        return { outcome: "conflict" as const };
+      const previousStatus = item.status;
       const [claimed] = await tx
         .update(chapterImportItems)
-        .set({ uploadId: null, status: "pending", updatedAt: new Date() })
+        .set({
+          uploadId: null,
+          status: "pending",
+          errorCode: null,
+          updatedAt: new Date(),
+        })
         .where(
           and(
             eq(chapterImportItems.id, item.id),
-            eq(chapterImportItems.status, "failed"),
+            eq(chapterImportItems.status, previousStatus),
           ),
         )
         .returning({ id: chapterImportItems.id });
       return claimed
         ? {
             outcome: "claimed" as const,
+            previousStatus,
             item: {
               id: item.id,
               clientId: item.clientId,

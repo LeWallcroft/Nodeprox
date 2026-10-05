@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Readable } from "node:stream";
 import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import type { StoragePort } from "@nodeprox/storage/port";
+import { StorageError } from "@nodeprox/storage/errors";
 import type { ProcessChapterReplacementInput } from "@nodeprox/types";
 import type { ZipExtractorPort } from "../../application/ports.js";
 import type { ValidatedImage } from "../../domain/image-policy.js";
@@ -28,6 +29,7 @@ const terminalValidationCodes = new Set([
   "chapter-replacement-manifest-mismatch",
   "candidate-storage-mismatch",
   "stored-image-metadata-mismatch",
+  "VALIDATION_MANIFEST_MISMATCH",
 ]);
 
 export class ChapterReplacementProcessingService {
@@ -36,10 +38,20 @@ export class ChapterReplacementProcessingService {
     private readonly storageExecution: StorageExecutionResolver,
     private readonly extractor: ZipExtractorPort,
     private readonly now: () => Date = () => new Date(),
+    private readonly logger?: { error(context: object, message: string): void },
   ) {}
 
-  async process(input: ProcessChapterReplacementInput): Promise<void> {
-    const claim = await this.repository.claimForProcessing(input);
+  async process(
+    input: ProcessChapterReplacementInput,
+    finalAttempt = false,
+    invocation?: { jobId: string; jobAttempt: number },
+  ): Promise<void> {
+    const claim = await this.repository.claimForProcessing({
+      ...input,
+      ...(invocation
+        ? { jobId: invocation.jobId, jobAttempt: invocation.jobAttempt }
+        : {}),
+    });
     if (claim.outcome !== "process") return;
     try {
       const storage = await this.storageExecution.storageFor(
@@ -47,6 +59,26 @@ export class ChapterReplacementProcessingService {
       );
       const source = await storage.get(claim.context.sourceStorageKey);
       const extracted = await this.inspectCandidate(source);
+      const admitted = await this.repository.loadAdmissionManifest(
+        claim.context.replacementId,
+      );
+      if (
+        !admitted ||
+        admitted.length !== extracted.length ||
+        extracted.some((image) => {
+          const entry = admitted.find(
+            (candidate) => candidate.sortOrder === image.sortOrder,
+          );
+          return (
+            !entry ||
+            entry.filename !== image.filename ||
+            entry.sizeBytes !== image.sizeBytes ||
+            entry.checksumSha256 !== image.checksum ||
+            entry.contentType !== image.contentType
+          );
+        })
+      )
+        throw new Error("VALIDATION_MANIFEST_MISMATCH");
       const proposed = extracted.map((image) => planItem(claim.context, image));
       const manifest = await this.repository.createOrLoadManifest(
         claim.context.replacementId,
@@ -83,14 +115,36 @@ export class ChapterReplacementProcessingService {
         throw new Error("chapter-replacement-ready-conflict");
     } catch (error) {
       const code = errorCode(error);
-      if (!terminalValidationCodes.has(code)) throw error;
+      if (
+        !terminalValidationCodes.has(code) &&
+        !(error instanceof StorageError && !error.retryable)
+      ) {
+        if (finalAttempt)
+          await this.repository.markRetryExhausted(
+            claim.context.replacementId,
+            code,
+          );
+        else
+          await this.repository.markRetryableFailed(
+            claim.context.replacementId,
+            code,
+          );
+        throw error;
+      }
       await this.repository.markFailed(
         claim.context.replacementId,
         code,
         input.originRequestId,
       );
     } finally {
-      await this.extractor.dispose().catch(() => undefined);
+      try {
+        await this.extractor.dispose();
+      } catch (disposeError) {
+        this.logger?.error(
+          { replacementId: claim.context.replacementId, error: disposeError },
+          "replacement.extractor.dispose.failed",
+        );
+      }
     }
   }
 
@@ -112,7 +166,7 @@ export class ChapterReplacementProcessingService {
     }
     const stored = await storage.put({
       key: item.candidateStorageKey,
-      body: this.extractor.readImage(image),
+      body: this.extractor.replayableImage(image),
       contentType: item.contentType,
       sizeBytes: item.sizeBytes,
     });
@@ -129,12 +183,23 @@ export class ChapterReplacementProcessingService {
     try {
       return await this.extractor.inspect(source);
     } catch (error) {
+      if (error instanceof StorageError || isTransientTransportError(error))
+        throw error;
       const code = errorCode(error);
       throw new Error(
         terminalValidationCodes.has(code) ? code : "invalid-zip-archive",
       );
     }
   }
+}
+
+function isTransientTransportError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN"].includes(String(error.code))
+  );
 }
 
 function planItem(
@@ -209,6 +274,7 @@ async function checksumStream(stream: Readable) {
 }
 
 function errorCode(error: unknown): string {
+  if (error instanceof StorageError) return error.code;
   return error instanceof Error && error.message
     ? error.message
     : "chapter-replacement-processing-failed";

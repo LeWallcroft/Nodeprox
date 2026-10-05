@@ -3,9 +3,11 @@ import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import {
   chapterReplacementItems,
   chapterReplacementOperations,
+  chapterProcessingAttempts,
   images,
   imageVersions,
   storageCleanupOutbox,
+  uploads,
 } from "../../../../../../../database/schema/index.js";
 import type {
   StorageCleanupEffect,
@@ -38,6 +40,7 @@ export class DrizzleStorageCleanupRepository
       where cleanup.id = candidates.id
       returning cleanup.id,
                 cleanup.replacement_id as "replacementId",
+                cleanup.upload_id as "uploadId",
                 cleanup.storage_key as "storageKey",
                 cleanup.storage_profile_id as "storageProfileId",
                 cleanup.reason,
@@ -46,7 +49,10 @@ export class DrizzleStorageCleanupRepository
     `);
     return [...rows].map((row) => ({
       id: String(row.id),
-      replacementId: String(row.replacementId),
+      ...(row.replacementId
+        ? { replacementId: String(row.replacementId) }
+        : {}),
+      ...(row.uploadId ? { uploadId: String(row.uploadId) } : {}),
       storageKey: String(row.storageKey),
       storageProfileId: String(row.storageProfileId),
       reason: row.reason as StorageCleanupEffect["reason"],
@@ -58,6 +64,35 @@ export class DrizzleStorageCleanupRepository
   }
 
   async isSafeToDelete(effect: StorageCleanupEffect): Promise<boolean> {
+    if (effect.reason === "chapter_source_zip") {
+      if (!effect.uploadId) return false;
+      const [upload] = await this.db
+        .select({
+          storageKey: uploads.storageKey,
+          storageProfileId: uploads.storageProfileId,
+        })
+        .from(uploads)
+        .where(eq(uploads.id, effect.uploadId))
+        .limit(1);
+      if (
+        !upload ||
+        upload.storageKey !== effect.storageKey ||
+        upload.storageProfileId !== effect.storageProfileId
+      )
+        return false;
+      const [succeeded] = await this.db
+        .select({ id: chapterProcessingAttempts.id })
+        .from(chapterProcessingAttempts)
+        .where(
+          and(
+            eq(chapterProcessingAttempts.uploadId, effect.uploadId),
+            eq(chapterProcessingAttempts.status, "succeeded"),
+          ),
+        )
+        .limit(1);
+      return Boolean(succeeded);
+    }
+    if (!effect.replacementId) return false;
     if (effect.reason === "replacement_source_zip") {
       const [operation] = await this.db
         .select({
@@ -72,9 +107,7 @@ export class DrizzleStorageCleanupRepository
         operation &&
           operation.sourceStorageKey === effect.storageKey &&
           operation.storageProfileId === effect.storageProfileId &&
-          ["ready", "completing", "completed", "failed"].includes(
-            operation.status,
-          ),
+          ["ready", "completing", "completed"].includes(operation.status),
       );
     }
 

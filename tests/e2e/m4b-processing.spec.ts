@@ -1,33 +1,44 @@
 import "dotenv/config";
-import {
-  expect,
-  request,
-  test,
-  type APIRequestContext,
-} from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import { existsSync, rmSync } from "node:fs";
 import { loadDatabaseConfig } from "@nodeprox/config";
-import { and, desc, eq, inArray } from "drizzle-orm";
-import { createDatabase } from "../../database/client.js";
 import {
-  chapters,
-  chapterProcessingAttempts,
-  images,
-  series,
-  uploads,
-} from "../../database/schema/index.js";
+  type APIRequestContext,
+  expect,
+  request,
+  test,
+} from "@playwright/test";
+import { desc, eq, inArray } from "drizzle-orm";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { AdminBootstrapService } from "../../apps/api/src/modules/authorization/application/services/admin-bootstrap.service.js";
 import { DrizzleAdminBootstrapStore } from "../../apps/api/src/modules/authorization/infrastructure/bootstrap/drizzle-admin-bootstrap.store.js";
+import { createDatabase } from "../../database/client.js";
+import {
+  chapterProcessingAttempts,
+  chapters,
+  images,
+  processingOutbox,
+  series,
+  uploads,
+  uploadValidationIssues,
+  uploadValidationRuns,
+} from "../../database/schema/index.js";
 
-const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0x00]);
-const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const jpeg = Buffer.from([
+  0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x00, 0x01, 0x00, 0x01, 0x03, 0x01,
+  0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00, 0xff, 0xd9,
+]);
+const png = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49,
+  0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+]);
 const webp = Buffer.from(
   "UklGRiIAAABXRUJQVlA4IBYAAAAwAQCdASoBAAEADsD+JaQAA3AAAAAA",
   "base64",
 );
-const gif = Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]);
+const gif = Buffer.from([
+  0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00,
+]);
 const e2eApiOrigin = "http://127.0.0.1:3101";
 
 function crc32(data: Buffer): number {
@@ -120,7 +131,27 @@ async function pollStatus(
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  throw new Error(`timed out waiting for chapter ${expected}`);
+  const [chapter] = await db
+    .select({ status: chapters.status })
+    .from(chapters)
+    .where(eq(chapters.id, chapterId));
+  const [attempt] = await db
+    .select()
+    .from(chapterProcessingAttempts)
+    .where(eq(chapterProcessingAttempts.chapterId, chapterId))
+    .orderBy(desc(chapterProcessingAttempts.attemptNumber))
+    .limit(1);
+  throw new Error(
+    `timed out waiting for chapter ${expected}: ${JSON.stringify({
+      chapterId,
+      chapterStatus: chapter?.status ?? null,
+      attemptStatus: attempt?.status ?? null,
+      errorCode: attempt?.errorCode ?? null,
+      errorMessage: attempt?.errorMessage ?? null,
+      jobId: attempt?.jobId ?? null,
+      uploadId: attempt?.uploadId ?? null,
+    })}`,
+  );
 }
 
 async function pollUntil(
@@ -133,6 +164,53 @@ async function pollUntil(
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
   throw new Error(`timed out waiting for ${description}`);
+}
+
+async function pollUploadStatus(
+  db: ReturnType<typeof createDatabase>["db"],
+  uploadId: string,
+  expected: "uploaded" | "rejected",
+): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    const [upload] = await db
+      .select({ status: uploads.status })
+      .from(uploads)
+      .where(eq(uploads.id, uploadId));
+    if (upload?.status === expected) return;
+    if (
+      expected === "uploaded" &&
+      (upload?.status === "rejected" || upload?.status === "terminal_failed")
+    ) {
+      const [run] = await db
+        .select({
+          id: uploadValidationRuns.id,
+          status: uploadValidationRuns.status,
+        })
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.uploadId, uploadId))
+        .orderBy(desc(uploadValidationRuns.attemptNumber))
+        .limit(1);
+      const issues = run
+        ? await db
+            .select({
+              code: uploadValidationIssues.code,
+              filename: uploadValidationIssues.filename,
+            })
+            .from(uploadValidationIssues)
+            .where(eq(uploadValidationIssues.runId, run.id))
+        : [];
+      throw new Error(
+        `upload did not pass admission: ${JSON.stringify({
+          uploadStatus: upload.status,
+          runStatus: run?.status ?? null,
+          issues,
+        })}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`timed out waiting for upload ${expected}: ${uploadId}`);
 }
 
 async function createTestAdmin(database: ReturnType<typeof createDatabase>) {
@@ -235,7 +313,8 @@ async function putGrantedUpload(
 }
 
 test.describe("M4-B real upload processing", () => {
-  test("keeps bulk items independent and persistently retries only the failed item", async () => {
+  test("resubmits only the rejected bulk item with a new transfer", async () => {
+    test.setTimeout(90_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
     const title = `M4-B E2E bulk ${Date.now()}`;
@@ -303,7 +382,7 @@ test.describe("M4-B real upload processing", () => {
       );
       await Promise.all([
         pollStatus(database.db, item25.chapterId, "ready"),
-        pollStatus(database.db, item26.chapterId, "failed"),
+        pollUploadStatus(database.db, item26.uploadId, "rejected"),
         pollStatus(database.db, item30.chapterId, "ready"),
       ]);
       type BatchProjection = {
@@ -327,11 +406,24 @@ test.describe("M4-B real upload processing", () => {
         projected.items.map((item) => [item.clientId, item.status]),
       ).toEqual([
         ["e2e-25", "ready"],
-        ["e2e-26", "failed"],
+        ["e2e-26", "rejected"],
         ["e2e-30", "ready"],
       ]);
       const failed = projected.items.find((item) => item.clientId === "e2e-26");
       if (!failed) throw new Error("failed batch item missing");
+      const oldRejectedUploadId = failed.uploadId;
+      const [oldRun] = await database.db
+        .select({ id: uploadValidationRuns.id })
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.uploadId, oldRejectedUploadId))
+        .orderBy(desc(uploadValidationRuns.attemptNumber))
+        .limit(1);
+      if (!oldRun) throw new Error("rejected upload validation run missing");
+      const oldIssues = await database.db
+        .select({ id: uploadValidationIssues.id })
+        .from(uploadValidationIssues)
+        .where(eq(uploadValidationIssues.runId, oldRun.id));
+      expect(oldIssues.length).toBeGreaterThan(0);
       const retriedResponse = await api.post(
         `/series/${seriesId}/import-batches/${batch.batchId}/items/${failed.itemId}/retry`,
         {
@@ -344,8 +436,10 @@ test.describe("M4-B real upload processing", () => {
       );
       expect(retriedResponse.status()).toBe(201);
       const retried = await retriedResponse.json();
-      expect(retried.uploadId).not.toBe(failed.uploadId);
+      expect(retried.status).toBe("uploading");
+      expect(retried.uploadId).not.toBe(oldRejectedUploadId);
       await putGrantedUpload(api, retried, validZip);
+      await pollUploadStatus(database.db, retried.uploadId, "uploaded");
       await pollStatus(database.db, failed.chapterId, "ready");
       await pollUntil(async () => {
         const response = await api.get(`/import-batches/${batch.batchId}`);
@@ -371,6 +465,33 @@ test.describe("M4-B real upload processing", () => {
         originalUploadIds.get("e2e-25"),
         originalUploadIds.get("e2e-30"),
       ]);
+      const history = await database.db
+        .select({ id: uploads.id, status: uploads.status })
+        .from(uploads)
+        .where(eq(uploads.chapterId, failed.chapterId));
+      expect(history).toEqual(
+        expect.arrayContaining([
+          { id: oldRejectedUploadId, status: "rejected" },
+          { id: retried.uploadId, status: "uploaded" },
+        ]),
+      );
+      const [preservedRun] = await database.db
+        .select({ status: uploadValidationRuns.status })
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.id, oldRun.id));
+      expect(preservedRun?.status).toBe("rejected");
+      expect(
+        await database.db
+          .select({ id: uploadValidationIssues.id })
+          .from(uploadValidationIssues)
+          .where(eq(uploadValidationIssues.runId, oldRun.id)),
+      ).toEqual(oldIssues);
+      expect(
+        await database.db
+          .select({ id: processingOutbox.id })
+          .from(processingOutbox)
+          .where(eq(processingOutbox.uploadId, oldRejectedUploadId)),
+      ).toHaveLength(0);
     } finally {
       const persistedChapters = seriesId
         ? await database.db
@@ -403,6 +524,7 @@ test.describe("M4-B real upload processing", () => {
   });
 
   test("processes a valid ZIP through API, outbox, BullMQ and Worker", async () => {
+    test.setTimeout(90_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
@@ -438,7 +560,13 @@ test.describe("M4-B real upload processing", () => {
         throw new Error(
           `upload failed: ${uploaded.status()} ${await uploaded.text()}`,
         );
-      expect((await uploaded.json()).status).toBe("uploaded");
+      expect((await uploaded.json()).status).toBe("validating");
+      const [pendingUpload] = await database.db
+        .select({ id: uploads.id })
+        .from(uploads)
+        .where(eq(uploads.chapterId, chapterId));
+      if (!pendingUpload) throw new Error("expected validating upload");
+      await pollUploadStatus(database.db, pendingUpload.id, "uploaded");
 
       await pollStatus(database.db, chapterId, "ready");
       const rows = await database.db
@@ -467,11 +595,13 @@ test.describe("M4-B real upload processing", () => {
         .from(uploads)
         .where(eq(uploads.chapterId, chapterId));
       if (!completedUpload) throw new Error("expected completed upload");
-      expect(
-        existsSync(
-          `${process.cwd()}/.nodeprox-storage/${completedUpload.storageKey}`,
-        ),
-      ).toBe(false);
+      await pollUntil(
+        async () =>
+          !existsSync(
+            `${process.cwd()}/.nodeprox-storage/${completedUpload.storageKey}`,
+          ),
+        "source ZIP cleanup after successful processing",
+      );
 
       anonymous = await request.newContext({
         baseURL: e2eApiOrigin,
@@ -555,7 +685,8 @@ test.describe("M4-B real upload processing", () => {
     }
   });
 
-  test("marks an invalid ZIP failed and cleans partial processing state", async () => {
+  test("rejects an invalid ZIP during admission without processing it", async () => {
+    test.setTimeout(90_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     let anonymous: APIRequestContext | undefined;
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
@@ -594,26 +725,51 @@ test.describe("M4-B real upload processing", () => {
         throw new Error(
           `upload failed: ${uploaded.status()} ${await uploaded.text()}`,
         );
-      await pollStatus(database.db, chapterId, "failed");
+      const [upload] = await database.db
+        .select({ id: uploads.id, status: uploads.status })
+        .from(uploads)
+        .where(eq(uploads.chapterId, chapterId));
+      if (!upload) throw new Error("invalid upload record was not found");
+      await pollUploadStatus(database.db, upload.id, "rejected");
+      const [rejectedChapter] = await database.db
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, chapterId));
+      expect(rejectedChapter?.status).toBe("draft");
       const rows = await database.db
         .select()
         .from(images)
         .where(eq(images.chapterId, chapterId));
       expect(rows).toHaveLength(0);
-      const [upload] = await database.db
-        .select({ storageKey: uploads.storageKey })
-        .from(uploads)
-        .where(
-          and(eq(uploads.chapterId, chapterId), eq(uploads.status, "uploaded")),
-        );
-      if (!upload) throw new Error("uploaded record was not found");
-      await pollUntil(
-        async () =>
-          !existsSync(
-            `${process.cwd()}/.nodeprox-storage/${upload.storageKey}`,
-          ),
-        "invalid ZIP cleanup after processing retries",
-      );
+      const [run] = await database.db
+        .select({
+          id: uploadValidationRuns.id,
+          status: uploadValidationRuns.status,
+        })
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.uploadId, upload.id))
+        .orderBy(desc(uploadValidationRuns.attemptNumber))
+        .limit(1);
+      expect(run?.status).toBe("rejected");
+      const issues = run
+        ? await database.db
+            .select({ code: uploadValidationIssues.code })
+            .from(uploadValidationIssues)
+            .where(eq(uploadValidationIssues.runId, run.id))
+        : [];
+      expect(issues.length).toBeGreaterThan(0);
+      expect(
+        await database.db
+          .select()
+          .from(chapterProcessingAttempts)
+          .where(eq(chapterProcessingAttempts.chapterId, chapterId)),
+      ).toHaveLength(0);
+      expect(
+        await database.db
+          .select({ id: processingOutbox.id })
+          .from(processingOutbox)
+          .where(eq(processingOutbox.uploadId, upload.id)),
+      ).toHaveLength(0);
     } finally {
       if (chapterId) {
         await database.db.delete(images).where(eq(images.chapterId, chapterId));

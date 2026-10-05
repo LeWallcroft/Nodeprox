@@ -41,7 +41,7 @@ describe("B2Storage contract", () => {
     await expect(
       adapter.put({
         key: "uploads/empty.zip",
-        body: Readable.from([]),
+        body: { sizeBytes: 0, open: () => Readable.from([]) },
         contentType: "application/zip",
         sizeBytes: 0,
       }),
@@ -64,7 +64,10 @@ describe("B2Storage contract", () => {
 
     const input = {
       key: "chapters/chapter/uploads/upload.zip",
-      body: Readable.from([Buffer.from("PK\\x03\\x04")]),
+      body: {
+        sizeBytes: 4,
+        open: () => Readable.from([Buffer.from("PK\\x03\\x04")]),
+      },
       contentType: "application/zip",
       sizeBytes: 4,
     };
@@ -79,8 +82,8 @@ describe("B2Storage contract", () => {
     };
     expect(putCommand.input.ContentLength).toBe(input.sizeBytes);
     expect(putCommand.input.IfNoneMatch).toBeUndefined();
-    expect(putCommand.input.Body).toBe(input.body);
-    expect((input.body as Readable).readableFlowing).toBeNull();
+    expect(putCommand.input.Body).toBeInstanceOf(Readable);
+    expect((putCommand.input.Body as Readable).readableFlowing).toBeNull();
     await expect(
       adapter.exists("chapters/chapter/uploads/upload.zip"),
     ).resolves.toBe(true);
@@ -103,7 +106,10 @@ describe("B2Storage contract", () => {
     Object.defineProperty(adapter, "client", {
       value: { send: vi.fn().mockRejectedValue(failure) },
     });
-    await expect(adapter.exists("unknown.zip")).rejects.toBe(failure);
+    await expect(adapter.exists("unknown.zip")).rejects.toMatchObject({
+      code: "STORAGE_UNKNOWN",
+      cause: failure,
+    });
   });
 
   it("normalizes an existing B2 object without overwriting it", async () => {
@@ -117,13 +123,13 @@ describe("B2Storage contract", () => {
     await expect(
       adapter.put({
         key: "Media/a/1/01.jpg",
-        body: Readable.from([Buffer.from("img")]),
+        body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("img")]) },
         contentType: "image/jpeg",
         sizeBytes: 3,
       }),
     ).rejects.toMatchObject({
       name: "StorageObjectAlreadyExistsError",
-      message: "storage-object-already-exists",
+      code: "STORAGE_OBJECT_ALREADY_EXISTS",
     });
     expect(send).toHaveBeenCalledTimes(1);
   });
@@ -141,7 +147,10 @@ describe("B2Storage contract", () => {
     Object.defineProperty(adapter, "client", {
       value: { send: vi.fn().mockRejectedValue(failure) },
     });
-    await expect(adapter.get("uploads/source.zip")).rejects.toBe(failure);
+    await expect(adapter.get("uploads/source.zip")).rejects.toMatchObject({
+      code: "STORAGE_UNKNOWN",
+      cause: failure,
+    });
   });
 });
 
@@ -164,20 +173,26 @@ describe("FilesystemStorage contract", () => {
       const adapter: StoragePort = new FilesystemStorage(root);
       await adapter.put({
         key: "Media/a/1/01.jpg",
-        body: Readable.from([Buffer.from("original")]),
+        body: {
+          sizeBytes: 8,
+          open: () => Readable.from([Buffer.from("original")]),
+        },
         contentType: "image/jpeg",
         sizeBytes: 8,
       });
       await expect(
         adapter.put({
           key: "Media/a/1/01.jpg",
-          body: Readable.from([Buffer.from("different")]),
+          body: {
+            sizeBytes: 9,
+            open: () => Readable.from([Buffer.from("different")]),
+          },
           contentType: "image/jpeg",
           sizeBytes: 9,
         }),
       ).rejects.toMatchObject({
         name: "StorageObjectAlreadyExistsError",
-        message: "storage-object-already-exists",
+        code: "STORAGE_OBJECT_ALREADY_EXISTS",
       });
       expect(
         Buffer.concat(await (await adapter.get("Media/a/1/01.jpg")).toArray()),
@@ -192,7 +207,7 @@ describe("FilesystemStorage contract", () => {
       const adapter: StoragePort = new FilesystemStorage(root);
       await adapter.put({
         key: "uploads/source.zip",
-        body: Readable.from([Buffer.from("zip")]),
+        body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
         contentType: "application/zip",
         sizeBytes: 3,
       });
@@ -217,7 +232,7 @@ describe("FilesystemStorage contract", () => {
       await expect(
         adapter.put({
           key: "uploads/zero.zip",
-          body: Readable.from([]),
+          body: { sizeBytes: 0, open: () => Readable.from([]) },
           contentType: "application/zip",
           sizeBytes: 0,
         }),
@@ -225,11 +240,14 @@ describe("FilesystemStorage contract", () => {
       await expect(
         adapter.put({
           key: "uploads/mismatch.zip",
-          body: Readable.from([Buffer.from("zip")]),
+          body: {
+            sizeBytes: 3,
+            open: () => Readable.from([Buffer.from("zip")]),
+          },
           contentType: "application/zip",
           sizeBytes: 4,
         }),
-      ).rejects.toThrow("storage-size-mismatch");
+      ).rejects.toMatchObject({ code: "STORAGE_INTEGRITY_FAILED" });
       await expect(adapter.exists("uploads/mismatch.zip")).resolves.toBe(false);
     } finally {
       await rm(root, { recursive: true, force: true });

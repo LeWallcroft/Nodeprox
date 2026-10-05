@@ -27,7 +27,7 @@ export interface ChapterReplacementUploadRepository {
   getCompletedResult(
     replacementId: string,
   ): Promise<ChapterReplacementResult | null>;
-  markUploadedAndEnqueue(input: {
+  markValidatingAndEnqueue(input: {
     replacementId: string;
     chapterId: string;
     etag?: string;

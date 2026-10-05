@@ -35,8 +35,16 @@ export class StorageCleanupProcessor {
 
   start(intervalMs = 1000): void {
     if (this.timer) return;
-    void this.runOnce();
-    this.timer = setInterval(() => void this.runOnce(), intervalMs);
+    const run = () => {
+      void this.runOnce().catch((error) => {
+        this.logger.error(
+          { errorName: error instanceof Error ? error.name : "unknown" },
+          "Storage cleanup cycle failed",
+        );
+      });
+    };
+    run();
+    this.timer = setInterval(run, intervalMs);
     this.timer.unref();
   }
 

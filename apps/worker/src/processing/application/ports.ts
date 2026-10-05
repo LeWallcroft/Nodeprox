@@ -1,6 +1,8 @@
 import type { Readable } from "node:stream";
+import type { ReplayableObjectBody } from "@nodeprox/storage/port";
 import type { ChapterState } from "@nodeprox/types";
 import type { ValidatedImage } from "../domain/image-policy.js";
+import type { ValidatedChapterManifest } from "../../admission-validation/domain/admission-validation.types.js";
 export type ProcessingUpload = {
   uploadId: string;
   chapterId: string;
@@ -20,12 +22,14 @@ export type ImageRecordInput = Omit<ValidatedImage, "tempPath"> & {
 export type ProcessingAttemptStatus =
   | "processing"
   | "retryable_failed"
+  | "retry_exhausted"
   | "terminal_failed"
   | "succeeded";
 export type ProcessingAttempt = {
   id: string;
   chapterId: string;
   uploadId: string | null;
+  validationRunId: string | null;
   storageProfileId: string;
   jobId: string | null;
   jobAttempt: number | null;
@@ -45,6 +49,9 @@ export type ProcessingClaimResult =
     };
 export interface ProcessingRepositoryPort {
   findUpload(uploadId: string): Promise<ProcessingUpload | null>;
+  loadLatestAcceptedManifest(
+    uploadId: string,
+  ): Promise<ValidatedChapterManifest | null>;
   claimChapter(input: {
     chapterId: string;
     uploadId: string;
@@ -72,13 +79,18 @@ export interface ProcessingRepositoryPort {
     chapterId: string,
     uploadId: string,
     attemptId: string,
-    failure: { terminal: boolean; errorCode: string; errorMessage: string },
+    failure: {
+      disposition: "retryable" | "retry_exhausted" | "terminal";
+      errorCode: string;
+      errorMessage: string;
+    },
     requestedByUserId: string,
   ): Promise<void>;
 }
 export interface ZipExtractorPort {
   inspect(source: Readable): Promise<ValidatedImage[]>;
   readImage(image: ValidatedImage): Readable;
+  replayableImage(image: ValidatedImage): ReplayableObjectBody;
   dispose(): Promise<void>;
 }
 export interface ProcessingAuditPort {

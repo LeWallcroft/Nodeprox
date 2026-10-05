@@ -351,9 +351,13 @@ function labelFor(status: ImportCandidate["status"]) {
   return {
     pending: "Pendiente",
     uploading: "Subiendo",
+    validating: "Validando archivo",
     uploaded: "Subido",
     processing: "Procesando",
     ready: "Listo",
+    rejected: "Carga rechazada",
+    retry_exhausted: "Reintentar procesamiento",
+    terminal_failed: "Error permanente",
     failed: "Error",
   }[status];
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { replayableFile } from "@nodeprox/storage/replayable-body";
 import unzipper from "unzipper";
 import type { ZipExtractorPort } from "../../application/ports.js";
 import {
@@ -140,6 +141,9 @@ export class UnzipperExtractor implements ZipExtractorPort {
   }
   readImage(image: ValidatedImage): Readable {
     return createReadStream(image.tempPath);
+  }
+  replayableImage(image: ValidatedImage) {
+    return replayableFile(image.tempPath, image.sizeBytes);
   }
   async dispose(): Promise<void> {
     if (!this.tempDir) return;

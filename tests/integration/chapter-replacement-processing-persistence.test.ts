@@ -3,13 +3,18 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, inject, it } from "vitest";
 import { DrizzleChapterReplacementProcessingRepository } from "../../apps/api/src/modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { DrizzleChapterReplacementProcessingWorkerRepository } from "../../apps/worker/src/processing/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
+import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
+import { DrizzleRetryUploadOperationRepository } from "../../apps/api/src/modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   chapterReplacementOperations,
   chapterReplacementProcessingOutbox,
+  chapterReplacementProcessingAttempts,
   chapters,
   images,
   storageCleanupOutbox,
+  uploadValidationOutbox,
+  uploadValidationRuns,
 } from "../../database/schema/index.js";
 import { createReplacementChapter } from "./helpers/chapter-replacement-fixture.js";
 
@@ -20,6 +25,9 @@ const apiRepository = new DrizzleChapterReplacementProcessingRepository(
 );
 const workerRepository =
   new DrizzleChapterReplacementProcessingWorkerRepository(database.db);
+const admissionRepository = new DrizzleAdmissionValidationRepository(
+  database.db,
+);
 
 afterAll(async () => database.sql.end());
 
@@ -40,14 +48,45 @@ async function pending() {
   return { chapter, operation };
 }
 
-async function uploaded() {
+async function validating() {
   const target = await pending();
-  const operation = await apiRepository.markUploadedAndEnqueue({
+  const operation = await apiRepository.markValidatingAndEnqueue({
     replacementId: target.operation.id,
     chapterId: target.chapter.chapterId,
     etag: "zip-etag",
   });
   if (!operation) throw new Error("fixture-upload-conflict");
+  return { ...target, operation };
+}
+
+async function uploaded() {
+  const target = await validating();
+  const claim = await admissionRepository.begin({
+    replacementId: target.operation.id,
+    jobId: randomUUID(),
+    jobAttempt: 1,
+  });
+  if (!claim) throw new Error("fixture-admission-claim-failed");
+  await admissionRepository.settle(claim.runId, {
+    outcome: "accepted",
+    issues: [],
+    manifest: [
+      {
+        filename: "01.png",
+        extension: "png",
+        contentType: "image/png",
+        sortOrder: 1,
+        sizeBytes: 16,
+        checksumSha256: "a".repeat(64),
+        warnings: [],
+      },
+    ],
+  });
+  const [operation] = await database.db
+    .select()
+    .from(chapterReplacementOperations)
+    .where(eq(chapterReplacementOperations.id, target.operation.id));
+  if (!operation) throw new Error("fixture-admission-settle-failed");
   return { ...target, operation };
 }
 
@@ -80,19 +119,14 @@ describe("CHR3 processing persistence", () => {
     expect(chapter?.status).toBe("ready");
   });
 
-  it("commits uploaded state and one processing intent atomically", async () => {
-    const target = await uploaded();
+  it("commits validating state and one admission intent atomically", async () => {
+    const target = await validating();
     const intents = await database.db
       .select()
-      .from(chapterReplacementProcessingOutbox)
-      .where(
-        eq(
-          chapterReplacementProcessingOutbox.replacementId,
-          target.operation.id,
-        ),
-      );
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.replacementId, target.operation.id));
     expect(target.operation).toMatchObject({
-      status: "uploaded",
+      status: "validating",
       etag: "zip-etag",
     });
     expect(intents).toHaveLength(1);
@@ -100,7 +134,7 @@ describe("CHR3 processing persistence", () => {
 
   it("persists and reads the completion request origin on its durable intent", async () => {
     const target = await pending();
-    await apiRepository.markUploadedAndEnqueue({
+    await apiRepository.markValidatingAndEnqueue({
       replacementId: target.operation.id,
       chapterId: target.chapter.chapterId,
       etag: "zip-etag",
@@ -108,29 +142,28 @@ describe("CHR3 processing persistence", () => {
     });
     const intents = await database.db
       .select()
-      .from(chapterReplacementProcessingOutbox)
-      .where(
-        eq(
-          chapterReplacementProcessingOutbox.replacementId,
-          target.operation.id,
-        ),
-      );
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.replacementId, target.operation.id));
     expect(intents).toHaveLength(1);
     expect(intents[0]?.originRequestId).toBe("request-complete");
-    expect(
-      (await apiRepository.findPending(100)).find(
-        (intent) => intent.replacementId === target.operation.id,
-      )?.originRequestId,
-    ).toBe("request-complete");
   });
 
   it("repeated upload completion creates no duplicate intent", async () => {
-    const target = await uploaded();
-    await apiRepository.markUploadedAndEnqueue({
+    const target = await validating();
+    await apiRepository.markValidatingAndEnqueue({
       replacementId: target.operation.id,
       chapterId: target.chapter.chapterId,
       etag: "zip-etag",
     });
+    const intents = await database.db
+      .select()
+      .from(uploadValidationOutbox)
+      .where(eq(uploadValidationOutbox.replacementId, target.operation.id));
+    expect(intents).toHaveLength(1);
+  });
+
+  it("claims uploaded operation as processing without Chapter media lock", async () => {
+    const target = await uploaded();
     const intents = await database.db
       .select()
       .from(chapterReplacementProcessingOutbox)
@@ -141,13 +174,12 @@ describe("CHR3 processing persistence", () => {
         ),
       );
     expect(intents).toHaveLength(1);
-  });
-
-  it("claims uploaded operation as processing without Chapter media lock", async () => {
-    const target = await uploaded();
     const claim = await workerRepository.claimForProcessing({
       replacementId: target.operation.id,
       chapterId: target.chapter.chapterId,
+      jobId: "replacement-job-1",
+      jobAttempt: 1,
+      originRequestId: "request-complete",
     });
     expect(claim.outcome).toBe("process");
     const [operation] = await database.db
@@ -155,6 +187,96 @@ describe("CHR3 processing persistence", () => {
       .from(chapterReplacementOperations)
       .where(eq(chapterReplacementOperations.id, target.operation.id));
     expect(operation?.status).toBe("processing");
+    const [accepted] = await database.db
+      .select({ id: uploadValidationRuns.id })
+      .from(uploadValidationRuns)
+      .where(eq(uploadValidationRuns.replacementId, target.operation.id));
+    const [attempt] = await database.db
+      .select()
+      .from(chapterReplacementProcessingAttempts)
+      .where(
+        eq(
+          chapterReplacementProcessingAttempts.replacementId,
+          target.operation.id,
+        ),
+      );
+    expect(attempt).toMatchObject({
+      validationRunId: accepted?.id,
+      jobId: "replacement-job-1",
+      jobAttempt: 1,
+      requestId: "request-complete",
+      attemptNumber: 1,
+      status: "processing",
+    });
+  });
+
+  it("records exhausted replacement attempts and requeues the same source", async () => {
+    const target = await uploaded();
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      const claim = await workerRepository.claimForProcessing({
+        replacementId: target.operation.id,
+        chapterId: target.chapter.chapterId,
+        jobId: "replacement-job",
+        jobAttempt: attempt,
+      });
+      expect(claim.outcome).toBe("process");
+      if (attempt < 3)
+        await workerRepository.markRetryableFailed(
+          target.operation.id,
+          "STORAGE_PROVIDER_UNAVAILABLE",
+        );
+      else
+        await workerRepository.markRetryExhausted(
+          target.operation.id,
+          "STORAGE_PROVIDER_UNAVAILABLE",
+        );
+    }
+    const attempts = await database.db
+      .select({ status: chapterReplacementProcessingAttempts.status })
+      .from(chapterReplacementProcessingAttempts)
+      .where(
+        eq(
+          chapterReplacementProcessingAttempts.replacementId,
+          target.operation.id,
+        ),
+      )
+      .orderBy(chapterReplacementProcessingAttempts.attemptNumber);
+    expect(attempts.map((attempt) => attempt.status)).toEqual([
+      "retryable_failed",
+      "retryable_failed",
+      "retry_exhausted",
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(storageCleanupOutbox)
+        .where(eq(storageCleanupOutbox.replacementId, target.operation.id)),
+    ).toHaveLength(0);
+    const retryRepository = new DrizzleRetryUploadOperationRepository(
+      database.db,
+    );
+    const operation = await retryRepository.find(
+      "chapter_replacement",
+      target.operation.id,
+    );
+    expect(operation).toMatchObject({
+      status: "retry_exhausted",
+      stage: "processing",
+      storageKey: target.operation.candidateZipStorageKey,
+    });
+    if (!operation) throw new Error("replacement retry operation missing");
+    expect(await retryRepository.requeue(operation, "manual-retry")).toBe(true);
+    const intents = await database.db
+      .select()
+      .from(chapterReplacementProcessingOutbox)
+      .where(
+        eq(
+          chapterReplacementProcessingOutbox.replacementId,
+          target.operation.id,
+        ),
+      );
+    expect(intents).toHaveLength(2);
+    expect(intents[1]?.originRequestId).toBe("manual-retry");
   });
 
   it("persists and reloads one immutable manifest plan", async () => {

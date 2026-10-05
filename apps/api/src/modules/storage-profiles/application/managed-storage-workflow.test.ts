@@ -74,12 +74,13 @@ describe("managed storage control-plane workflow with fake providers", () => {
       put: vi.fn(
         async (input: {
           key: string;
-          body: NodeJS.ReadableStream;
+          body: { sizeBytes: number; open(): NodeJS.ReadableStream };
           contentType: string;
           sizeBytes: number;
         }) => {
           const chunks: Buffer[] = [];
-          for await (const chunk of input.body) chunks.push(Buffer.from(chunk));
+          for await (const chunk of input.body.open())
+            chunks.push(Buffer.from(chunk));
           objects.set(input.key, Buffer.concat(chunks));
           return {
             key: input.key,

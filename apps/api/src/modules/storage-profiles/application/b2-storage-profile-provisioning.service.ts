@@ -212,7 +212,7 @@ export class B2StorageProfileProvisioningService {
     try {
       await storage.put({
         key,
-        body: Readable.from(body),
+        body: { sizeBytes: body.length, open: () => Readable.from([body]) },
         contentType: "application/octet-stream",
         sizeBytes: body.length,
       });

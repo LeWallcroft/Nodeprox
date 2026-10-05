@@ -199,10 +199,11 @@ export class ChapterImportBatchService {
     contentType: string;
     sizeBytes: number;
   }) {
+    // Retry the logical import item with a new transfer, not its previous job.
     const access = await this.access.check(input.actor, input.seriesId);
     if (access === "denied") throw new ImportBatchDeniedError();
     if (access === "not-found") throw new ImportBatchNotFoundError();
-    const claim = await this.repository.claimRetry(input);
+    const claim = await this.repository.claimResubmission(input);
     if (claim.outcome === "not-found") throw new ImportBatchNotFoundError();
     if (claim.outcome === "conflict") throw new ImportBatchConflictError();
     if (claim.outcome !== "claimed") throw new ImportBatchConflictError();
@@ -314,8 +315,14 @@ function projectBatchStatus(
   items: readonly { status: string }[],
 ): "pending" | "running" | "completed" | "completed_with_errors" {
   if (items.every((item) => item.status === "ready")) return "completed";
-  const final = items.every(
-    (item) => item.status === "ready" || item.status === "failed",
+  const final = items.every((item) =>
+    [
+      "ready",
+      "failed",
+      "rejected",
+      "retry_exhausted",
+      "terminal_failed",
+    ].includes(item.status),
   );
   if (final) return "completed_with_errors";
   if (items.every((item) => item.status === "pending")) return "pending";

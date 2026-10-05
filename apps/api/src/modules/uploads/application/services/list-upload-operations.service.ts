@@ -1,5 +1,6 @@
 export type UploadOperationKind =
   | "chapter_import"
+  | "chapter_upload"
   | "chapter_replacement"
   | "image_replacement";
 
@@ -7,6 +8,10 @@ export type UploadOperationStatus =
   | "pending"
   | "pending_upload"
   | "uploading"
+  | "validating"
+  | "rejected"
+  | "retry_exhausted"
+  | "terminal_failed"
   | "uploaded"
   | "processing"
   | "ready"
@@ -25,6 +30,7 @@ export type UploadOperationProjection = {
   filename: string;
   status: UploadOperationStatus;
   errorCode: string | null;
+  failureStage: "admission" | "storage" | "processing" | "database" | null;
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;

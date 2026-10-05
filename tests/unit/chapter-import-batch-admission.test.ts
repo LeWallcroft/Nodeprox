@@ -4,6 +4,7 @@ import {
   IMPORT_BATCH_TOTAL_SIZE_LIMIT,
   type ImportBatchLimitError,
 } from "../../apps/api/src/modules/ingestion/application/chapter-import-batch.service.js";
+import { ChapterTargetResolver } from "../../apps/api/src/modules/ingestion/application/chapter-target.resolver.js";
 import type {
   ImportBatchRepositoryPort,
   ImportChapterCreatePort,
@@ -12,7 +13,6 @@ import type {
   ImportSeriesAccessPort,
   ImportUploadPort,
 } from "../../apps/api/src/modules/ingestion/application/ports.js";
-import { ChapterTargetResolver } from "../../apps/api/src/modules/ingestion/application/chapter-target.resolver.js";
 
 const actor = { userId: "actor-1", sessionId: "session-1" };
 const ITEM_LIMIT = 512 * 1024 * 1024;
@@ -95,7 +95,7 @@ function createService(options?: {
     updateResolution: async () => true,
     failItem: async () => undefined,
     find: async () => null,
-    claimRetry: async () => ({ outcome: "not-found" }),
+    claimResubmission: async () => ({ outcome: "not-found" }),
   };
   const access: ImportSeriesAccessPort = { check: async () => "allowed" };
   const lookup: ImportChapterLookupPort = {
