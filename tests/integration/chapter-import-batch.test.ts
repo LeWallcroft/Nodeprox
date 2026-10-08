@@ -30,6 +30,8 @@ import {
   series,
   seriesAssignments,
   uploads,
+  uploadValidationEntries,
+  uploadValidationRuns,
   users,
 } from "../../database/schema/index.js";
 import {
@@ -151,6 +153,108 @@ beforeAll(async () => {
 });
 
 describe("ChapterImportBatch admission control", () => {
+  it("correlates accepted import warnings by uploadId while keeping itemId as the operation ID", async () => {
+    const cookie = await login(ownerEmail);
+    const seriesId = await createSeries(cookie, "Import warning correlation");
+    const created = await app.inject({
+      method: "POST",
+      url: `/series/${seriesId}/import-batches`,
+      headers: { cookie },
+      payload: {
+        items: [
+          {
+            clientId: "warning-item",
+            chapterNumber: 1,
+            filename: "warning.zip",
+            contentType: "application/zip",
+            sizeBytes: 4,
+          },
+        ],
+      },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const item = created.json().items[0] as {
+      itemId: string;
+      uploadId: string;
+      chapterId: string;
+    };
+    expect(item.itemId).not.toBe(item.uploadId);
+    const [run] = await database.db
+      .insert(uploadValidationRuns)
+      .values({
+        uploadId: item.uploadId,
+        attemptNumber: 1,
+        status: "accepted",
+        finishedAt: new Date(),
+      })
+      .returning({ id: uploadValidationRuns.id });
+    if (!run) throw new Error("validation run missing");
+    const warnings = [
+      {
+        code: "large-file" as const,
+        filename: "01.webp",
+        sizeBytes: 2 * 1024 * 1024,
+        thresholdBytes: 1024 * 1024,
+      },
+      {
+        code: "tall-image" as const,
+        filename: "01.webp",
+        height: 13_420,
+        thresholdHeight: 12_000,
+      },
+    ];
+    await database.db.insert(uploadValidationEntries).values({
+      runId: run.id,
+      filename: "01.webp",
+      extension: "webp",
+      contentType: "image/webp",
+      sortOrder: 1,
+      sizeBytes: 2 * 1024 * 1024,
+      checksumSha256: "a".repeat(64),
+      warnings,
+    });
+    await database.db
+      .update(uploads)
+      .set({ status: "uploaded" })
+      .where(eq(uploads.id, item.uploadId));
+    await database.db
+      .update(chapters)
+      .set({ status: "ready" })
+      .where(eq(chapters.id, item.chapterId));
+    await database.db
+      .update(chapterImportItems)
+      .set({ status: "ready" })
+      .where(eq(chapterImportItems.id, item.itemId));
+
+    const operations = await app.inject({
+      method: "GET",
+      url: "/me/upload-operations?limit=100",
+      headers: { cookie },
+    });
+    expect(operations.statusCode).toBe(200);
+    expect(operations.json().items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "chapter_import",
+          id: item.itemId,
+          status: "ready",
+          warningCount: 2,
+        }),
+      ]),
+    );
+    const report = await app.inject({
+      method: "GET",
+      url: `/me/upload-operations/chapter_import/${item.itemId}/validation-report`,
+      headers: { cookie },
+    });
+    expect(report.statusCode).toBe(200);
+    expect(report.json()).toMatchObject({
+      validationRunId: run.id,
+      status: "accepted",
+      warnings,
+    });
+  });
+
   it("accepts exactly fifteen items", async () => {
     const cookie = await login(ownerEmail);
     const seriesId = await createSeries(cookie, "Fifteen items");

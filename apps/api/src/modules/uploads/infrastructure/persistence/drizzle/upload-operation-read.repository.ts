@@ -176,7 +176,7 @@ export class DrizzleUploadOperationReadRepository
       ...imports.map((row) => ({
         ...row,
         kind: "chapter_import" as const,
-        warningCount: warningCounts.get(row.id) ?? 0,
+        warningCount: row.uploadId ? (warningCounts.get(row.uploadId) ?? 0) : 0,
         failureStage:
           row.status === "rejected" ||
           row.uploadStatus === "retry_exhausted" ||

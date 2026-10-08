@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { PROXY_ROUTE_RULES, isAllowedProxyRoute } from "./proxy-allowlist.js";
+import { isAllowedProxyRoute, PROXY_ROUTE_RULES } from "./proxy-allowlist.js";
 
 describe("same-origin proxy allowlist", () => {
   it("keeps every declared rule method-specific", () => {
@@ -50,6 +50,40 @@ describe("same-origin proxy allowlist", () => {
       "admin/users/id/series-responsibilities-extra",
     ])
       expect(isAllowedProxyRoute(path, "GET")).toBe(false);
+  });
+
+  it("allows only chapter operation validation reports and retries with their exact methods", () => {
+    const operationId = "3b1ed2c2-1f67-460f-95d3-837d2999c180";
+    for (const kind of [
+      "chapter_upload",
+      "chapter_import",
+      "chapter_replacement",
+    ]) {
+      const base = `me/upload-operations/${kind}/${operationId}`;
+      expect(isAllowedProxyRoute(`${base}/validation-report`, "GET")).toBe(
+        true,
+      );
+      expect(isAllowedProxyRoute(`${base}/retry`, "POST")).toBe(true);
+      for (const method of ["POST", "DELETE"])
+        expect(isAllowedProxyRoute(`${base}/validation-report`, method)).toBe(
+          false,
+        );
+      for (const method of ["GET", "DELETE"])
+        expect(isAllowedProxyRoute(`${base}/retry`, method)).toBe(false);
+    }
+    for (const kind of ["image_replacement", "unknown"]) {
+      const base = `me/upload-operations/${kind}/${operationId}`;
+      expect(isAllowedProxyRoute(`${base}/validation-report`, "GET")).toBe(
+        false,
+      );
+      expect(isAllowedProxyRoute(`${base}/retry`, "POST")).toBe(false);
+    }
+    expect(
+      isAllowedProxyRoute(
+        `me/upload-operations/chapter_upload/${operationId}/other`,
+        "GET",
+      ),
+    ).toBe(false);
   });
 
   it("is consumed by the route handler rather than a second inline matrix", () => {

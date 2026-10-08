@@ -31,6 +31,16 @@ export const PROXY_ROUTE_RULES: readonly ProxyRouteRule[] = [
   { pattern: "me/discord/series-channels", methods: GET },
   { pattern: "me/series-creation-grants", methods: GET },
   { pattern: "me/upload-operations", methods: GET },
+  {
+    pattern:
+      /^me\/upload-operations\/(chapter_import|chapter_upload|chapter_replacement)\/[^/]+\/validation-report$/,
+    methods: GET,
+  },
+  {
+    pattern:
+      /^me\/upload-operations\/(chapter_import|chapter_upload|chapter_replacement)\/[^/]+\/retry$/,
+    methods: POST,
+  },
   { pattern: "me/notifications", methods: GET },
   { pattern: "me/notifications/unread-count", methods: GET },
   { pattern: /^me\/notifications\/[^/]+\/read$/, methods: PATCH },
