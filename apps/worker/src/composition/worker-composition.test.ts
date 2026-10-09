@@ -1,9 +1,9 @@
 import type { Job } from "bullmq";
-import { describe, expect, it, vi } from "vitest";
-import { createWorkerJobHandler } from "./worker-job-handler.js";
-import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
 import { UnrecoverableError } from "bullmq";
+import { describe, expect, it, vi } from "vitest";
+import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
 import { createWorkerRuntime } from "./create-worker-runtime.js";
+import { createWorkerJobHandler } from "./worker-job-handler.js";
 
 function fakeJob(name: string, attemptsMade = 0): Job {
   return {
@@ -21,7 +21,7 @@ describe("Worker composition", () => {
     const handler = createWorkerJobHandler({
       logger: { info: vi.fn() },
       deletion: { execute: vi.fn() },
-      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({}),
       createExtractor: vi.fn(),
       createChapterProcessing: vi.fn(),
       createReplacementProcessing: vi.fn(),
@@ -40,7 +40,7 @@ describe("Worker composition", () => {
     const handler = createWorkerJobHandler({
       logger: { info: vi.fn() },
       deletion: { execute: vi.fn() },
-      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({}),
       createExtractor: vi.fn(),
       createChapterProcessing: vi.fn(),
       createReplacementProcessing: vi.fn(),
@@ -67,16 +67,15 @@ describe("Worker composition", () => {
     const deletion = vi.fn();
     const processing = vi.fn();
     const replacement = vi.fn();
-    const loadImageProcessingWarnings = vi.fn().mockResolvedValue({
-      warnImageBytes: 8,
-      warnWidthPx: 4000,
-      warnHeightPx: 12000,
+    const loadUploadProcessingPolicy = vi.fn().mockResolvedValue({
+      warnings: { warnImageBytes: 8, warnWidthPx: 4000, warnHeightPx: 12000 },
+      admission: {},
     });
     const createExtractor = vi.fn().mockReturnValue({});
     const handler = createWorkerJobHandler({
       logger: { info: vi.fn() },
       deletion: { execute: deletion },
-      loadImageProcessingWarnings,
+      loadUploadProcessingPolicy,
       createExtractor,
       createChapterProcessing: () => ({ process: processing }),
       createReplacementProcessing: () => ({ process: replacement }),
@@ -84,9 +83,10 @@ describe("Worker composition", () => {
 
     await handler(fakeJob("chapter.delete"));
     expect(deletion).toHaveBeenCalledOnce();
-    expect(loadImageProcessingWarnings).not.toHaveBeenCalled();
+    expect(loadUploadProcessingPolicy).not.toHaveBeenCalled();
     await handler(fakeJob("chapter.replacement.process"));
     expect(replacement).toHaveBeenCalledOnce();
+    expect(loadUploadProcessingPolicy).toHaveBeenCalledOnce();
     await handler(fakeJob("chapter.process", 1));
     expect(processing).toHaveBeenCalledWith({ chapterId: "chapter-1" }, true, {
       jobId: "job-1",
@@ -105,7 +105,10 @@ describe("Worker composition", () => {
     const handler = createWorkerJobHandler({
       logger: { info },
       deletion: { execute: vi.fn() },
-      loadImageProcessingWarnings: vi.fn().mockResolvedValue({}),
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({
+        warnings: { warnImageBytes: 8, warnWidthPx: 4000, warnHeightPx: 12000 },
+        admission: {},
+      }),
       createExtractor: vi.fn().mockReturnValue({}),
       createChapterProcessing: () => ({ process: vi.fn() }),
       createReplacementProcessing: () => ({ process: replacement }),

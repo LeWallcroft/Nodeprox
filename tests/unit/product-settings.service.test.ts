@@ -26,7 +26,7 @@ describe("ProductSettingsService", () => {
     const { service } = setup(new Map([["helper_cooldown_days", 14]]));
     const result = await service.list(context);
     const fields = result.sections.flatMap((section) => section.fields);
-    expect(fields).toHaveLength(5);
+    expect(fields).toHaveLength(10);
     expect(fields).toContainEqual(
       expect.objectContaining({
         key: "helper_cooldown_days",
@@ -71,5 +71,59 @@ describe("ProductSettingsService", () => {
       actorId: "user-1",
       requestId: "req-settings",
     });
+  });
+
+  it("rejects warning thresholds above an enabled hard limit", async () => {
+    const { service } = setup();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_width_px", value: 3000 },
+        { key: "upload_warning_width_px", value: 4000 },
+      ]),
+    ).rejects.toBeInstanceOf(ProductSettingsValidationError);
+    await expect(
+      service.update(context, [
+        { key: "upload_max_width_px", value: 0 },
+        { key: "upload_warning_width_px", value: 4000 },
+      ]),
+    ).resolves.toBeDefined();
+  });
+
+  it("accepts lower or equal image-size warning thresholds and rejects higher ones", async () => {
+    const { service } = setup();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_image_size_mb", value: 5 },
+        { key: "upload_warning_image_size_mb", value: 3 },
+      ]),
+    ).resolves.toBeDefined();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_image_size_mb", value: 5 },
+        { key: "upload_warning_image_size_mb", value: 5 },
+      ]),
+    ).resolves.toBeDefined();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_image_size_mb", value: 5 },
+        { key: "upload_warning_image_size_mb", value: 6 },
+      ]),
+    ).rejects.toBeInstanceOf(ProductSettingsValidationError);
+  });
+
+  it("validates warning height against the enabled hard height", async () => {
+    const { service } = setup();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_height_px", value: 12000 },
+        { key: "upload_warning_height_px", value: 12000 },
+      ]),
+    ).resolves.toBeDefined();
+    await expect(
+      service.update(context, [
+        { key: "upload_max_height_px", value: 12000 },
+        { key: "upload_warning_height_px", value: 12001 },
+      ]),
+    ).rejects.toBeInstanceOf(ProductSettingsValidationError);
   });
 });

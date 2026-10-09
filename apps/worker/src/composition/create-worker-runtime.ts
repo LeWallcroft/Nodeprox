@@ -1,4 +1,4 @@
-import { Worker, type Job, type WorkerOptions } from "bullmq";
+import { type Job, Worker, type WorkerOptions } from "bullmq";
 import type { WorkerDependencies } from "./create-worker-dependencies.js";
 import { createWorkerJobHandler } from "./worker-job-handler.js";
 
@@ -19,7 +19,7 @@ type RuntimeDependencies = Pick<
   | "mediaEffects"
   | "storageCleanup"
   | "deletion"
-  | "loadImageProcessingWarnings"
+  | "loadUploadProcessingPolicy"
   | "createExtractor"
   | "createChapterProcessing"
   | "createReplacementProcessing"

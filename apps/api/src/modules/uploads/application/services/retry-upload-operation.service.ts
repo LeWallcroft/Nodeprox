@@ -1,4 +1,5 @@
 import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
+import type { MediaWarning } from "@nodeprox/types";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import type { ChapterPermissionService } from "../../../chapters/application/services/chapter-permission.service.js";
 
@@ -40,6 +41,7 @@ export interface RetryUploadOperationRepositoryPort {
       actual: Record<string, unknown> | null;
       expected: Record<string, unknown> | null;
     }[];
+    warnings: readonly MediaWarning[];
   } | null>;
 }
 

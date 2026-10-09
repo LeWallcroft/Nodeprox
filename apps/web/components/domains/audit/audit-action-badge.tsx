@@ -29,6 +29,18 @@ export function auditActionPresentation(
     return { label: "Carga cancelada", tone: "warning", Icon: Upload };
   if (normalized === "chapter.upload.failed")
     return { label: "Carga fallida", tone: "danger", Icon: Upload };
+  if (normalized === "chapter.upload.admission.rejected")
+    return {
+      label: "Carga rechazada en validación",
+      tone: "danger",
+      Icon: Upload,
+    };
+  if (normalized === "chapter.replacement.admission.rejected")
+    return {
+      label: "Reemplazo rechazado en validación",
+      tone: "danger",
+      Icon: Upload,
+    };
 
   if (normalized.includes("delete") || normalized.includes("removed")) {
     return { label: "Eliminar", tone: "danger", Icon: Trash2 };

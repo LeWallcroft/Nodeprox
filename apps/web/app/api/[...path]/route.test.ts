@@ -47,6 +47,89 @@ describe("same-origin API proxy", () => {
     vi.unstubAllGlobals();
   });
 
+  it("forwards a ready import validation report with historical warning thresholds", async () => {
+    const operationId = "3b1ed2c2-1f67-460f-95d3-837d2999c180";
+    const report = {
+      validationRunId: "40712ba8-ec49-4f78-ac13-801601a608e4",
+      status: "accepted",
+      issues: [],
+      warnings: [
+        {
+          code: "large-file",
+          filename: "01.webp",
+          sizeBytes: 2 * 1024 * 1024,
+          thresholdBytes: 1024 * 1024,
+        },
+      ],
+    };
+    const backend = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(report), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", backend);
+    try {
+      const response = await GET(
+        new Request(
+          `http://localhost:3000/api/me/upload-operations/chapter_import/${operationId}/validation-report`,
+          { headers: { cookie: "nodeprox_session=valid" } },
+        ),
+        context([
+          "me",
+          "upload-operations",
+          "chapter_import",
+          operationId,
+          "validation-report",
+        ]),
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual(report);
+      expect(backend).toHaveBeenCalledWith(
+        `http://localhost:3001/me/upload-operations/chapter_import/${operationId}/validation-report`,
+        expect.objectContaining({ method: "GET" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("forwards an exhausted import retry to the API", async () => {
+    const operationId = "3b1ed2c2-1f67-460f-95d3-837d2999c180";
+    const backend = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ status: "uploaded", stage: "processing" }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        },
+      ),
+    );
+    vi.stubGlobal("fetch", backend);
+    try {
+      const response = await POST(
+        new Request(
+          `http://localhost:3000/api/me/upload-operations/chapter_import/${operationId}/retry`,
+          { method: "POST", headers: { cookie: "nodeprox_session=valid" } },
+        ),
+        context([
+          "me",
+          "upload-operations",
+          "chapter_import",
+          operationId,
+          "retry",
+        ]),
+      );
+      expect(response.status).toBe(200);
+      expect(backend).toHaveBeenCalledWith(
+        `http://localhost:3001/me/upload-operations/chapter_import/${operationId}/retry`,
+        expect.objectContaining({ method: "POST" }),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("proxies the paginated audit read model and CSV export route", async () => {
     const backend = vi
       .fn()

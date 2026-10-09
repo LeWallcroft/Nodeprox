@@ -9,6 +9,9 @@ const ALLOWED_METADATA_KEYS = new Set([
   "resourceId",
   "seriesId",
   "chapterId",
+  "validationRunId",
+  "issueCount",
+  "issueCodes",
   "uploadId",
   "attemptId",
   "attemptNumber",
@@ -31,6 +34,8 @@ const ALLOWED_METADATA_KEYS = new Set([
   "invalidateCapabilityCount",
   "configureCapabilityCount",
 ]);
+
+const ARRAY_METADATA_KEYS = new Set(["keys", "issueCodes"]);
 
 const SENSITIVE_KEY_PATTERN =
   /password|token|cookie|authorization|secret|credential|api.?key|nodeprox_session/i;
@@ -60,7 +65,10 @@ export function sanitizeAuditMetadata(
     if (SENSITIVE_KEY_PATTERN.test(key) || !ALLOWED_METADATA_KEYS.has(key))
       throw new InvalidAuditMetadataError(key);
     if (Array.isArray(value)) {
-      if (key !== "keys" || !value.every((item) => typeof item === "string"))
+      if (
+        !ARRAY_METADATA_KEYS.has(key) ||
+        !value.every((item) => typeof item === "string")
+      )
         throw new InvalidAuditMetadataError(key);
       sanitized[key] = value;
       continue;

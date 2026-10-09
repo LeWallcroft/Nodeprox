@@ -11,22 +11,26 @@ import { StorageClientRegistry } from "@nodeprox/storage/profile-execution";
 import { and, eq, inArray } from "drizzle-orm";
 import pino from "pino";
 import { createDatabase } from "../../../../database/client.js";
-import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
-import { AdmissionValidationService } from "../admission-validation/application/admission-validation.service.js";
-import { DrizzleAdmissionValidationRepository } from "../admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
-import { ChapterZipInspector } from "../admission-validation/infrastructure/zip/chapter-zip.inspector.js";
 import {
   storageProfiles,
   systemConfig,
 } from "../../../../database/schema/index.js";
+import { DrizzleStorageProfileRuntimeRepository } from "../../../../database/storage-profile-runtime.js";
+import { AdmissionValidationService } from "../admission-validation/application/admission-validation.service.js";
+import {
+  buildUploadProcessingPolicy,
+  type UploadProcessingPolicy,
+} from "../admission-validation/domain/upload-processing-policy.js";
+import { DrizzleAdmissionValidationRepository } from "../admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
+import { ChapterZipInspector } from "../admission-validation/infrastructure/zip/chapter-zip.inspector.js";
 import { ChapterDeletionService } from "../deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "../deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import { MediaEffectProcessor } from "../media-effects/application/media-effect.processor.js";
 import { CloudflareCdnInvalidationAdapter } from "../media-effects/infrastructure/cloudflare-cdn-invalidation.adapter.js";
 import { DrizzleMediaEffectRepository } from "../media-effects/infrastructure/persistence/drizzle/media-effect.repository.js";
-import { DrizzleChapterReplacementProcessingWorkerRepository } from "../processing/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { ChapterProcessingService } from "../processing/application/chapter-processing.service.js";
 import { ChapterReplacementProcessingService } from "../processing/chapter-replacements/application/chapter-replacement-processing.service.js";
+import { DrizzleChapterReplacementProcessingWorkerRepository } from "../processing/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { DrizzleProcessingRepository } from "../processing/infrastructure/persistence/drizzle/processing.repository.js";
 import { UnzipperExtractor } from "../processing/infrastructure/zip/unzipper.extractor.js";
 import { StorageCleanupProcessor } from "../storage-cleanup/application/storage-cleanup.processor.js";
@@ -140,33 +144,15 @@ export function createWorkerDependencies() {
         ...warnings,
       });
     },
-    createAdmissionValidation(warnings: {
-      warnImageBytes: number;
-      warnWidthPx: number;
-      warnHeightPx: number;
-    }) {
+    createAdmissionValidation(policy: UploadProcessingPolicy) {
       return new AdmissionValidationService(
         admissionRepository,
         storageExecution,
         new ChapterZipInspector({
           maxEntries: processing.PROCESSING_MAX_ENTRIES,
           maxTotalBytes: processing.PROCESSING_MAX_TOTAL_SIZE_BYTES,
-          maxImageBytes: processing.PROCESSING_MAX_IMAGE_SIZE_BYTES,
-          ...warnings,
-          ...(processing.ADMISSION_MAX_WIDTH_PX !== undefined
-            ? { maxWidthPx: processing.ADMISSION_MAX_WIDTH_PX }
-            : {}),
-          ...(processing.ADMISSION_MAX_HEIGHT_PX !== undefined
-            ? { maxHeightPx: processing.ADMISSION_MAX_HEIGHT_PX }
-            : {}),
-          ...(processing.ADMISSION_MAX_PIXELS !== undefined
-            ? { maxPixels: processing.ADMISSION_MAX_PIXELS }
-            : {}),
-          ...(processing.ADMISSION_MAX_COMPRESSION_RATIO !== undefined
-            ? {
-                maxCompressionRatio: processing.ADMISSION_MAX_COMPRESSION_RATIO,
-              }
-            : {}),
+          ...policy.admission,
+          ...policy.warnings,
         }),
       );
     },
@@ -188,7 +174,7 @@ export function createWorkerDependencies() {
         logger,
       );
     },
-    async loadImageProcessingWarnings() {
+    async loadUploadProcessingPolicy() {
       const rows = await database.db
         .select({ key: systemConfig.key, value: systemConfig.value })
         .from(systemConfig)
@@ -197,6 +183,11 @@ export function createWorkerDependencies() {
             "upload_warning_image_size_mb",
             "upload_warning_width_px",
             "upload_warning_height_px",
+            "upload_max_image_size_mb",
+            "upload_max_width_px",
+            "upload_max_height_px",
+            "upload_max_pixels",
+            "upload_max_compression_ratio",
           ]),
         );
       const values = new Map(
@@ -204,12 +195,21 @@ export function createWorkerDependencies() {
           typeof row.value === "number" ? [[row.key, row.value] as const] : [],
         ),
       );
-      return {
-        warnImageBytes:
-          (values.get("upload_warning_image_size_mb") ?? 8) * 1024 * 1024,
-        warnWidthPx: values.get("upload_warning_width_px") ?? 4000,
-        warnHeightPx: values.get("upload_warning_height_px") ?? 12000,
-      };
+      return buildUploadProcessingPolicy(values, {
+        maxImageBytes: processing.PROCESSING_MAX_IMAGE_SIZE_BYTES,
+        ...(processing.ADMISSION_MAX_WIDTH_PX !== undefined
+          ? { maxWidthPx: processing.ADMISSION_MAX_WIDTH_PX }
+          : {}),
+        ...(processing.ADMISSION_MAX_HEIGHT_PX !== undefined
+          ? { maxHeightPx: processing.ADMISSION_MAX_HEIGHT_PX }
+          : {}),
+        ...(processing.ADMISSION_MAX_PIXELS !== undefined
+          ? { maxPixels: processing.ADMISSION_MAX_PIXELS }
+          : {}),
+        ...(processing.ADMISSION_MAX_COMPRESSION_RATIO !== undefined
+          ? { maxCompressionRatio: processing.ADMISSION_MAX_COMPRESSION_RATIO }
+          : {}),
+      });
     },
   };
 }

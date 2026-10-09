@@ -4,13 +4,14 @@ import {
   chapterImportItems,
   chapterProcessingAttempts,
   chapterReplacementOperations,
-  chapters,
   chapterReplacementProcessingOutbox,
+  chapters,
   processingOutbox,
+  uploads,
+  uploadValidationEntries,
   uploadValidationIssues,
   uploadValidationOutbox,
   uploadValidationRuns,
-  uploads,
 } from "../../../../../../../../database/schema/index.js";
 import type {
   RetryableUploadKind,
@@ -275,11 +276,18 @@ export class DrizzleRetryUploadOperationRepository
       })
       .from(uploadValidationIssues)
       .where(eq(uploadValidationIssues.runId, run.id));
+    const entries = await this.db
+      .select({ warnings: uploadValidationEntries.warnings })
+      .from(uploadValidationEntries)
+      .where(eq(uploadValidationEntries.runId, run.id));
     return {
       validationRunId: run.id,
       requestId: run.requestId,
       status: run.status,
       issues,
+      warnings: entries.flatMap((entry) =>
+        Array.isArray(entry.warnings) ? entry.warnings : [],
+      ),
     };
   }
 }

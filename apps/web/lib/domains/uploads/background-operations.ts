@@ -1,3 +1,4 @@
+import type { MediaWarning } from "@nodeprox/types";
 import { apiRequestBrowser } from "../../api/browser";
 
 export type BackgroundUploadOperation = {
@@ -28,6 +29,7 @@ export type BackgroundUploadOperation = {
     | "completed"
     | "failed";
   errorCode: string | null;
+  warningCount: number;
   failureStage: "admission" | "storage" | "processing" | "database" | null;
   createdAt: string;
   updatedAt: string;
@@ -53,6 +55,7 @@ export type UploadValidationReport = {
     actual: Record<string, unknown> | null;
     expected: Record<string, unknown> | null;
   }[];
+  warnings: readonly MediaWarning[];
 };
 
 export function getUploadValidationReport(

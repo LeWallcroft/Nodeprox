@@ -30,6 +30,7 @@ export type UploadOperationProjection = {
   filename: string;
   status: UploadOperationStatus;
   errorCode: string | null;
+  warningCount: number;
   failureStage: "admission" | "storage" | "processing" | "database" | null;
   createdAt: Date;
   updatedAt: Date;

@@ -6,7 +6,9 @@ import {
   isActiveItem,
   isReadyBatch,
   isRetryableImportFailure,
+  mediaWarningPresentation,
   requiresChapterReplacement,
+  validationIssueMeasurement,
 } from "./upload-center";
 
 describe("Upload Center presentation", () => {
@@ -62,6 +64,46 @@ describe("Upload Center presentation", () => {
     expect(isRetryableImportFailure("upload-initiation-failed")).toBe(true);
   });
 
+  it("formats warning measurements and retains historical warnings without thresholds", () => {
+    expect(
+      mediaWarningPresentation({
+        code: "large-file",
+        filename: "02.webp",
+        sizeBytes: 6_815_744,
+        thresholdBytes: 5 * 1024 * 1024,
+      }),
+    ).toEqual({
+      title: "Archivo grande",
+      actual: "6.5 MB",
+      threshold: "5 MB",
+    });
+    expect(
+      mediaWarningPresentation({
+        code: "tall-image",
+        filename: "03.webp",
+        height: 13_420,
+      }),
+    ).toEqual({ title: "Imagen muy alta", actual: "13 420 px" });
+  });
+
+  it("formats known validation issue measurements without raw object values", () => {
+    expect(
+      validationIssueMeasurement({
+        code: "IMAGE_HEIGHT_EXCEEDED",
+        actual: { heightPx: 15_842 },
+        expected: { maxHeightPx: 12_000 },
+      }),
+    ).toEqual({ actual: "15 842 px", expected: "12 000 px" });
+    expect(
+      validationIssueMeasurement({
+        code: "IMAGE_SIZE_EXCEEDED",
+        actual: { sizeBytes: 6 * 1024 * 1024 },
+        expected: { maxImageBytes: 5 * 1024 * 1024 },
+      }),
+    ).toEqual({ actual: "6 MB", expected: "5 MB" });
+    expect(validationIssueMeasurement({ code: "ZIP_INVALID" })).toEqual({});
+  });
+
   it("uses local dismissal and queue-only refresh without deletion", () => {
     const center = readFileSync(
       "apps/web/components/layout/upload-center.tsx",
@@ -87,6 +129,18 @@ describe("Upload Center presentation", () => {
     );
     expect(center).toContain("visibleRecords.filter");
     expect(center).toContain("previousPathname.current !== pathname");
+    expect(center).toContain(
+      "Completada con \u0024{warningCount} advertencias",
+    );
+    expect(center).toContain("Carga rechazada");
+    expect(center).toContain("Carga completada con advertencias");
+    expect(center).toContain("no bloquearon el procesamiento");
+    expect(center).toContain("No se pudo cargar el detalle.");
+    expect(center).toContain("Reintentar detalle");
+    expect(center).toContain("validationIssueLabel(issue.code)");
+    expect(center).toContain("(rejected || warned)");
+    expect(center).toContain("validationIssueMeasurement(issue)");
+    expect(center).toContain("mediaWarningPresentation(warning)");
     expect(center).toContain(
       'addEventListener("pointerdown", closeWhenLeaving)',
     );

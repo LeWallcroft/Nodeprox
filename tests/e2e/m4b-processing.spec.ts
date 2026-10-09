@@ -14,11 +14,13 @@ import { AdminBootstrapService } from "../../apps/api/src/modules/authorization/
 import { DrizzleAdminBootstrapStore } from "../../apps/api/src/modules/authorization/infrastructure/bootstrap/drizzle-admin-bootstrap.store.js";
 import { createDatabase } from "../../database/client.js";
 import {
+  auditLogs,
   chapterProcessingAttempts,
   chapters,
   images,
   processingOutbox,
   series,
+  systemConfig,
   uploads,
   uploadValidationIssues,
   uploadValidationRuns,
@@ -787,6 +789,222 @@ test.describe("M4-B real upload processing", () => {
       await database.sql.end();
       await api.dispose();
       await anonymous?.dispose();
+    }
+  });
+
+  test("reloads hard limits per Admission job and projects non-blocking warnings", async () => {
+    test.setTimeout(120_000);
+    let api = await request.newContext({ baseURL: e2eApiOrigin });
+    const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
+    const settingKeys = [
+      "upload_warning_image_size_mb",
+      "upload_max_image_size_mb",
+      "upload_warning_height_px",
+      "upload_max_height_px",
+    ] as const;
+    const previousSettings = await database.db
+      .select()
+      .from(systemConfig)
+      .where(inArray(systemConfig.key, [...settingKeys]));
+    const previousByKey = new Map(
+      previousSettings.map((setting) => [setting.key, setting]),
+    );
+    const title = `M4-B E2E admission policy ${Date.now()}`;
+    let slug = "";
+    let seriesId = "";
+    const chapterIds: string[] = [];
+    try {
+      api = await login(api, await createTestAdmin(database));
+      const saveSettings = async (
+        warningMb: number,
+        hardMb: number,
+        warningHeight?: number,
+        hardHeight?: number,
+      ) => {
+        const changes: Array<{ key: string; value: number }> = [
+          { key: "upload_warning_image_size_mb", value: warningMb },
+          { key: "upload_max_image_size_mb", value: hardMb },
+        ];
+        if (warningHeight !== undefined && hardHeight !== undefined) {
+          changes.push(
+            { key: "upload_warning_height_px", value: warningHeight },
+            { key: "upload_max_height_px", value: hardHeight },
+          );
+        }
+        const response = await api.patch("/admin/settings", {
+          data: { changes },
+          headers: { origin: e2eApiOrigin },
+        });
+        expect(response.status()).toBe(200);
+      };
+      await saveSettings(1, 64);
+      const createdSeries = await api.post("/series", {
+        data: { title },
+        headers: { origin: e2eApiOrigin },
+      });
+      expect(createdSeries.status()).toBe(201);
+      const createdSeriesBody = await createdSeries.json();
+      seriesId = createdSeriesBody.id;
+      slug = createdSeriesBody.slug;
+
+      const createChapter = async (number: number) => {
+        const response = await api.post(`/series/${seriesId}/chapters`, {
+          data: { chapterNumber: number },
+          headers: { origin: e2eApiOrigin },
+        });
+        expect(response.status()).toBe(201);
+        const chapterId = (await response.json()).id as string;
+        chapterIds.push(chapterId);
+        return chapterId;
+      };
+      const oversizedJpeg = Buffer.concat([jpeg, Buffer.alloc(1_050_000)]);
+      const warningChapterId = await createChapter(1);
+      const warningZip = zipStored([{ name: "01.jpg", data: oversizedJpeg }]);
+      const warningComplete = await directUpload(
+        api,
+        warningChapterId,
+        "warning.zip",
+        warningZip,
+      );
+      expect(warningComplete.status()).toBe(200);
+      const warningUploadId = (await warningComplete.json()).uploadId as string;
+      await pollUploadStatus(database.db, warningUploadId, "uploaded");
+      await pollStatus(database.db, warningChapterId, "ready");
+      const report = await api.get(
+        `/me/upload-operations/chapter_upload/${warningUploadId}/validation-report`,
+      );
+      expect(report.status()).toBe(200);
+      expect((await report.json()).warnings).toContainEqual({
+        code: "large-file",
+        filename: "01.jpg",
+        sizeBytes: oversizedJpeg.length,
+        thresholdBytes: 1024 * 1024,
+      });
+      const projected = await api.get("/me/upload-operations");
+      expect((await projected.json()).items).toContainEqual(
+        expect.objectContaining({ id: warningUploadId, warningCount: 1 }),
+      );
+
+      // This update occurs while the same Worker process is running.
+      await saveSettings(1, 1);
+      const rejectedChapterId = await createChapter(2);
+      const rejectedZip = zipStored([{ name: "01.jpg", data: oversizedJpeg }]);
+      const rejectedComplete = await directUpload(
+        api,
+        rejectedChapterId,
+        "hard-limit.zip",
+        rejectedZip,
+      );
+      expect(rejectedComplete.status()).toBe(200);
+      const rejectedUploadId = (await rejectedComplete.json())
+        .uploadId as string;
+      await pollUploadStatus(database.db, rejectedUploadId, "rejected");
+      const [rejectedChapter] = await database.db
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, rejectedChapterId));
+      expect(rejectedChapter?.status).toBe("draft");
+      const [run] = await database.db
+        .select({
+          id: uploadValidationRuns.id,
+          status: uploadValidationRuns.status,
+          requestId: uploadValidationRuns.requestId,
+        })
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.uploadId, rejectedUploadId))
+        .orderBy(desc(uploadValidationRuns.attemptNumber))
+        .limit(1);
+      expect(run?.status).toBe("rejected");
+      const issues = run
+        ? await database.db
+            .select({ code: uploadValidationIssues.code })
+            .from(uploadValidationIssues)
+            .where(eq(uploadValidationIssues.runId, run.id))
+        : [];
+      expect(issues).toContainEqual({ code: "IMAGE_SIZE_EXCEEDED" });
+      expect(
+        await database.db
+          .select()
+          .from(processingOutbox)
+          .where(eq(processingOutbox.uploadId, rejectedUploadId)),
+      ).toHaveLength(0);
+      const audit = await database.db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.resourceId, rejectedChapterId));
+      expect(audit).toContainEqual(
+        expect.objectContaining({
+          action: "chapter.upload.admission.rejected",
+          result: "rejected",
+          reasonCode: "IMAGE_SIZE_EXCEEDED",
+          requestId: run?.requestId,
+        }),
+      );
+
+      await saveSettings(1, 64, 12000, 12000);
+      const heightChapterId = await createChapter(3);
+      const tallPng = Buffer.from(png);
+      tallPng.writeUInt32BE(12001, 20);
+      const heightZip = zipStored([{ name: "01.png", data: tallPng }]);
+      const heightComplete = await directUpload(
+        api,
+        heightChapterId,
+        "height-limit.zip",
+        heightZip,
+      );
+      expect(heightComplete.status()).toBe(200);
+      const heightUploadId = (await heightComplete.json()).uploadId as string;
+      await pollUploadStatus(database.db, heightUploadId, "rejected");
+      const heightReport = await api.get(
+        `/me/upload-operations/chapter_upload/${heightUploadId}/validation-report`,
+      );
+      expect(heightReport.status()).toBe(200);
+      expect((await heightReport.json()).issues).toContainEqual(
+        expect.objectContaining({
+          code: "IMAGE_HEIGHT_EXCEEDED",
+          actual: { heightPx: 12001 },
+          expected: { maxHeightPx: 12000 },
+        }),
+      );
+    } finally {
+      for (const chapterId of chapterIds) {
+        await database.db.delete(images).where(eq(images.chapterId, chapterId));
+        await database.db
+          .delete(uploads)
+          .where(eq(uploads.chapterId, chapterId));
+        await database.db.delete(chapters).where(eq(chapters.id, chapterId));
+      }
+      if (seriesId)
+        await database.db.delete(series).where(eq(series.id, seriesId));
+      for (const key of settingKeys) {
+        const previous = previousByKey.get(key);
+        if (previous) {
+          await database.db
+            .update(systemConfig)
+            .set({
+              value: previous.value,
+              updatedBy: previous.updatedBy,
+              updatedAt: previous.updatedAt,
+            })
+            .where(eq(systemConfig.key, key));
+        } else {
+          await database.db
+            .delete(systemConfig)
+            .where(eq(systemConfig.key, key));
+        }
+      }
+      if (slug)
+        rmSync(`${process.cwd()}/.nodeprox-storage/Media/${slug}/1`, {
+          recursive: true,
+          force: true,
+        });
+      if (slug)
+        rmSync(`${process.cwd()}/.nodeprox-storage/Media/${slug}/2`, {
+          recursive: true,
+          force: true,
+        });
+      await database.sql.end();
+      await api.dispose();
     }
   });
 });

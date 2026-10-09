@@ -4,17 +4,17 @@ export {
   InvalidAuditMetadataError,
   sanitizeAuditMetadata,
 } from "./audit-metadata.js";
-export {
-  CHAPTER_STATES,
-  CHAPTER_TRANSITIONS,
-  evaluateChapterTransition,
-} from "./chapter-state.js";
 export type {
   ChapterState,
   ChapterTransition,
   ChapterTransitionDecision,
   TransitionChapterStateInput,
   TransitionChapterStateResult,
+} from "./chapter-state.js";
+export {
+  CHAPTER_STATES,
+  CHAPTER_TRANSITIONS,
+  evaluateChapterTransition,
 } from "./chapter-state.js";
 
 export interface RequestContext {
@@ -90,9 +90,24 @@ export interface ChapterDeletionQueuePort {
 }
 
 export type MediaWarning =
-  | { code: "large-file"; filename: string; sizeBytes: number }
-  | { code: "wide-image"; filename: string; width: number }
-  | { code: "tall-image"; filename: string; height: number };
+  | {
+      code: "large-file";
+      filename: string;
+      sizeBytes: number;
+      thresholdBytes?: number;
+    }
+  | {
+      code: "wide-image";
+      filename: string;
+      width: number;
+      thresholdWidth?: number;
+    }
+  | {
+      code: "tall-image";
+      filename: string;
+      height: number;
+      thresholdHeight?: number;
+    };
 
 export type ProblemCategory =
   | "validation"

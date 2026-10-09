@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
+import { DrizzleAdmissionValidationRepository } from "../../apps/worker/src/admission-validation/infrastructure/persistence/drizzle/admission-validation.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
@@ -14,8 +15,10 @@ import {
   imageVersions,
   mediaEffectOutbox,
   series,
-  users,
+  uploadValidationIssues,
   uploadValidationOutbox,
+  uploadValidationRuns,
+  users,
 } from "../../database/schema/index.js";
 import {
   UploadTransferObjectNotFoundError,
@@ -299,6 +302,76 @@ describe("CHR4 Chapter replacement HTTP workflow", () => {
     expect(intents[0]?.originRequestId).toBe(
       first.completed.headers["x-request-id"],
     );
+  });
+
+  it("audits Admission rejection atomically while preserving published replacement media", async () => {
+    const target = await fixture();
+    const cookie = await login(ownerEmail);
+    const prepared = await uploadAndComplete(cookie, target.chapterId);
+    const admission = new DrizzleAdmissionValidationRepository(database.db);
+    const requestId = "replacement-admission-rejected";
+    const claim = await admission.begin({
+      replacementId: prepared.replacementId,
+      jobId: randomUUID(),
+      jobAttempt: 1,
+      requestId,
+    });
+    if (!claim) throw new Error("replacement-admission-claim-missing");
+    await admission.settle(claim.runId, {
+      outcome: "rejected",
+      issues: [
+        { code: "ZIP_INVALID_LAYOUT", severity: "error" },
+        { code: "ZIP_INVALID_LAYOUT", severity: "error" },
+        { code: "IMAGE_MAGIC_MISMATCH", severity: "error" },
+      ],
+    });
+    const [operation] = await database.db
+      .select({ status: chapterReplacementOperations.status })
+      .from(chapterReplacementOperations)
+      .where(eq(chapterReplacementOperations.id, prepared.replacementId));
+    expect(operation?.status).toBe("rejected");
+    expect(
+      await database.db
+        .select()
+        .from(images)
+        .where(eq(images.chapterId, target.chapterId)),
+    ).toHaveLength(1);
+    expect(
+      await database.db
+        .select()
+        .from(uploadValidationIssues)
+        .where(eq(uploadValidationIssues.runId, claim.runId)),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: "ZIP_INVALID_LAYOUT" }),
+        expect.objectContaining({ code: "IMAGE_MAGIC_MISMATCH" }),
+      ]),
+    );
+    expect(
+      await database.db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.requestId, requestId)),
+    ).toEqual([
+      expect.objectContaining({
+        action: "chapter.replacement.admission.rejected",
+        resourceId: target.chapterId,
+        result: "rejected",
+        reasonCode: "ZIP_INVALID_LAYOUT",
+        requestId,
+        metadata: expect.objectContaining({
+          validationRunId: claim.runId,
+          issueCount: 3,
+          issueCodes: ["ZIP_INVALID_LAYOUT", "IMAGE_MAGIC_MISMATCH"],
+        }),
+      }),
+    ]);
+    expect(
+      await database.db
+        .select()
+        .from(uploadValidationRuns)
+        .where(eq(uploadValidationRuns.id, claim.runId)),
+    ).toEqual([expect.objectContaining({ status: "rejected", requestId })]);
   });
 
   it("CHR4-HTTP-07/08 status returns safe lifecycle without storage internals", async () => {

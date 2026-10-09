@@ -1,4 +1,4 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   chapterImportBatches,
@@ -9,6 +9,7 @@ import {
   imageReplacementOperations,
   series,
   uploads,
+  uploadValidationEntries,
   uploadValidationRuns,
 } from "../../../../../../../../database/schema/index.js";
 import type {
@@ -32,6 +33,7 @@ export class DrizzleUploadOperationReadRepository
             chapterId: chapterImportItems.chapterId,
             chapterNumber: chapterImportItems.chapterNumber,
             filename: chapterImportItems.filename,
+            uploadId: chapterImportItems.uploadId,
             status: chapterImportItems.status,
             uploadStatus: uploads.status,
             errorCode: chapterImportItems.errorCode,
@@ -124,10 +126,57 @@ export class DrizzleUploadOperationReadRepository
           .limit(input.limit),
       ]);
 
+    const uploadIds = [
+      ...new Set([
+        ...imports.flatMap((row) => (row.uploadId ? [row.uploadId] : [])),
+        ...directUploads.map((row) => row.id),
+      ]),
+    ];
+    const replacementIds = chapterReplacements.map((row) => row.id);
+    const ownerFilters = [
+      ...(uploadIds.length
+        ? [inArray(uploadValidationRuns.uploadId, uploadIds)]
+        : []),
+      ...(replacementIds.length
+        ? [inArray(uploadValidationRuns.replacementId, replacementIds)]
+        : []),
+    ];
+    const warningEntries = ownerFilters.length
+      ? await this.db
+          .select({
+            ownerId: sql<string>`coalesce(${uploadValidationRuns.uploadId}, ${uploadValidationRuns.replacementId})`,
+            runId: uploadValidationRuns.id,
+            warnings: uploadValidationEntries.warnings,
+            startedAt: uploadValidationRuns.startedAt,
+          })
+          .from(uploadValidationRuns)
+          .innerJoin(
+            uploadValidationEntries,
+            eq(uploadValidationEntries.runId, uploadValidationRuns.id),
+          )
+          .where(
+            sql`${uploadValidationRuns.status} = 'accepted' and ${or(...ownerFilters)}`,
+          )
+          .orderBy(desc(uploadValidationRuns.startedAt))
+      : [];
+    const warningCounts = new Map<string, number>();
+    const latestRuns = new Map<string, string>();
+    for (const row of warningEntries) {
+      if (!latestRuns.has(row.ownerId)) latestRuns.set(row.ownerId, row.runId);
+    }
+    for (const row of warningEntries) {
+      if (latestRuns.get(row.ownerId) !== row.runId) continue;
+      const warnings = Array.isArray(row.warnings) ? row.warnings : [];
+      warningCounts.set(
+        row.ownerId,
+        (warningCounts.get(row.ownerId) ?? 0) + warnings.length,
+      );
+    }
     const projections: UploadOperationProjection[] = [
       ...imports.map((row) => ({
         ...row,
         kind: "chapter_import" as const,
+        warningCount: row.uploadId ? (warningCounts.get(row.uploadId) ?? 0) : 0,
         failureStage:
           row.status === "rejected" ||
           row.uploadStatus === "retry_exhausted" ||
@@ -142,6 +191,7 @@ export class DrizzleUploadOperationReadRepository
       ...chapterReplacements.map((row) => ({
         ...row,
         kind: "chapter_replacement" as const,
+        warningCount: warningCounts.get(row.id) ?? 0,
         failureStage:
           row.status === "rejected" ||
           ((row.status === "retry_exhausted" ||
@@ -156,6 +206,7 @@ export class DrizzleUploadOperationReadRepository
       ...imageReplacements.map((row) => ({
         ...row,
         kind: "image_replacement" as const,
+        warningCount: 0,
         failureStage: row.status === "failed" ? ("storage" as const) : null,
       })),
       ...directUploads.map((row) => {
@@ -177,6 +228,7 @@ export class DrizzleUploadOperationReadRepository
         return {
           id: row.id,
           kind: "chapter_upload" as const,
+          warningCount: warningCounts.get(row.id) ?? 0,
           seriesId: row.seriesId,
           seriesTitle: row.seriesTitle,
           chapterId: row.chapterId,
