@@ -10,12 +10,16 @@ import {
 import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import { useCreateChapter } from "../../../lib/domains/chapters/hooks";
 import { useSeriesList } from "../../../lib/domains/series/hooks";
-import { useUploadChapter } from "../../../lib/domains/uploads/hooks";
+import {
+  useUploadChapter,
+  useUploadPolicy,
+} from "../../../lib/domains/uploads/hooks";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { SearchableCombobox } from "../../ui/searchable-combobox";
 import { errorMessage } from "../feedback";
+import { UploadRequirements } from "../uploads/upload-requirements";
 import { ZipDropzone } from "../uploads/zip-dropzone";
 
 export function GlobalChapterCreateDialog({
@@ -23,16 +27,17 @@ export function GlobalChapterCreateDialog({
   onOpenChange,
   onCreated,
   fixedSeries,
+  latestChapterBySeries,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreated: (chapterId: string) => void;
   fixedSeries?: { id: string; title: string; slug?: string | null };
+  latestChapterBySeries?: Readonly<Record<string, number | undefined>>;
 }) {
   const series = useSeriesList();
   const [seriesId, setSeriesId] = useState("");
   const [number, setNumber] = useState("");
-  const [title, setTitle] = useState("");
   const [zip, setZip] = useState<File | null>(null);
   const [created, setCreated] = useState<{
     id: string;
@@ -42,6 +47,15 @@ export function GlobalChapterCreateDialog({
   const uploadStarted = useRef(false);
   const activeSeriesId = fixedSeries?.id ?? seriesId;
   const create = useCreateChapter(activeSeriesId);
+  const uploadPolicy = useUploadPolicy(open);
+  const latestChapter = activeSeriesId
+    ? latestChapterBySeries?.[activeSeriesId]
+    : undefined;
+  const hasLatestChapterProjection = Boolean(
+    activeSeriesId &&
+      latestChapterBySeries &&
+      Object.hasOwn(latestChapterBySeries, activeSeriesId),
+  );
   const selectedSeries =
     fixedSeries ?? (series.data ?? []).find((item) => item.id === seriesId);
   const upload = useUploadChapter(created?.seriesId ?? "", created?.id ?? "");
@@ -50,7 +64,6 @@ export function GlobalChapterCreateDialog({
   const close = useCallback(() => {
     setSeriesId("");
     setNumber("");
-    setTitle("");
     setZip(null);
     setCreated(null);
     setError(null);
@@ -81,7 +94,7 @@ export function GlobalChapterCreateDialog({
     try {
       const chapter = await create.mutateAsync({
         chapterNumber,
-        title: title.trim() || null,
+        title: null,
       });
       onCreated(chapter.id);
       if (!zip) {
@@ -99,7 +112,7 @@ export function GlobalChapterCreateDialog({
       open={open}
       onOpenChange={(next) => next || close()}
       title="Nuevo capítulo"
-      description="Crea un capítulo individual y, si corresponde, adjunta un único ZIP al final del formulario."
+      description="Crea un capítulo indicando su número y, si corresponde, adjunta un ZIP con sus imágenes."
       busy={busy}
     >
       <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
@@ -157,21 +170,21 @@ export function GlobalChapterCreateDialog({
             Se valida que el número no exista dentro de la Serie seleccionada.
           </span>
         </label>
-        <label
-          className="grid gap-1.5 text-[13px] font-medium text-muted"
-          htmlFor="global-chapter-title"
-        >
-          Título (opcional)
-          <input
-            id="global-chapter-title"
-            maxLength={200}
-            disabled={!selectedSeries || busy}
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Ej. Capítulo 26"
-          />
-        </label>
-        <div className="grid gap-2 border-t border-border pt-4">
+        {hasLatestChapterProjection ? (
+          <p className="m-0 text-xs text-secondary" role="status">
+            {latestChapter === undefined
+              ? "Esta serie todavía no tiene capítulos."
+              : `Último capítulo visible: ${latestChapter}`}
+          </p>
+        ) : null}
+        <UploadRequirements
+          policy={uploadPolicy.data ?? null}
+          loading={uploadPolicy.isPending}
+          error={uploadPolicy.isError}
+          onRetry={() => void uploadPolicy.refetch()}
+          compact
+        />
+        <div className="grid gap-2 pt-2">
           <div>
             <p className="m-0 text-[13px] font-medium text-muted">
               Subir ZIP (opcional)

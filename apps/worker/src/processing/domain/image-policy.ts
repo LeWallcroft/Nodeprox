@@ -1,5 +1,9 @@
 import { buildChapterMediaStorageKey } from "@nodeprox/storage";
-import type { MediaWarning } from "@nodeprox/types";
+import {
+  CHAPTER_IMAGE_EXTENSIONS,
+  CHAPTER_IMAGE_FILENAME_PATTERN,
+  type MediaWarning,
+} from "@nodeprox/types";
 
 export type ImageContentType =
   | "image/jpeg"
@@ -16,18 +20,27 @@ export type ValidatedImage = {
   warnings: readonly MediaWarning[];
   tempPath: string;
 };
-const allowed = new Map<string, ImageContentType>([
-  ["jpg", "image/jpeg"],
-  ["jpeg", "image/jpeg"],
-  ["png", "image/png"],
-  ["webp", "image/webp"],
-  ["gif", "image/gif"],
-]);
+const contentTypes: Record<
+  (typeof CHAPTER_IMAGE_EXTENSIONS)[number],
+  ImageContentType
+> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  gif: "image/gif",
+};
+const allowed = new Map<string, ImageContentType>(
+  CHAPTER_IMAGE_EXTENSIONS.map((extension) => [
+    extension,
+    contentTypes[extension],
+  ]),
+);
 export function validateImageName(filename: string): {
   extension: string;
   sortOrder: number;
 } {
-  const match = /^(\d{2})\.(jpg|jpeg|png|webp|gif)$/.exec(filename);
+  const match = CHAPTER_IMAGE_FILENAME_PATTERN.exec(filename);
   if (!match) throw new Error("invalid-image-filename");
   const sortOrder = Number(match[1]);
   if (!Number.isSafeInteger(sortOrder) || sortOrder < 0)

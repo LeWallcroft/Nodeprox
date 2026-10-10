@@ -10,6 +10,35 @@ export interface ChapterListItem {
   imageCount: number;
 }
 
+export function latestChapterNumber(
+  chapters: readonly { chapterNumber: number }[],
+): number | null {
+  if (chapters.length === 0) return null;
+  return chapters.reduce(
+    (latest, chapter) => Math.max(latest, chapter.chapterNumber),
+    Number.NEGATIVE_INFINITY,
+  );
+}
+
+export function latestChapterNumbersBySeries(
+  chapters: readonly {
+    chapterNumber: number;
+    seriesId?: string;
+    series?: { id: string };
+  }[],
+): Readonly<Record<string, number>> {
+  const latest: Record<string, number> = {};
+  for (const chapter of chapters) {
+    const seriesId = chapter.seriesId ?? chapter.series?.id;
+    if (!seriesId) continue;
+    latest[seriesId] = Math.max(
+      latest[seriesId] ?? Number.NEGATIVE_INFINITY,
+      chapter.chapterNumber,
+    );
+  }
+  return latest;
+}
+
 export function toChapterListItem(
   chapter: Chapter & { imageCount?: number },
 ): ChapterListItem {

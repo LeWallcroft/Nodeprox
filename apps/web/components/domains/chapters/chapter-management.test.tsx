@@ -131,6 +131,11 @@ describe("Chapter management presentation", () => {
     expect(createDialog).toContain('inputMode="decimal"');
     expect(createDialog).toContain('type="text"');
     expect(createDialog).not.toContain("normalizeChapterNumber");
+    expect(createDialog).not.toContain("Título (opcional)");
+    expect(createDialog).not.toContain('id="global-chapter-title"');
+    expect(createDialog).toContain("title: null");
+    expect(createDialog).toContain("latestChapterBySeries");
+    expect(createDialog).not.toContain("+ 1");
   });
 
   it("uses replacement instead of a second ZIP upload when a Chapter already has images", () => {
@@ -153,6 +158,22 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("bg-destructive-surface");
   });
 
+  it("uses the Series list image count when no global Chapter projection exists", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "draft" }}
+        imageCount={7}
+        capabilities={["images.upload", "chapters.replace"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+    expect(markup).toContain(">7</span>");
+    expect(markup).toContain("Cambiar capítulo");
+    expect(markup).not.toContain("Subir ZIP");
+  });
+
   it("keeps direct ZIP upload available before a Chapter has images", () => {
     const markup = renderWithQueryClient(
       <ChapterDetailPanel
@@ -165,6 +186,33 @@ describe("Chapter management presentation", () => {
     );
     expect(markup).toContain("Subir ZIP");
     expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("keeps ZIP upload for a draft Chapter with no images", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "draft" }}
+        imageCount={0}
+        capabilities={["images.upload", "chapters.replace"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+    expect(markup).toContain(">0</span>");
+    expect(markup).toContain("Subir ZIP");
+    expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("gets uploader policy without the admin settings dependency", () => {
+    const provider = readFileSync(
+      "apps/web/components/providers/upload-queue-provider.tsx",
+      "utf8",
+    );
+    expect(provider).toContain("useUploadPolicy(Boolean(userId))");
+    expect(provider).not.toContain("useProductSettings");
+    expect(provider).not.toContain("bulk_upload_concurrency");
+    expect(provider).not.toContain("/admin/settings");
   });
 
   it("hides contextual actions when the capability projection omits them", () => {

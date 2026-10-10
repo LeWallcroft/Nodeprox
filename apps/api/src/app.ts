@@ -32,6 +32,7 @@ import { registerSeriesPlugin } from "./modules/series/presentation/series.plugi
 import { registerStorageProfilePlugin } from "./modules/storage-profiles/presentation/storage-profile.plugin.js";
 import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
 import { registerUploadCenterPlugin } from "./modules/uploads/presentation/upload-center.plugin.js";
+import { registerUploadPolicyPlugin } from "./modules/uploads/presentation/upload-policy.plugin.js";
 import { API_LOGGER_OPTIONS } from "./observability/logger.js";
 import { registerErrorHandler } from "./plugins/error-handler.js";
 import { registerRequestContext } from "./plugins/request-context.js";
@@ -153,6 +154,10 @@ export function buildApp(
       service: services.createUploadCenterService(),
       operations:
         services.createRetryUploadOperationService(chapterPermissions),
+      sessionGuard,
+    });
+    registerUploadPolicyPlugin(app, {
+      service: services.createUserUploadPolicyService(),
       sessionGuard,
     });
     registerImportBatchPlugin(

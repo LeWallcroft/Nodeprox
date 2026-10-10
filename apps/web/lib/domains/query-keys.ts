@@ -38,6 +38,7 @@ export const queryKeys = {
     operations: ["uploads", "operations"] as const,
     operationsForUser: (userId: string) =>
       ["uploads", "operations", userId] as const,
+    policy: ["uploads", "policy"] as const,
   },
   publication: {
     chapter: (chapterId: string) => ["public", "chapters", chapterId] as const,

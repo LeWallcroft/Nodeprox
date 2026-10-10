@@ -37,6 +37,7 @@ import {
   type ChapterStatus,
   chapterStatuses,
 } from "../../../lib/domains/chapters/types";
+import { latestChapterNumbersBySeries } from "../../../lib/domains/chapters/view-model";
 
 const pageSize = 10;
 
@@ -71,6 +72,10 @@ export default function GlobalChaptersPage() {
     [chapters.data, selectedChapterId],
   );
   const selectedQuery = useChapter(selectedChapterId ?? "");
+  const latestChapterBySeries = useMemo(
+    () => latestChapterNumbersBySeries(chapters.data ?? []),
+    [chapters.data],
+  );
   const quickChapter = useMemo(
     () =>
       (chapters.data ?? []).find((chapter) => chapter.id === quickChapterId) ??
@@ -400,6 +405,9 @@ export default function GlobalChaptersPage() {
               <ChapterDetailPanel
                 chapter={selectedQuery.data ?? null}
                 globalChapter={selectedChapter}
+                {...(selectedChapter?.imageCount !== undefined
+                  ? { imageCount: selectedChapter.imageCount }
+                  : {})}
                 capabilities={selectedCapabilities.data?.capabilities}
                 onClose={() => setSelectedChapterId(null)}
                 onAssignCollaborator={() => setAssigning(true)}
@@ -418,6 +426,7 @@ export default function GlobalChaptersPage() {
       <GlobalChapterCreateDialog
         open={creating}
         onOpenChange={setCreating}
+        latestChapterBySeries={latestChapterBySeries}
         onCreated={(chapterId) => {
           void chapters.refetch();
           selectChapter(chapterId);

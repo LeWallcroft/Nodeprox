@@ -27,7 +27,6 @@ import {
 } from "../../lib/domains/ingestion/api";
 import {
   canEnqueueDirectUpload,
-  MAX_DIRECT_UPLOAD_CONCURRENCY,
   type PersistedTrackedBatch,
   safeBulkUploadConcurrency,
   sanitizeTrackedBatches,
@@ -39,8 +38,8 @@ import type {
   RetriedImportItem,
 } from "../../lib/domains/ingestion/types";
 import { queryKeys } from "../../lib/domains/query-keys";
-import { useProductSettings } from "../../lib/domains/settings/hooks";
 import { putDirectUpload } from "../../lib/domains/uploads/api";
+import { useUploadPolicy } from "../../lib/domains/uploads/hooks";
 import {
   type BackgroundUploadOperation,
   listBackgroundUploadOperations,
@@ -116,7 +115,7 @@ export function UploadQueueProvider({
   children: ReactNode;
   userId?: string | null;
 }) {
-  const settings = useProductSettings();
+  const policy = useUploadPolicy(Boolean(userId));
   const queryClient = useQueryClient();
   const [tracked, setTracked] = useState<TrackedBatch[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -135,14 +134,10 @@ export function UploadQueueProvider({
     {},
   );
 
-  const concurrency = useMemo(() => {
-    const value = settings.data?.sections
-      .flatMap((section) => section.fields)
-      .find((field) => field.key === "bulk_upload_concurrency")?.value;
-    return safeBulkUploadConcurrency(
-      typeof value === "number" ? value : MAX_DIRECT_UPLOAD_CONCURRENCY,
-    );
-  }, [settings.data]);
+  const concurrency = useMemo(
+    () => safeBulkUploadConcurrency(policy.data?.transfer.maxConcurrentUploads),
+    [policy.data],
+  );
 
   const operationsQuery = useQuery({
     queryKey: queryKeys.uploads.operationsForUser(userId ?? "anonymous"),

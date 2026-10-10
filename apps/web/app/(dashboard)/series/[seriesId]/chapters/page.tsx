@@ -32,6 +32,7 @@ import {
 } from "../../../../../lib/domains/chapters/types";
 import {
   filterChapters,
+  latestChapterNumber,
   sortChapters,
   toChapterListItem,
 } from "../../../../../lib/domains/chapters/view-model";
@@ -159,6 +160,13 @@ export default function SeriesChaptersPage() {
       <GlobalChapterCreateDialog
         open={creating}
         onOpenChange={setCreating}
+        {...(listQuery.data
+          ? {
+              latestChapterBySeries: {
+                [seriesId]: latestChapterNumber(listQuery.data) ?? undefined,
+              },
+            }
+          : {})}
         fixedSeries={
           seriesQuery.data
             ? {
@@ -271,6 +279,9 @@ export default function SeriesChaptersPage() {
             {!selectedChapterId || selectedQuery.isSuccess ? (
               <ChapterDetailPanel
                 chapter={selectedQuery.data ?? null}
+                {...(selectedListItem?.imageCount !== undefined
+                  ? { imageCount: selectedListItem.imageCount }
+                  : {})}
                 capabilities={selectedCapabilities.data?.capabilities}
                 seriesTitle={seriesQuery.data?.title ?? "Serie"}
                 showSeriesLink={false}

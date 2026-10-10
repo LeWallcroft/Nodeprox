@@ -4,6 +4,7 @@ import {
   loadDatabaseConfig,
   loadMediaEffectsConfig,
   loadProcessingConfig,
+  loadUploadAdmissionConfig,
 } from "@nodeprox/config";
 
 describe("NodeProx configuration", () => {
@@ -78,6 +79,23 @@ describe("NodeProx configuration", () => {
       MEDIA_WARN_IMAGE_SIZE_BYTES: 8388608,
       MEDIA_WARN_WIDTH_PX: 4000,
       MEDIA_WARN_HEIGHT_PX: 12000,
+    });
+  });
+
+  it("loads admission ceilings without requiring Redis", () => {
+    expect(
+      loadUploadAdmissionConfig({
+        PROCESSING_MAX_ENTRIES: "1200",
+        PROCESSING_MAX_IMAGE_SIZE_BYTES: "67108864",
+      }),
+    ).toEqual({
+      PROCESSING_MAX_ENTRIES: 1200,
+      PROCESSING_MAX_TOTAL_SIZE_BYTES: 536870912,
+      PROCESSING_MAX_IMAGE_SIZE_BYTES: 67108864,
+      ADMISSION_MAX_WIDTH_PX: undefined,
+      ADMISSION_MAX_HEIGHT_PX: undefined,
+      ADMISSION_MAX_PIXELS: undefined,
+      ADMISSION_MAX_COMPRESSION_RATIO: undefined,
     });
   });
 

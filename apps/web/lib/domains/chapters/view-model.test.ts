@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { filterChapters, sortChapters, toChapterListItem } from "./view-model";
+import {
+  filterChapters,
+  latestChapterNumber,
+  latestChapterNumbersBySeries,
+  sortChapters,
+  toChapterListItem,
+} from "./view-model";
 
 const chapters = [
   {
@@ -51,5 +57,34 @@ describe("Chapter list view model", () => {
     expect(filterChapters(chapters, "25")).toHaveLength(1);
     expect(filterChapters(chapters, "inicio")).toHaveLength(1);
     expect(filterChapters(chapters, "missing")).toHaveLength(0);
+  });
+
+  it("finds the latest numeric Chapter without assuming list order", () => {
+    expect(latestChapterNumber([])).toBeNull();
+    expect(
+      latestChapterNumber([
+        { chapterNumber: 10 },
+        { chapterNumber: 9.5 },
+        { chapterNumber: 12 },
+        { chapterNumber: 11.25 },
+      ]),
+    ).toBe(12);
+    expect(
+      latestChapterNumber([
+        { chapterNumber: 10 },
+        { chapterNumber: 10.25 },
+        { chapterNumber: 10.5 },
+      ]),
+    ).toBe(10.5);
+  });
+
+  it("groups latest Chapter numbers from either supported Series projection", () => {
+    expect(
+      latestChapterNumbersBySeries([
+        { seriesId: "one", chapterNumber: 10.5 },
+        { seriesId: "one", chapterNumber: 9 },
+        { series: { id: "two" }, chapterNumber: 3 },
+      ]),
+    ).toEqual({ one: 10.5, two: 3 });
   });
 });

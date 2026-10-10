@@ -105,6 +105,15 @@ const processingConfigSchema = z.object({
   MEDIA_WARN_WIDTH_PX: z.coerce.number().int().positive().default(4000),
   MEDIA_WARN_HEIGHT_PX: z.coerce.number().int().positive().default(12000),
 });
+const uploadAdmissionConfigSchema = processingConfigSchema.pick({
+  PROCESSING_MAX_ENTRIES: true,
+  PROCESSING_MAX_TOTAL_SIZE_BYTES: true,
+  PROCESSING_MAX_IMAGE_SIZE_BYTES: true,
+  ADMISSION_MAX_WIDTH_PX: true,
+  ADMISSION_MAX_HEIGHT_PX: true,
+  ADMISSION_MAX_PIXELS: true,
+  ADMISSION_MAX_COMPRESSION_RATIO: true,
+});
 const mediaEffectsConfigSchema = z.object({
   CLOUDFLARE_ZONE_ID: z.string().trim().min(1),
   CLOUDFLARE_PURGE_API_TOKEN: z.string().trim().min(1),
@@ -160,6 +169,9 @@ export type NodeProxStorageConfig =
       b2: z.infer<typeof b2ConfigSchema>;
     };
 export type NodeProxProcessingConfig = z.infer<typeof processingConfigSchema>;
+export type NodeProxUploadAdmissionConfig = z.infer<
+  typeof uploadAdmissionConfigSchema
+>;
 export type NodeProxStorageProfileConfig = z.infer<
   typeof storageProfileConfigSchema
 >;
@@ -178,6 +190,7 @@ export {
   domainEventDispatchConfigSchema,
   mediaEffectsConfigSchema,
   processingConfigSchema,
+  uploadAdmissionConfigSchema,
 };
 
 export function loadConfig(
@@ -190,6 +203,12 @@ export function loadProcessingConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxProcessingConfig {
   return processingConfigSchema.parse(env);
+}
+
+export function loadUploadAdmissionConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxUploadAdmissionConfig {
+  return uploadAdmissionConfigSchema.parse(env);
 }
 
 export function loadMediaEffectsConfig(
