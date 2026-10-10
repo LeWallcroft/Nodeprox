@@ -78,7 +78,7 @@ function validGrantNotification(
       input.sourceEventId,
     ) &&
     (input.reference === null ||
-      (typeof input.reference === "string" && input.reference.length <= 240))
+      (typeof input.reference === "string" && input.reference.length <= 500))
   );
 }
 

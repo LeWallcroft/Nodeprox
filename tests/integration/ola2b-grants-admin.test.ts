@@ -83,6 +83,30 @@ afterAll(async () => {
 });
 
 describe("OLA 2B public grant administration", () => {
+  it("accepts a 500-character Web reference and rejects 501 characters", async () => {
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "r".repeat(500) },
+    });
+    expect(accepted.statusCode).toBe(201);
+    const [stored] = await database.db
+      .select()
+      .from(seriesCreationGrants)
+      .where(eq(seriesCreationGrants.id, accepted.json().id));
+    expect(stored?.reference).toBe("r".repeat(500));
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "r".repeat(501) },
+    });
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json().code).toBe("validation-failed");
+  });
+
   it("supports bounded user lookup and rejects unauthorized actors", async () => {
     const denied = await app.inject({
       method: "GET",

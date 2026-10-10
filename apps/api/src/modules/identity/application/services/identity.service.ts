@@ -36,15 +36,6 @@ export type PublicUserRecord = Pick<
   | "updatedAt"
 > & { discordLinked: boolean };
 
-export type SafeUserReference = {
-  id: string;
-  email: string;
-  displayName: string | null;
-  discordUsername: string | null;
-  avatarUrl: string | null;
-  discordLinked: boolean;
-};
-
 export type ManagedUserProjection = PublicUserRecord & {
   assignedSeriesCount: number;
   lastAccessAt: Date | null;
