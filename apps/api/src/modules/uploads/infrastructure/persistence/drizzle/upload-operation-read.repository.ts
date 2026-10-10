@@ -48,7 +48,10 @@ export class DrizzleUploadOperationReadRepository
           .innerJoin(series, eq(series.id, chapterImportBatches.seriesId))
           .leftJoin(uploads, eq(uploads.id, chapterImportItems.uploadId))
           .where(eq(chapterImportBatches.createdBy, input.userId))
-          .orderBy(desc(chapterImportItems.updatedAt))
+          .orderBy(
+            desc(chapterImportItems.createdAt),
+            desc(chapterImportItems.id),
+          )
           .limit(input.limit),
         this.db
           .select({
@@ -74,7 +77,10 @@ export class DrizzleUploadOperationReadRepository
           .where(
             eq(chapterReplacementOperations.requestedByUserId, input.userId),
           )
-          .orderBy(desc(chapterReplacementOperations.updatedAt))
+          .orderBy(
+            desc(chapterReplacementOperations.createdAt),
+            desc(chapterReplacementOperations.id),
+          )
           .limit(input.limit),
         this.db
           .select({
@@ -98,7 +104,10 @@ export class DrizzleUploadOperationReadRepository
           )
           .innerJoin(series, eq(series.id, chapters.seriesId))
           .where(eq(imageReplacementOperations.requestedByUserId, input.userId))
-          .orderBy(desc(imageReplacementOperations.updatedAt))
+          .orderBy(
+            desc(imageReplacementOperations.createdAt),
+            desc(imageReplacementOperations.id),
+          )
           .limit(input.limit),
         this.db
           .select({
@@ -122,7 +131,7 @@ export class DrizzleUploadOperationReadRepository
           .where(
             sql`${uploads.createdBy} = ${input.userId} and not exists (select 1 from ${chapterImportItems} where ${chapterImportItems.uploadId} = ${uploads.id})`,
           )
-          .orderBy(desc(uploads.updatedAt))
+          .orderBy(desc(uploads.createdAt), desc(uploads.id))
           .limit(input.limit),
       ]);
 
@@ -252,9 +261,11 @@ export class DrizzleUploadOperationReadRepository
       }),
     ];
     return projections
-      .sort(
-        (left, right) => right.updatedAt.getTime() - left.updatedAt.getTime(),
-      )
+      .sort((left, right) => {
+        const createdAtOrder =
+          right.createdAt.getTime() - left.createdAt.getTime();
+        return createdAtOrder || right.id.localeCompare(left.id);
+      })
       .slice(0, input.limit);
   }
 }

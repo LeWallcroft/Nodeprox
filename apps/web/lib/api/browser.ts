@@ -1,4 +1,4 @@
-import { normalizeApiError, type ApiRequestOptions } from "./types";
+import { type ApiRequestOptions, normalizeApiError } from "./types";
 
 const sameOriginApiPrefix = "/api";
 
@@ -8,6 +8,7 @@ export async function apiRequestBrowser<T>(
 ): Promise<T> {
   const response = await fetch(`${sameOriginApiPrefix}${path}`, {
     ...options,
+    cache: "no-store",
     credentials: "include",
   });
   if (!response.ok) {

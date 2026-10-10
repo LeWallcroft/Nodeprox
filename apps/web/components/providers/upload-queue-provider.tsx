@@ -80,6 +80,8 @@ type QueueCandidate = Pick<
 >;
 
 type UploadQueueContextValue = {
+  userId: string | null;
+  operationsLoaded: boolean;
   batches: readonly UploadCenterBatch[];
   operations: readonly BackgroundUploadOperation[];
   activeTransfers: number;
@@ -440,6 +442,8 @@ export function UploadQueueProvider({
 
   const value = useMemo<UploadQueueContextValue>(
     () => ({
+      userId,
+      operationsLoaded: operationsQuery.isSuccess,
       batches,
       operations: operationsQuery.data?.items ?? [],
       activeTransfers,
@@ -456,12 +460,14 @@ export function UploadQueueProvider({
       activeTransfers,
       batches,
       operationsQuery.data?.items,
+      operationsQuery.isSuccess,
       progress,
       queuedTransfers,
       refreshBatch,
       refresh,
       retryWithFile,
       startBatch,
+      userId,
     ],
   );
   return (

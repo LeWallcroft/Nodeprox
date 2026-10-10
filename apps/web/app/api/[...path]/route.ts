@@ -30,7 +30,13 @@ function invalidProxyResponse(): Response {
       detail: "The requested API route is not available.",
       code: "invalid-proxy-path",
     }),
-    { status: 404, headers: { "content-type": "application/problem+json" } },
+    {
+      status: 404,
+      headers: {
+        "content-type": "application/problem+json",
+        "cache-control": "private, no-store",
+      },
+    },
   );
 }
 
@@ -43,7 +49,13 @@ function unavailableProxyResponse(): Response {
       detail: "The API service is unavailable.",
       code: "proxy-unavailable",
     }),
-    { status: 502, headers: { "content-type": "application/problem+json" } },
+    {
+      status: 502,
+      headers: {
+        "content-type": "application/problem+json",
+        "cache-control": "private, no-store",
+      },
+    },
   );
 }
 
@@ -78,6 +90,7 @@ async function forward(
       headers: requestHeaders,
       body: request.body,
       redirect: "manual",
+      cache: "no-store",
     };
     if (request.body) options.duplex = "half";
     const response = await fetch(buildBackendUrl(request, path), options);
@@ -94,6 +107,7 @@ async function forward(
       const setCookie = response.headers.get("set-cookie");
       if (setCookie) responseHeaders.append("set-cookie", setCookie);
     }
+    responseHeaders.set("cache-control", "private, no-store");
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,

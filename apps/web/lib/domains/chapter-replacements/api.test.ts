@@ -63,7 +63,7 @@ describe("whole Chapter replacement Web API", () => {
     await getChapterReplacement({ chapterId: "c1", replacementId: "r1" });
     expect(fetchMock.mock.calls[0]).toEqual([
       "/api/chapters/c1/replacements/r1/complete",
-      { method: "POST", credentials: "include" },
+      { method: "POST", cache: "no-store", credentials: "include" },
     ]);
     expect(fetchMock.mock.calls[1]?.[0]).toBe(
       "/api/chapters/c1/replacements/r1",

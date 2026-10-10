@@ -4,6 +4,7 @@ import { existsSync, rmSync } from "node:fs";
 import { loadDatabaseConfig } from "@nodeprox/config";
 import {
   type APIRequestContext,
+  type Page,
   expect,
   request,
   test,
@@ -245,6 +246,43 @@ async function login(
   const session = await authenticated.get("/auth/session");
   expect(session.status()).toBe(200);
   return authenticated;
+}
+
+async function authenticatePage(
+  page: Page,
+  credentials: { email: string; password: string },
+) {
+  const browserSession = await request.newContext({ baseURL: e2eApiOrigin });
+  try {
+    const browserLogin = await browserSession.post("/auth/login", {
+      data: credentials,
+      headers: { origin: e2eApiOrigin },
+    });
+    expect(browserLogin.status()).toBe(204);
+    const browserToken = /^nodeprox_session=([^;]+)/.exec(
+      browserLogin.headers()["set-cookie"] ?? "",
+    )?.[1];
+    if (!browserToken)
+      throw new Error("browser authentication cookie was not issued");
+    await page.context().addCookies([
+      {
+        name: "nodeprox_session",
+        value: browserToken,
+        url: "http://127.0.0.1:3100",
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+    ]);
+  } finally {
+    await browserSession.dispose();
+  }
+  await page.goto("/");
+  await expect(
+    page.getByRole("complementary", { name: "Navegación principal" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Notificaciones de cargas" }),
+  ).toBeEmpty();
 }
 
 async function directUpload(
@@ -792,7 +830,9 @@ test.describe("M4-B real upload processing", () => {
     }
   });
 
-  test("reloads hard limits per Admission job and projects non-blocking warnings", async () => {
+  test("reloads hard limits per Admission job and projects non-blocking warnings", async ({
+    page,
+  }) => {
     test.setTimeout(120_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
@@ -814,7 +854,9 @@ test.describe("M4-B real upload processing", () => {
     let seriesId = "";
     const chapterIds: string[] = [];
     try {
-      api = await login(api, await createTestAdmin(database));
+      const credentials = await createTestAdmin(database);
+      api = await login(api, credentials);
+      await authenticatePage(page, credentials);
       const saveSettings = async (
         warningMb: number,
         hardMb: number,
@@ -885,6 +927,53 @@ test.describe("M4-B real upload processing", () => {
         expect.objectContaining({ id: warningUploadId, warningCount: 1 }),
       );
 
+      const warningNotice = page
+        .getByRole("status")
+        .filter({ hasText: "Carga completada con advertencias" });
+      await expect(warningNotice).toBeVisible({ timeout: 30_000 });
+      await warningNotice.getByRole("button", { name: "Ver detalles" }).click();
+      await expect(
+        page.getByRole("heading", { name: /Detalle de carga/ }),
+      ).toBeVisible();
+      await expect(page.getByText("01.jpg")).toBeVisible();
+      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
+      await expect(page.getByText("Umbral recomendado: 1 MB")).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Completadas/ }).click();
+      const warningRow = page
+        .locator("article")
+        .filter({ hasText: "warning.zip" });
+      await expect(warningRow).toBeVisible();
+      await warningRow.getByRole("button", { name: "Ver detalles" }).click();
+      await expect(
+        page.getByRole("heading", { name: /Detalle de carga/ }),
+      ).toBeVisible();
+      await expect(page.getByText("01.jpg")).toBeVisible();
+      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
+      await expect(page.getByText("Umbral recomendado: 1 MB")).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page.getByRole("button", { name: "Limpiar completadas" }).click();
+      await expect(warningRow).toHaveCount(0);
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
+      await expect(warningRow).toHaveCount(0);
+      await page.reload();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Completadas/ }).click();
+      await expect(
+        page.locator("article").filter({ hasText: "warning.zip" }),
+      ).toHaveCount(0);
+
       // This update occurs while the same Worker process is running.
       await saveSettings(1, 1);
       const rejectedChapterId = await createChapter(2);
@@ -940,6 +1029,45 @@ test.describe("M4-B real upload processing", () => {
           requestId: run?.requestId,
         }),
       );
+      const rejectedNotice = page
+        .getByRole("alert")
+        .filter({ hasText: "Carga rechazada" });
+      await expect(rejectedNotice).toBeVisible({ timeout: 30_000 });
+      await rejectedNotice
+        .getByRole("button", { name: "Ver detalles" })
+        .click();
+      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
+      await expect(page.getByText("Máximo: 1 MB")).toBeVisible();
+      await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page.getByRole("tab", { name: /Con errores/ }).click();
+      const rejectedRow = page
+        .locator("article")
+        .filter({ hasText: "hard-limit.zip" });
+      await expect(rejectedRow).toBeVisible();
+      await rejectedRow.getByRole("button", { name: "Ver detalles" }).click();
+      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
+      await expect(page.getByText("Máximo: 1 MB")).toBeVisible();
+      await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page.getByRole("button", { name: "Limpiar errores" }).click();
+      await expect(rejectedRow).toHaveCount(0);
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
+      await expect(rejectedRow).toHaveCount(0);
+      await page.reload();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Con errores/ }).click();
+      await expect(
+        page.locator("article").filter({ hasText: "hard-limit.zip" }),
+      ).toHaveCount(0);
 
       await saveSettings(1, 64, 12000, 12000);
       const heightChapterId = await createChapter(3);
