@@ -131,6 +131,7 @@ describe("Upload Center view model and state", () => {
       record({ fileCount: 15, totalSizeBytes: 42 * 1024 * 1024 }),
     );
     expect(success).toContain("bg-success/10 text-success");
+    expect(success).toContain("text-success");
     expect(success).toContain("Archivos");
     expect(success).toContain(">15</span>");
     expect(success).toContain("Tamaño total");
@@ -149,7 +150,12 @@ describe("Upload Center view model and state", () => {
         totalSizeBytes: 42 * 1024 * 1024,
       }),
     );
-    expect(warning).toContain("bg-warning/10 text-warning-text");
+    expect(warning).toContain("bg-warning/10 text-warning");
+    expect(warning).toContain(
+      'class="m-0 text-base font-semibold text-warning"',
+    );
+    expect(warning).toContain('class="m-0 mt-1 text-sm text-secondary"');
+    expect(warning).not.toContain("text-warning-text");
     expect(warning).toContain("Advertencias");
     expect(warning).toContain(">14</span>");
     expect(warning).toContain("Ver detalle");
@@ -161,6 +167,7 @@ describe("Upload Center view model and state", () => {
       record({ status: "rejected", issueCount: 3, fileCount: 5 }),
     );
     expect(rejected).toContain("bg-destructive-surface text-destructive-text");
+    expect(rejected).toContain("text-destructive-text");
     expect(rejected).toContain("Archivos");
     expect(rejected).toContain(">5</span>");
     expect(rejected).toContain("Problemas encontrados");

@@ -167,7 +167,9 @@ export function UploadResultDialog({
         <div
           className={`flex items-start gap-3 rounded-control p-4 ${resultToneClass(result.tone)}`}
         >
-          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-current/10">
+          <span
+            className={`grid size-10 shrink-0 place-items-center rounded-full ${resultHeroIconClass(result.tone)}`}
+          >
             {result.tone === "success" ? (
               <CircleCheckBig aria-hidden="true" className="size-6" />
             ) : operation.status === "retry_exhausted" ? (
@@ -187,10 +189,12 @@ export function UploadResultDialog({
             )}
           </span>
           <div>
-            <h3 className="m-0 text-base font-semibold text-text">
+            <h3
+              className={`m-0 text-base font-semibold ${resultTitleToneClass(result.tone)}`}
+            >
               {result.title}
             </h3>
-            <p className="m-0 mt-1 text-sm">{result.copy}</p>
+            <p className="m-0 mt-1 text-sm text-secondary">{result.copy}</p>
           </div>
         </div>
         <div className="rounded-control bg-surface p-4">
@@ -308,7 +312,7 @@ function resultMetricToneClass(
 ) {
   return {
     success: "text-success",
-    warning: "text-warning-text",
+    warning: "text-warning",
     danger: "text-destructive-text",
     neutral: "text-secondary",
   }[tone];
@@ -319,7 +323,7 @@ function resultMetricValueClass(
 ) {
   return {
     success: "text-success",
-    warning: "text-warning-text",
+    warning: "text-warning",
     danger: "text-destructive-text",
     neutral: "text-text",
   }[tone];
@@ -328,15 +332,31 @@ function resultMetricValueClass(
 function resultMetadataIconClass(tone: "success" | "warning" | "danger") {
   return {
     success: "bg-success/10 text-success",
-    warning: "bg-warning/10 text-warning-text",
+    warning: "bg-warning/10 text-warning",
     danger: "bg-destructive-surface text-destructive-text",
   }[tone];
 }
 
 function resultSummaryClass(tone: "warning" | "danger") {
   return {
-    warning: "bg-warning/10 text-warning-text",
+    warning: "bg-warning/10 text-warning",
     danger: "bg-destructive-surface text-destructive-text",
+  }[tone];
+}
+
+function resultHeroIconClass(tone: "success" | "warning" | "danger") {
+  return {
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning",
+    danger: "bg-destructive-surface text-destructive-text",
+  }[tone];
+}
+
+function resultTitleToneClass(tone: "success" | "warning" | "danger") {
+  return {
+    success: "text-success",
+    warning: "text-warning",
+    danger: "text-destructive-text",
   }[tone];
 }
 
@@ -351,7 +371,7 @@ function resultOperationIcon(kind: UploadCenterRecord["kind"]): ReactNode {
 function resultToneClass(tone: "success" | "warning" | "danger") {
   return {
     success: "bg-success/10 text-success",
-    warning: "bg-warning/10 text-warning-text",
+    warning: "bg-warning/10 text-warning",
     danger: "bg-destructive-surface text-destructive-text",
   }[tone];
 }
