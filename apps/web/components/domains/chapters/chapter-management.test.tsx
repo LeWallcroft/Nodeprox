@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { queryKeys } from "../../../lib/domains/query-keys";
 import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
@@ -30,10 +31,16 @@ const chapter = {
   updatedAt: "2026-08-02T00:00:00.000Z",
 };
 
-function renderWithQueryClient(element: ReactNode) {
+function renderWithQueryClient(
+  element: ReactNode,
+  chapters?: readonly (typeof chapter & { imageCount: number })[],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  if (chapters) {
+    queryClient.setQueryData(queryKeys.series.chapters("series-1"), chapters);
+  }
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <UploadQueueProvider>{element}</UploadQueueProvider>
@@ -269,6 +276,30 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("multiple");
     expect(markup).not.toContain("Continuar con ZIP");
     expect(markup).toContain("Requisitos para la carga");
+  });
+
+  it("shows the latest visible chapter in the bulk upload modal without filling numbers", () => {
+    const markup = renderWithQueryClient(
+      <BulkChapterUploadDialog
+        open
+        onOpenChange={() => undefined}
+        seriesId="series-1"
+        seriesTitle="Serie"
+      />,
+      [
+        { ...chapter, chapterNumber: 58, imageCount: 1 },
+        { ...chapter, id: "chapter-61", chapterNumber: 61, imageCount: 0 },
+      ],
+    );
+
+    expect(markup).toContain("Referencia de la serie");
+    expect(markup).toContain("Último capítulo visible");
+    expect(markup).toContain("tabular-nums text-primary");
+    expect(markup).toContain(">61</span>");
+    expect(markup).toContain(
+      "Añade los ZIP para asignar el número de cada capítulo.",
+    );
+    expect(markup).not.toContain('value="62"');
   });
 
   it("makes the latest Chapter reference visually prominent without auto-filling", () => {

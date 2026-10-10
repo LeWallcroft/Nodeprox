@@ -9,6 +9,7 @@ import {
 import { useMemo, useState } from "react";
 import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number";
 import { useChapterList } from "../../../lib/domains/chapters/hooks";
+import { latestChapterNumber } from "../../../lib/domains/chapters/view-model";
 import { mediaWarningLabel } from "../../../lib/domains/ingestion/orchestration";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
 import { useUploadPolicy } from "../../../lib/domains/uploads/hooks";
@@ -24,6 +25,7 @@ import { ProgressBar } from "../../ui/progress-bar";
 import { errorMessage } from "../feedback";
 import { UploadRequirements } from "../uploads/upload-requirements";
 import { ZipDropzone } from "../uploads/zip-dropzone";
+import { LatestChapterGuidance } from "./latest-chapter-guidance";
 
 export function BulkChapterUploadDialog({
   open,
@@ -157,6 +159,11 @@ export function BulkChapterUploadDialog({
           onRetry={() => void policy.refetch()}
           compact
         />
+        {chapters.isSuccess ? (
+          <LatestChapterGuidance
+            chapterNumber={latestChapterNumber(chapters.data ?? [])}
+          />
+        ) : null}
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <section className="grid content-start gap-2">
             <ZipDropzone
