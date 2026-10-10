@@ -4,8 +4,8 @@ import { existsSync, rmSync } from "node:fs";
 import { loadDatabaseConfig } from "@nodeprox/config";
 import {
   type APIRequestContext,
-  type Page,
   expect,
+  type Page,
   request,
   test,
 } from "@playwright/test";
@@ -798,6 +798,15 @@ test.describe("M4-B real upload processing", () => {
             .where(eq(uploadValidationIssues.runId, run.id))
         : [];
       expect(issues.length).toBeGreaterThan(0);
+      const operationList = await api.get("/me/upload-operations");
+      expect((await operationList.json()).items).toContainEqual(
+        expect.objectContaining({
+          id: upload.id,
+          kind: "chapter_upload",
+          status: "rejected",
+          issueCount: issues.length,
+        }),
+      );
       expect(
         await database.db
           .select()
@@ -836,6 +845,11 @@ test.describe("M4-B real upload processing", () => {
     test.setTimeout(120_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
+    const reportRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/validation-report"))
+        reportRequests.push(request.url());
+    });
     const settingKeys = [
       "upload_warning_image_size_mb",
       "upload_max_image_size_mb",
@@ -927,30 +941,30 @@ test.describe("M4-B real upload processing", () => {
         expect.objectContaining({ id: warningUploadId, warningCount: 1 }),
       );
 
-      const warningNotice = page
-        .getByRole("status")
-        .filter({ hasText: "Carga completada con advertencias" });
-      await expect(warningNotice).toBeVisible({ timeout: 30_000 });
-      await warningNotice.getByRole("button", { name: "Ver detalles" }).click();
+      // This API-driven upload may complete before the browser observes an
+      // active state. Reload to verify terminal history is not announced.
+      await page.reload();
       await expect(
-        page.getByRole("heading", { name: /Detalle de carga/ }),
+        page.getByRole("complementary", { name: "Navegación principal" }),
       ).toBeVisible();
-      await expect(page.getByText("01.jpg")).toBeVisible();
-      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
-      await expect(page.getByText("Umbral recomendado: 1 MB")).toBeVisible();
-      await page
-        .getByRole("dialog")
-        .getByRole("button", { name: "Cerrar diálogo" })
-        .click();
+      await expect(
+        page.getByRole("dialog").filter({
+          hasText: "Carga completada con advertencias",
+        }),
+      ).toHaveCount(0);
+      expect(reportRequests).toHaveLength(0);
       await page
         .getByRole("button", { name: "Abrir centro de cargas" })
         .click();
       await page.getByRole("tab", { name: /Completadas/ }).click();
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
       const warningRow = page
         .locator("article")
         .filter({ hasText: "warning.zip" });
       await expect(warningRow).toBeVisible();
+      expect(reportRequests).toHaveLength(0);
       await warningRow.getByRole("button", { name: "Ver detalles" }).click();
+      await expect.poll(() => reportRequests.length).toBe(1);
       await expect(
         page.getByRole("heading", { name: /Detalle de carga/ }),
       ).toBeVisible();
@@ -1029,19 +1043,21 @@ test.describe("M4-B real upload processing", () => {
           requestId: run?.requestId,
         }),
       );
-      const rejectedNotice = page
-        .getByRole("alert")
+      const rejectedResult = page
+        .getByRole("dialog")
         .filter({ hasText: "Carga rechazada" });
-      await expect(rejectedNotice).toBeVisible({ timeout: 30_000 });
-      await rejectedNotice
-        .getByRole("button", { name: "Ver detalles" })
-        .click();
+      await expect(rejectedResult).toBeVisible({ timeout: 30_000 });
+      await rejectedResult.getByRole("button", { name: /Ver detalle/ }).click();
       await expect(page.getByText("Actual: 1 MB")).toBeVisible();
       await expect(page.getByText("Máximo: 1 MB")).toBeVisible();
       await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
+      await expect(page.getByRole("tab", { name: /Errores 1/ })).toBeVisible();
       await page
         .getByRole("dialog")
         .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
         .click();
       await page.getByRole("tab", { name: /Con errores/ }).click();
       const rejectedRow = page

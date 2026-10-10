@@ -52,18 +52,54 @@ export function uploadOutcomeMessage(record: UploadCenterRecord) {
   };
 }
 
+export function uploadBatchOutcomePresentation(summary: {
+  completed: number;
+  warnings: number;
+  rejected: number;
+  failed: number;
+}) {
+  return {
+    title: "Carga masiva completada",
+    copy: [
+      `${summary.completed} capítulos completados`,
+      `${summary.warnings} con advertencias`,
+      `${summary.rejected} ${summary.rejected === 1 ? "rechazado" : "rechazados"}`,
+      ...(summary.failed ? [`${summary.failed} con error`] : []),
+    ].join(" · "),
+    tone: (summary.rejected || summary.failed
+      ? "error"
+      : summary.warnings
+        ? "warning"
+        : "success") as "error" | "warning" | "success",
+  };
+}
+
 export function UploadOutcomeMessage({
   operation,
+  batchSummary,
   onDismiss,
   onDetails,
+  onCenter,
   onRetry,
 }: {
   operation: UploadCenterRecord;
+  batchSummary?: {
+    completed: number;
+    warnings: number;
+    rejected: number;
+    failed: number;
+  };
   onDismiss(): void;
   onDetails(): void;
+  onCenter?(): void;
   onRetry?(): void;
 }) {
-  const message = uploadOutcomeMessage(operation);
+  const message = batchSummary
+    ? {
+        ...uploadBatchOutcomePresentation(batchSummary),
+        detail: false,
+      }
+    : uploadOutcomeMessage(operation);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
     if (paused) return;
@@ -100,7 +136,16 @@ export function UploadOutcomeMessage({
         </button>
       </div>
       <div className="mt-2 flex gap-3 text-sm">
-        {message.detail ? (
+        {batchSummary && onCenter ? (
+          <button
+            type="button"
+            className="text-primary underline"
+            onClick={onCenter}
+          >
+            Ver Centro de cargas
+          </button>
+        ) : null}
+        {!batchSummary && message.detail ? (
           <button
             type="button"
             className="text-primary underline"

@@ -25,6 +25,7 @@ import { retryBackgroundUploadOperation } from "../../lib/domains/uploads/backgr
 import {
   type DismissedUploadOutcome,
   fillOutcomeNoticeSlots,
+  isTerminalUploadStatus,
   isUploadOutcomeDismissed,
   observeUploadOutcomeTransitions,
   sanitizeDismissedUploadOutcomes,
@@ -32,17 +33,29 @@ import {
 } from "../../lib/domains/uploads/upload-center-state";
 import {
   canLoadValidationReport,
+  compareUploadCenterRecords,
   mergeUploadCenterRecords,
   type UploadCenterRecord,
+  uploadCenterSummary,
 } from "../../lib/domains/uploads/upload-center-view-model";
 import { UploadOperationDetailDialog } from "../domains/uploads/upload-operation-detail-dialog";
 import { UploadOutcomeMessage } from "../domains/uploads/upload-outcome-message";
+import { UploadResultDialog } from "../domains/uploads/upload-result-dialog";
 import { useUploadQueue } from "../providers/upload-queue-provider";
 import { Button } from "../ui/button";
 import { ProgressBar } from "../ui/progress-bar";
 
 type Tab = "active" | "completed" | "failed";
-type Notice = { key: string; record: UploadCenterRecord };
+type Notice = {
+  key: string;
+  record: UploadCenterRecord;
+  batchSummary?: {
+    completed: number;
+    warnings: number;
+    rejected: number;
+    failed: number;
+  };
+};
 
 export function UploadCenter() {
   const queue = useUploadQueue();
@@ -55,6 +68,7 @@ export function UploadCenter() {
   const [tab, setTab] = useState<Tab>("active");
   const [refreshing, setRefreshing] = useState(false);
   const [detail, setDetail] = useState<UploadCenterRecord | null>(null);
+  const [resultQueue, setResultQueue] = useState<UploadCenterRecord[]>([]);
   const [dismissed, setDismissed] = useState<readonly DismissedUploadOutcome[]>(
     [],
   );
@@ -136,16 +150,90 @@ export function UploadCenter() {
 
   useEffect(() => {
     if (!queue.operationsLoaded) return;
+    const previous = previousOperations.current;
     const observed = observeUploadOutcomeTransitions({
       operations: queue.operations,
       recordsById,
-      previousStatuses: previousOperations.current,
+      previousStatuses: previous,
       announcedKeys: announced.current,
     });
     previousOperations.current = observed.currentStatuses;
-    if (observed.notices.length)
-      setPendingNotices((old) => [...old, ...observed.notices]);
-  }, [queue.operations, queue.operationsLoaded, recordsById]);
+    if (!observed.notices.length) return;
+
+    const groups = new Map<string, UploadCenterRecord[]>();
+    for (const record of records) {
+      if (record.kind !== "chapter_import" || !record.batchId) continue;
+      groups.set(record.batchId, [
+        ...(groups.get(record.batchId) ?? []),
+        record,
+      ]);
+    }
+    const isBulkImport = (record: UploadCenterRecord) =>
+      record.kind === "chapter_import" &&
+      Boolean(record.batchId && (groups.get(record.batchId)?.length ?? 0) > 1);
+    const individual = observed.notices.filter(
+      (notice) => !isBulkImport(notice.record),
+    );
+    if (individual.length)
+      setResultQueue((old) => {
+        const known = new Set(old.map((record) => record.outcomeFingerprint));
+        return [
+          ...old,
+          ...individual
+            .map((notice) => notice.record)
+            .filter((record) => !known.has(record.outcomeFingerprint)),
+        ];
+      });
+
+    const notices: Notice[] = observed.notices
+      .filter((notice) => isBulkImport(notice.record))
+      .map(({ key, record }) => ({ key, record }));
+    if (previous) {
+      for (const [batchId, group] of groups) {
+        if (
+          group.length < 2 ||
+          !group.every((record) => isTerminalUploadStatus(record.status))
+        )
+          continue;
+        const newlyCompleted = group.some((record) => {
+          const oldStatus = previous.get(record.id)?.split(":")[0];
+          return oldStatus !== undefined && !isTerminalUploadStatus(oldStatus);
+        });
+        if (!newlyCompleted) continue;
+        const ordered = [...group].sort(compareUploadCenterRecords);
+        const record = ordered[0];
+        if (!record) continue;
+        const key = `batch:${batchId}:${group
+          .map(
+            (item) =>
+              `${item.id}:${item.status}:${item.warningCount}:${item.outcomeAt}`,
+          )
+          .sort()
+          .join("|")}`;
+        if (announced.current.has(key)) continue;
+        announced.current.add(key);
+        notices.push({
+          key,
+          record,
+          batchSummary: {
+            completed: group.filter(
+              (item) =>
+                ["ready", "completed"].includes(item.status) &&
+                !item.warningCount,
+            ).length,
+            warnings: group.filter((item) => item.warningCount > 0).length,
+            rejected: group.filter((item) => item.status === "rejected").length,
+            failed: group.filter((item) =>
+              ["failed", "retry_exhausted", "terminal_failed"].includes(
+                item.status,
+              ),
+            ).length,
+          },
+        });
+      }
+    }
+    if (notices.length) setPendingNotices((old) => [...old, ...notices]);
+  }, [queue.operations, queue.operationsLoaded, records, recordsById]);
 
   useEffect(() => {
     if (visibleNotices.length >= 3 || !pendingNotices.length) return;
@@ -184,11 +272,19 @@ export function UploadCenter() {
 
   const visibleRecords = useMemo(
     () =>
-      dismissalLoaded && dismissalUserId === queue.userId
-        ? records.filter(
-            (record) => !isUploadOutcomeDismissed(record, dismissed),
-          )
-        : records,
+      records.filter((record) => {
+        const terminal = [
+          "ready",
+          "completed",
+          "rejected",
+          "failed",
+          "retry_exhausted",
+          "terminal_failed",
+        ].includes(record.status);
+        if (!terminal) return true;
+        if (!dismissalLoaded || dismissalUserId !== queue.userId) return false;
+        return !isUploadOutcomeDismissed(record, dismissed);
+      }),
     [dismissalLoaded, dismissalUserId, dismissed, queue.userId, records],
   );
   const completed = (record: UploadCenterRecord) =>
@@ -204,13 +300,15 @@ export function UploadCenter() {
     completed: visibleRecords.filter(completed).length,
     failed: visibleRecords.filter(failed).length,
   };
-  const tabRecords = visibleRecords.filter((record) =>
-    tab === "active"
-      ? active(record)
-      : tab === "completed"
-        ? completed(record)
-        : failed(record),
-  );
+  const tabRecords = visibleRecords
+    .filter((record) =>
+      tab === "active"
+        ? active(record)
+        : tab === "completed"
+          ? completed(record)
+          : failed(record),
+    )
+    .sort(compareUploadCenterRecords);
 
   async function refresh() {
     setRefreshing(true);
@@ -247,16 +345,30 @@ export function UploadCenter() {
         className="fixed right-5 top-5 z-40 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
         aria-live="polite"
       >
-        {visibleNotices.map(({ key, record }) => (
+        {visibleNotices.map(({ key, record, batchSummary }) => (
           <UploadOutcomeMessage
             key={key}
             operation={record}
+            {...(batchSummary ? { batchSummary } : {})}
             onDismiss={() => closeNotice(key)}
             onDetails={() => openDetails(recordsById.get(record.id) ?? record)}
+            onCenter={() => setOpen(true)}
             onRetry={() => void retryRetained(record)}
           />
         ))}
       </section>
+      <UploadResultDialog
+        open={resultQueue.length > 0}
+        operation={resultQueue[0] ?? null}
+        onOpenChange={(next) => {
+          if (!next) setResultQueue((old) => old.slice(1));
+        }}
+        onCenter={() => setOpen(true)}
+        onDetails={() => {
+          const selected = resultQueue[0];
+          if (selected) openDetails(recordsById.get(selected.id) ?? selected);
+        }}
+      />
       <UploadOperationDetailDialog
         open={detail !== null}
         operation={detail}
@@ -476,19 +588,14 @@ function UploadCenterRow({
               {record.filename}
             </p>
           </div>
-          <span className="shrink-0 text-xs text-secondary">
-            {statusLabel(record.status)}
+          <span
+            className={`shrink-0 rounded-full px-2 py-1 text-xs ${summaryToneClass(uploadCenterSummary(record).tone)}`}
+          >
+            {uploadCenterSummary(record).label}
           </span>
         </div>
         <p className="m-0 mt-1 text-xs text-secondary">
-          {record.warningCount
-            ? `${record.warningCount} advertencias`
-            : record.errorCode
-              ? safeErrorLabel(record.errorCode)
-              : null}
-        </p>
-        <p className="m-0 mt-1 text-xs text-secondary">
-          {formatCreatedAt(record.createdAt)}
+          {formatActivityAt(record.activityAt)}
         </p>
         {active ? (
           <div className="mt-2">
@@ -698,9 +805,6 @@ function statusLabel(status: string) {
     )[status] ?? status
   );
 }
-function safeErrorLabel(code: string) {
-  return code.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
-}
 function formatCreatedAt(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -709,4 +813,23 @@ function formatCreatedAt(value: string) {
         dateStyle: "short",
         timeStyle: "short",
       }).format(date);
+}
+function formatActivityAt(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  if (elapsed < 60_000) return "Hace menos de un minuto";
+  if (elapsed < 3_600_000)
+    return `Hace ${Math.floor(elapsed / 60_000)} minutos`;
+  if (elapsed < 86_400_000)
+    return `Hace ${Math.floor(elapsed / 3_600_000)} horas`;
+  return formatCreatedAt(value);
+}
+function summaryToneClass(tone: "success" | "warning" | "danger" | "info") {
+  return {
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning-text",
+    danger: "bg-destructive-surface text-destructive-text",
+    info: "bg-primary/10 text-primary",
+  }[tone];
 }

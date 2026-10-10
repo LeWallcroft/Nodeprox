@@ -21,6 +21,7 @@ export function AppDialog({
   footer,
   size = "md",
   busy = false,
+  contentClassName = "",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -30,6 +31,7 @@ export function AppDialog({
   footer?: ReactNode;
   size?: "sm" | "md" | "lg";
   busy?: boolean;
+  contentClassName?: string;
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -124,7 +126,9 @@ export function AppDialog({
             <X aria-hidden="true" className="size-4" />
           </button>
         </header>
-        <div className="min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4">
+        <div
+          className={`min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4 ${contentClassName}`}
+        >
           {children}
         </div>
         {footer ? (

@@ -3,6 +3,7 @@ import { apiRequestBrowser } from "../../api/browser";
 
 export type BackgroundUploadOperation = {
   id: string;
+  batchId?: string | null;
   kind:
     | "chapter_import"
     | "chapter_upload"
@@ -30,6 +31,9 @@ export type BackgroundUploadOperation = {
     | "failed";
   errorCode: string | null;
   warningCount: number;
+  issueCount?: number;
+  fileCount?: number | null;
+  totalSizeBytes?: number | null;
   failureStage: "admission" | "storage" | "processing" | "database" | null;
   createdAt: string;
   updatedAt: string;

@@ -20,11 +20,16 @@ export type UploadCenterRecord = {
   filename: string;
   status: BackgroundUploadOperation["status"];
   warningCount: number;
+  issueCount: number;
+  fileCount: number | null;
+  totalSizeBytes: number | null;
   errorCode: string | null;
   failureStage: BackgroundUploadOperation["failureStage"];
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  activityAt: string;
+  outcomeAt: string | null;
   retryable: boolean;
   ephemeral: boolean;
   outcomeFingerprint: string;
@@ -54,14 +59,65 @@ export function uploadOutcomeFingerprint(input: {
   id: string;
   status: string;
   updatedAt: string;
+  outcomeAt?: string | null;
 }): string {
-  return `${input.id}:${input.status}:${input.updatedAt}`;
+  if (!isTerminalStatus(input.status)) return `${input.id}:${input.status}`;
+  return `${input.id}:${input.status}:${input.outcomeAt ?? input.updatedAt}`;
+}
+
+export function resolveUploadActivityAt(record: {
+  status: string;
+  updatedAt: string;
+  completedAt: string | null;
+}): string {
+  if (record.status === "ready" || record.status === "completed")
+    return record.completedAt ?? record.updatedAt;
+  return record.updatedAt;
+}
+
+export function uploadCenterSummary(record: UploadCenterRecord): {
+  label: string;
+  tone: "success" | "warning" | "danger" | "info";
+} {
+  if (record.status === "ready" || record.status === "completed")
+    return record.warningCount
+      ? {
+          label: `Completada con ${record.warningCount} advertencias`,
+          tone: "warning",
+        }
+      : { label: "Completada", tone: "success" };
+  if (record.status === "rejected")
+    return {
+      label: record.issueCount
+        ? `Carga rechazada · ${record.issueCount} problemas`
+        : "Carga rechazada",
+      tone: "danger",
+    };
+  if (record.status === "retry_exhausted")
+    return { label: "Requiere atención", tone: "warning" };
+  if (record.status === "failed" || record.status === "terminal_failed")
+    return { label: "No se pudo completar", tone: "danger" };
+  if (record.status === "validating")
+    return { label: "Validando archivo", tone: "info" };
+  if (record.status === "processing")
+    return { label: "Procesando", tone: "info" };
+  if (record.status === "uploaded")
+    return { label: "Archivo subido", tone: "info" };
+  if (record.status === "completing")
+    return { label: "Finalizando", tone: "info" };
+  return { label: "Subiendo", tone: "info" };
 }
 
 export function compareUploadCenterRecords(
-  left: Pick<UploadCenterRecord, "createdAt" | "id">,
-  right: Pick<UploadCenterRecord, "createdAt" | "id">,
+  left: Pick<UploadCenterRecord, "createdAt" | "id"> &
+    Partial<Pick<UploadCenterRecord, "activityAt">>,
+  right: Pick<UploadCenterRecord, "createdAt" | "id"> &
+    Partial<Pick<UploadCenterRecord, "activityAt">>,
 ): number {
+  const byActivity =
+    Date.parse(right.activityAt ?? right.createdAt) -
+    Date.parse(left.activityAt ?? left.createdAt);
+  if (byActivity) return byActivity;
   const byCreation = Date.parse(right.createdAt) - Date.parse(left.createdAt);
   return byCreation || right.id.localeCompare(left.id);
 }
@@ -84,7 +140,7 @@ export function mergeUploadCenterRecords(input: {
     return makeRecord({
       id: operation.id,
       kind: operation.kind,
-      groupId: batch?.batchId ?? null,
+      groupId: batch?.batchId ?? operation.batchId ?? null,
       seriesId: operation.seriesId,
       seriesTitle: operation.seriesTitle,
       chapterId: operation.chapterId,
@@ -92,6 +148,9 @@ export function mergeUploadCenterRecords(input: {
       filename: operation.filename,
       status: operation.status,
       warningCount: operation.warningCount,
+      issueCount: operation.issueCount ?? 0,
+      fileCount: operation.fileCount ?? null,
+      totalSizeBytes: operation.totalSizeBytes ?? null,
       errorCode: operation.errorCode,
       failureStage: operation.failureStage,
       createdAt: operation.createdAt,
@@ -102,7 +161,7 @@ export function mergeUploadCenterRecords(input: {
         operation.status === "failed" &&
         !isNonRetryableError(operation.errorCode),
       ephemeral: false,
-      batchId: batch?.batchId ?? null,
+      batchId: batch?.batchId ?? operation.batchId ?? null,
       uploadId:
         batch?.projection?.items.find((item) => item.itemId === operation.id)
           ?.uploadId ?? null,
@@ -127,6 +186,9 @@ export function mergeUploadCenterRecords(input: {
           filename: item.filename,
           status: item.status,
           warningCount: item.warnings.length,
+          issueCount: 0,
+          fileCount: null,
+          totalSizeBytes: null,
           errorCode: item.errorCode,
           failureStage:
             item.status === "rejected"
@@ -150,12 +212,34 @@ export function mergeUploadCenterRecords(input: {
 }
 
 function makeRecord(
-  record: Omit<UploadCenterRecord, "outcomeFingerprint">,
+  record: Omit<
+    UploadCenterRecord,
+    "outcomeFingerprint" | "activityAt" | "outcomeAt"
+  >,
 ): UploadCenterRecord {
+  const outcomeAt = isTerminalStatus(record.status)
+    ? (record.completedAt ?? record.updatedAt)
+    : null;
   return {
     ...record,
-    outcomeFingerprint: uploadOutcomeFingerprint(record),
+    activityAt: resolveUploadActivityAt(record),
+    outcomeAt,
+    outcomeFingerprint: uploadOutcomeFingerprint({
+      ...record,
+      outcomeAt,
+    }),
   };
+}
+
+function isTerminalStatus(status: string): boolean {
+  return [
+    "ready",
+    "completed",
+    "rejected",
+    "failed",
+    "retry_exhausted",
+    "terminal_failed",
+  ].includes(status);
 }
 
 function isNonRetryableError(errorCode: string | null): boolean {

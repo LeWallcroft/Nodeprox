@@ -21,6 +21,7 @@ export type UploadOperationStatus =
 
 export type UploadOperationProjection = {
   id: string;
+  batchId?: string | null;
   kind: UploadOperationKind;
   seriesId: string;
   seriesTitle: string;
@@ -31,6 +32,9 @@ export type UploadOperationProjection = {
   status: UploadOperationStatus;
   errorCode: string | null;
   warningCount: number;
+  issueCount: number;
+  fileCount: number | null;
+  totalSizeBytes: number | null;
   failureStage: "admission" | "storage" | "processing" | "database" | null;
   createdAt: Date;
   updatedAt: Date;

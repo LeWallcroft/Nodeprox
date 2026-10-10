@@ -1,7 +1,7 @@
 "use client";
 
 import type { MediaWarning } from "@nodeprox/types";
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import {
   getUploadValidationReport,
   type UploadValidationReport,
@@ -22,6 +22,9 @@ export function UploadOperationDetailDialog({
   onOpenChange(open: boolean): void;
 }) {
   const [state, setState] = useState<"loading" | "loaded" | "error">("loading");
+  const [activeTab, setActiveTab] = useState<
+    "warnings" | "errors" | "information"
+  >("warnings");
   const [report, setReport] = useState<UploadValidationReport | null>(null);
   const operationId = operation?.id;
   const kind = operation?.kind;
@@ -50,53 +53,111 @@ export function UploadOperationDetailDialog({
   useEffect(() => {
     if (!open) return;
     setReport(null);
+    setActiveTab(
+      !supportsReport
+        ? "information"
+        : operation?.status === "rejected"
+          ? "errors"
+          : "warnings",
+    );
     if (!operationId || !supportsReport) {
       setState("loaded");
       return;
     }
     void load();
-  }, [load, open, operationId, supportsReport]);
+  }, [load, open, operation?.status, operationId, supportsReport]);
 
   const title = operation ? operationTitle(operation) : "Detalle de carga";
   return (
-    <AppDialog open={open} onOpenChange={onOpenChange} title={title} size="lg">
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      size="lg"
+      contentClassName="flex flex-1 flex-col"
+    >
       {!operation ? null : (
-        <div className="space-y-4 text-sm text-secondary">
+        <div className="flex min-h-0 flex-1 flex-col gap-4 text-sm text-secondary">
           <div className="rounded-control border border-[var(--border-subtle)] bg-surface p-3">
             <p className="m-0 font-medium text-text">
-              {statusLabel(operation.status)}
+              {operation.seriesTitle}
+              {operation.chapterNumber === null
+                ? ""
+                : ` · Capítulo ${operation.chapterNumber}`}
             </p>
-            <p className="m-0 mt-1">{operation.filename}</p>
-            {operation.errorCode ? (
+            <p className="m-0 mt-1">
+              {operation.filename} · {statusLabel(operation.status)}
+            </p>
+            {operation.status === "ready" && operation.warningCount > 0 ? (
+              <p className="m-0 mt-1 text-warning-text">
+                Carga completada con advertencias · {operation.warningCount}
+              </p>
+            ) : operation.status === "rejected" ? (
               <p className="m-0 mt-1 text-destructive-text">
-                {safeErrorLabel(operation.errorCode)}
+                Carga rechazada
+                {operation.issueCount
+                  ? ` · ${operation.issueCount} problemas`
+                  : ""}
               </p>
             ) : null}
-            {operation.failureStage ? (
-              <p className="m-0 mt-1">Etapa: {operation.failureStage}</p>
+            {operation.failureStage && operation.errorCode ? (
+              <p className="m-0 mt-1 text-destructive-text">
+                {safeErrorLabel(operation.errorCode)} · {operation.failureStage}
+              </p>
             ) : null}
           </div>
-          {!supportsReport ? null : state === "loading" ? (
-            <p role="status">Cargando detalle…</p>
-          ) : state === "error" ? (
-            <div role="alert">
-              <p>No se pudo cargar el detalle.</p>
-              <button
-                className="underline"
-                type="button"
-                onClick={() => void load()}
-              >
-                Reintentar detalle
-              </button>
-            </div>
-          ) : supportsReport ? (
-            <ValidationDetails operation={operation} report={report} />
-          ) : null}
-          <div className="border-t border-[var(--border-subtle)] pt-3 text-xs">
-            {report?.requestId ? (
-              <p className="m-0">Request ID: {report.requestId}</p>
-            ) : null}
-            <p className="m-0 mt-1">Operation ID: {operation.id}</p>
+          <div
+            className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)]"
+            role="tablist"
+            aria-label="Secciones del detalle"
+          >
+            <DetailTab
+              active={activeTab === "warnings"}
+              onClick={() => setActiveTab("warnings")}
+            >
+              Advertencias{" "}
+              <span>{report?.warnings.length ?? operation.warningCount}</span>
+            </DetailTab>
+            <DetailTab
+              active={activeTab === "errors"}
+              onClick={() => setActiveTab("errors")}
+            >
+              Errores{" "}
+              <span>{report?.issues.length ?? operation.issueCount}</span>
+            </DetailTab>
+            <DetailTab
+              active={activeTab === "information"}
+              onClick={() => setActiveTab("information")}
+            >
+              Información general
+            </DetailTab>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {activeTab === "information" ? (
+              <OperationInformation
+                operation={operation}
+                requestId={report?.requestId ?? null}
+              />
+            ) : !supportsReport ? null : state === "loading" ? (
+              <p role="status">Cargando detalle…</p>
+            ) : state === "error" ? (
+              <div role="alert">
+                <p>No se pudo cargar el detalle.</p>
+                <button
+                  className="underline"
+                  type="button"
+                  onClick={() => void load()}
+                >
+                  Reintentar detalle
+                </button>
+              </div>
+            ) : (
+              <ValidationDetails
+                operation={operation}
+                report={report}
+                section={activeTab}
+              />
+            )}
           </div>
         </div>
       )}
@@ -107,9 +168,11 @@ export function UploadOperationDetailDialog({
 function ValidationDetails({
   operation,
   report,
+  section,
 }: {
   operation: UploadCenterRecord;
   report: UploadValidationReport | null;
+  section: "warnings" | "errors";
 }) {
   if (!report) return null;
   const issues = groupByFilename(
@@ -123,59 +186,124 @@ function ValidationDetails({
     (warning) => warning.filename,
   );
   return (
-    <div className="space-y-4">
-      {issues.map(([filename, items]) => (
-        <section
-          key={`issue-${filename}`}
-          className="rounded-control border border-destructive/30 bg-destructive-surface p-3"
-        >
-          <h3 className="m-0 font-semibold text-text">{filename}</h3>
-          {items.map((issue) => {
-            const measurement = validationIssueMeasurement(issue);
-            return (
-              <div key={issue.id} className="mt-2">
-                <p className="m-0 font-medium text-text">
-                  {validationIssueLabel(issue.code)}
-                </p>
-                {measurement.actual ? (
-                  <p className="m-0 mt-1">Actual: {measurement.actual}</p>
-                ) : null}
-                {measurement.expected ? (
-                  <p className="m-0">Máximo: {measurement.expected}</p>
-                ) : null}
-                <p className="m-0 mt-1 text-xs">Código: {issue.code}</p>
-              </div>
-            );
-          })}
-        </section>
-      ))}
-      {warnings.map(([filename, items]) => (
-        <section
-          key={`warning-${filename}`}
-          className="rounded-control border border-warning/30 bg-warning/5 p-3"
-        >
-          <h3 className="m-0 font-semibold text-text">{filename}</h3>
-          {items.map((warning) => {
-            const detail = mediaWarningPresentation(warning);
-            return (
-              <div
-                key={`${warning.code}-${warning.filename}-${JSON.stringify(warning)}`}
-                className="mt-2"
-              >
-                <p className="m-0 font-medium text-text">{detail.title}</p>
-                <p className="m-0 mt-1">Actual: {detail.actual}</p>
-                {detail.threshold ? (
-                  <p className="m-0">Umbral recomendado: {detail.threshold}</p>
-                ) : null}
-              </div>
-            );
-          })}
-        </section>
-      ))}
-      {!issues.length && !warnings.length ? (
-        <p className="m-0">No hay detalles de validación para mostrar.</p>
+    <div className="min-h-0 space-y-3 overflow-y-auto pr-1">
+      {section === "errors"
+        ? issues.map(([filename, items]) => (
+            <section
+              key={`issue-${filename}`}
+              className="rounded-control border border-destructive/30 bg-destructive-surface p-3"
+            >
+              <h3 className="m-0 font-semibold text-text">{filename}</h3>
+              {items.map((issue) => {
+                const measurement = validationIssueMeasurement(issue);
+                return (
+                  <div key={issue.id} className="mt-2">
+                    <p className="m-0 font-medium text-text">
+                      {validationIssueLabel(issue.code)}
+                    </p>
+                    {measurement.actual ? (
+                      <p className="m-0 mt-1">Actual: {measurement.actual}</p>
+                    ) : null}
+                    {measurement.expected ? (
+                      <p className="m-0">Máximo: {measurement.expected}</p>
+                    ) : null}
+                    <p className="m-0 mt-1 text-xs">Código: {issue.code}</p>
+                  </div>
+                );
+              })}
+            </section>
+          ))
+        : null}
+      {section === "warnings"
+        ? warnings.map(([filename, items]) => (
+            <section
+              key={`warning-${filename}`}
+              className="rounded-control border border-warning/30 bg-warning/5 p-3"
+            >
+              <h3 className="m-0 font-semibold text-text">{filename}</h3>
+              {items.map((warning) => {
+                const detail = mediaWarningPresentation(warning);
+                return (
+                  <div
+                    key={`${warning.code}-${warning.filename}-${JSON.stringify(warning)}`}
+                    className="mt-2"
+                  >
+                    <p className="m-0 font-medium text-text">{detail.title}</p>
+                    <p className="m-0 mt-1">Actual: {detail.actual}</p>
+                    {detail.threshold ? (
+                      <p className="m-0">
+                        Umbral recomendado: {detail.threshold}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </section>
+          ))
+        : null}
+      {section === "errors" && !issues.length ? (
+        <p className="m-0">No hay errores de validación.</p>
+      ) : section === "warnings" && !warnings.length ? (
+        <p className="m-0">No hay advertencias de validación.</p>
       ) : null}
     </div>
+  );
+}
+
+function DetailTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick(): void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      className={`shrink-0 rounded-t-control px-3 py-2 text-xs ${active ? "bg-primary text-primary-foreground" : "text-secondary hover:bg-surface-hover"}`}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+}
+
+function OperationInformation({
+  operation,
+  requestId,
+}: {
+  operation: UploadCenterRecord;
+  requestId: string | null;
+}) {
+  return (
+    <dl className="grid min-w-0 grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
+      <dt>Serie</dt>
+      <dd className="m-0 truncate text-text">{operation.seriesTitle}</dd>
+      <dt>Capítulo</dt>
+      <dd className="m-0 text-text">{operation.chapterNumber ?? "—"}</dd>
+      <dt>ZIP</dt>
+      <dd className="m-0 break-all text-text">{operation.filename}</dd>
+      <dt>Estado</dt>
+      <dd className="m-0 text-text">{statusLabel(operation.status)}</dd>
+      <dt>Inicio</dt>
+      <dd className="m-0 text-text">{formatDate(operation.createdAt)}</dd>
+      <dt>Última actividad</dt>
+      <dd className="m-0 text-text">
+        {formatDate(operation.outcomeAt ?? operation.activityAt)}
+      </dd>
+      <dt>Operation ID</dt>
+      <dd className="m-0 break-all text-text">{operation.id}</dd>
+      {requestId ? (
+        <>
+          <dt>Request ID</dt>
+          <dd className="m-0 break-all text-text">{requestId}</dd>
+        </>
+      ) : null}
+    </dl>
   );
 }
 
@@ -280,6 +408,15 @@ function formatInteger(value: number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
     .format(value)
     .replace(/,/g, " ");
+}
+function formatDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("es-PE", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
 }
 function operationTitle(operation: UploadCenterRecord) {
   return `${operation.status === "rejected" ? "Carga rechazada" : "Detalle de carga"}${operation.chapterNumber === null ? "" : ` · Capítulo ${operation.chapterNumber}`}`;

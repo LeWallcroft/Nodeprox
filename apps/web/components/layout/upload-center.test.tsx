@@ -12,13 +12,18 @@ import {
   compareUploadCenterRecords,
   mergeUploadCenterRecords,
   type UploadCenterRecord,
+  uploadCenterSummary,
   uploadOutcomeFingerprint,
 } from "../../lib/domains/uploads/upload-center-view-model";
 import {
   mediaWarningPresentation,
   validationIssueMeasurement,
 } from "../domains/uploads/upload-operation-detail-dialog";
-import { uploadOutcomeMessage } from "../domains/uploads/upload-outcome-message";
+import {
+  uploadBatchOutcomePresentation,
+  uploadOutcomeMessage,
+} from "../domains/uploads/upload-outcome-message";
+import { uploadResultPresentation } from "../domains/uploads/upload-result-dialog";
 import { uploadQueueStorageKey } from "../providers/upload-queue-provider";
 
 function operation(
@@ -36,6 +41,9 @@ function operation(
     status: "ready",
     errorCode: null,
     warningCount: 0,
+    issueCount: 0,
+    fileCount: null,
+    totalSizeBytes: null,
     failureStage: null,
     createdAt: "2026-01-01T10:00:00.000Z",
     updatedAt: "2026-01-01T11:00:00.000Z",
@@ -58,11 +66,21 @@ function record(
     filename: "a.zip",
     status: "ready" as const,
     warningCount: 0,
+    issueCount: 0,
+    fileCount: null,
+    totalSizeBytes: null,
     errorCode: null,
     failureStage: null,
     createdAt: "2026-01-01T10:00:00.000Z",
     updatedAt: "2026-01-01T11:00:00.000Z",
     completedAt: null,
+    activityAt:
+      overrides.activityAt ?? overrides.updatedAt ?? "2026-01-01T11:00:00.000Z",
+    outcomeAt:
+      overrides.outcomeAt ??
+      overrides.completedAt ??
+      overrides.updatedAt ??
+      "2026-01-01T11:00:00.000Z",
     retryable: false,
     ephemeral: false,
     outcomeFingerprint: "",
@@ -74,28 +92,64 @@ function record(
 }
 
 describe("Upload Center view model and state", () => {
-  it("keeps global order based on creation and deterministic id tie-break", () => {
+  it("orders active work by latest activity and uses deterministic tie-breaks", () => {
     const older = operation({
       id: "a",
+      status: "processing",
       createdAt: "2026-01-01T10:00:00Z",
-      updatedAt: "2026-01-01T12:00:00Z",
+      updatedAt: "2026-01-01T10:25:00Z",
+      completedAt: null,
     });
     const newer = operation({
       id: "b",
-      createdAt: "2026-01-01T10:30:00Z",
-      updatedAt: "2026-01-01T10:30:00Z",
+      status: "processing",
+      createdAt: "2026-01-01T10:10:00Z",
+      updatedAt: "2026-01-01T10:20:00Z",
+      completedAt: null,
     });
     const rows = mergeUploadCenterRecords({
       operations: [older, newer],
       batches: [],
     });
-    expect(rows.map((row) => row.id)).toEqual(["b", "a"]);
+    expect(rows.map((row) => row.id)).toEqual(["a", "b"]);
     expect(
       compareUploadCenterRecords(
-        { id: "a", createdAt: "same" },
-        { id: "b", createdAt: "same" },
+        { id: "a", createdAt: "same", activityAt: "same" },
+        { id: "b", createdAt: "same", activityAt: "same" },
       ),
     ).toBeGreaterThan(0);
+  });
+
+  it("orders completed by completion and errors by their outcome timestamp", () => {
+    const completed = mergeUploadCenterRecords({
+      operations: [
+        operation({ id: "a", completedAt: "2026-01-01T10:20:00Z" }),
+        operation({ id: "b", completedAt: "2026-01-01T10:30:00Z" }),
+      ],
+      batches: [],
+    });
+    expect(completed.map((record) => record.id)).toEqual(["b", "a"]);
+    const errors = mergeUploadCenterRecords({
+      operations: [
+        operation({
+          id: "a",
+          status: "rejected",
+          updatedAt: "2026-01-01T10:30:00Z",
+        }),
+        operation({
+          id: "b",
+          status: "failed",
+          updatedAt: "2026-01-01T10:25:00Z",
+        }),
+        operation({
+          id: "c",
+          status: "rejected",
+          updatedAt: "2026-01-01T10:10:00Z",
+        }),
+      ],
+      batches: [],
+    });
+    expect(errors.map((record) => record.id)).toEqual(["a", "b", "c"]);
   });
 
   it("deduplicates persisted import projections and replaces ephemeral items", () => {
@@ -200,6 +254,20 @@ describe("Upload Center view model and state", () => {
         },
       ]),
     ).toBe(false);
+  });
+
+  it("keeps dismissal fingerprints stable after outcome timestamps are persisted", () => {
+    const original = record({
+      status: "ready",
+      completedAt: "2026-01-01T10:30:00Z",
+      updatedAt: "2026-01-01T10:30:00Z",
+    });
+    const later = record({
+      status: "ready",
+      completedAt: "2026-01-01T10:30:00Z",
+      updatedAt: "2026-01-01T10:35:00Z",
+    });
+    expect(later.outcomeFingerprint).toBe(original.outcomeFingerprint);
   });
 
   it("sanitizes malformed, old and excess dismissal data", () => {
@@ -337,6 +405,68 @@ describe("Upload Center view model and state", () => {
       title: "Reemplazo completado",
       copy: "La imagen se reemplazó correctamente.",
     });
+  });
+
+  it("keeps row summaries compact and reports batch outcomes once", () => {
+    expect(uploadCenterSummary(record({ warningCount: 14 }))).toEqual({
+      label: "Completada con 14 advertencias",
+      tone: "warning",
+    });
+    expect(
+      uploadCenterSummary(record({ status: "rejected", issueCount: 4 })),
+    ).toEqual({
+      label: "Carga rechazada · 4 problemas",
+      tone: "danger",
+    });
+    expect(
+      uploadCenterSummary(
+        record({ status: "rejected", errorCode: "IMAGE_HEIGHT_EXCEEDED" }),
+      ),
+    ).toEqual({ label: "Carga rechazada", tone: "danger" });
+    expect(
+      uploadBatchOutcomePresentation({
+        completed: 8,
+        warnings: 2,
+        rejected: 1,
+        failed: 0,
+      }),
+    ).toMatchObject({
+      title: "Carga masiva completada",
+      copy: "8 capítulos completados · 2 con advertencias · 1 rechazado",
+    });
+  });
+
+  it("presents contextual individual result dialog outcomes", () => {
+    expect(
+      uploadResultPresentation(record({ kind: "chapter_upload" })),
+    ).toMatchObject({
+      title: "Carga completada",
+      copy: "El capítulo se cargó correctamente.",
+    });
+    expect(
+      uploadResultPresentation(record({ kind: "chapter_import" })),
+    ).toMatchObject({
+      title: "Carga completada",
+      copy: "El capítulo se cargó correctamente.",
+    });
+    expect(
+      uploadResultPresentation(record({ kind: "chapter_replacement" })),
+    ).toMatchObject({
+      title: "Reemplazo completado",
+      copy: "El capítulo se reemplazó correctamente.",
+    });
+    expect(
+      uploadResultPresentation(
+        record({ kind: "image_replacement", status: "completed" }),
+      ),
+    ).toMatchObject({
+      title: "Reemplazo completado",
+      copy: "La imagen se reemplazó correctamente.",
+    });
+    expect(
+      uploadResultPresentation(record({ status: "rejected", issueCount: 3 }))
+        .copy,
+    ).toContain("3 problemas");
   });
 
   it("announces only observed transitions once and preserves FIFO with a three notice limit", () => {
