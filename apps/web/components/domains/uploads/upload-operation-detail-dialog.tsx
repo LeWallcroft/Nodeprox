@@ -74,11 +74,13 @@ export function UploadOperationDetailDialog({
       onOpenChange={onOpenChange}
       title={title}
       size="lg"
+      chrome="soft"
+      geometry="workspace-stable"
       contentClassName="flex flex-1 flex-col"
     >
       {!operation ? null : (
-        <div className="flex min-h-0 flex-1 flex-col gap-4 text-sm text-secondary">
-          <div className="rounded-control border border-[var(--border-subtle)] bg-surface p-3">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 text-sm text-secondary">
+          <div className="shrink-0 space-y-1 px-1">
             <p className="m-0 font-medium text-text">
               {operation.seriesTitle}
               {operation.chapterNumber === null
@@ -107,7 +109,7 @@ export function UploadOperationDetailDialog({
             ) : null}
           </div>
           <div
-            className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)]"
+            className="flex shrink-0 gap-1 overflow-x-auto rounded-control bg-surface p-1"
             role="tablist"
             aria-label="Secciones del detalle"
           >
@@ -132,7 +134,7 @@ export function UploadOperationDetailDialog({
               Información general
             </DetailTab>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="min-h-0 flex-1 overflow-y-auto rounded-control bg-surface/50 p-2 pr-1">
             {activeTab === "information" ? (
               <OperationInformation
                 operation={operation}
@@ -191,7 +193,7 @@ function ValidationDetails({
         ? issues.map(([filename, items]) => (
             <section
               key={`issue-${filename}`}
-              className="rounded-control border border-destructive/30 bg-destructive-surface p-3"
+              className="rounded-control border-l-[3px] border-destructive-text bg-surface p-3"
             >
               <h3 className="m-0 font-semibold text-text">{filename}</h3>
               {items.map((issue) => {
@@ -201,11 +203,21 @@ function ValidationDetails({
                     <p className="m-0 font-medium text-text">
                       {validationIssueLabel(issue.code)}
                     </p>
-                    {measurement.actual ? (
-                      <p className="m-0 mt-1">Actual: {measurement.actual}</p>
-                    ) : null}
-                    {measurement.expected ? (
-                      <p className="m-0">Máximo: {measurement.expected}</p>
+                    {measurement.actual || measurement.expected ? (
+                      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {measurement.actual ? (
+                          <Measurement
+                            label="Actual"
+                            value={measurement.actual}
+                          />
+                        ) : null}
+                        {measurement.expected ? (
+                          <Measurement
+                            label="Máximo"
+                            value={measurement.expected}
+                          />
+                        ) : null}
+                      </div>
                     ) : null}
                     <p className="m-0 mt-1 text-xs">Código: {issue.code}</p>
                   </div>
@@ -218,7 +230,7 @@ function ValidationDetails({
         ? warnings.map(([filename, items]) => (
             <section
               key={`warning-${filename}`}
-              className="rounded-control border border-warning/30 bg-warning/5 p-3"
+              className="rounded-control border-l-[3px] border-warning bg-surface p-3"
             >
               <h3 className="m-0 font-semibold text-text">{filename}</h3>
               {items.map((warning) => {
@@ -229,12 +241,15 @@ function ValidationDetails({
                     className="mt-2"
                   >
                     <p className="m-0 font-medium text-text">{detail.title}</p>
-                    <p className="m-0 mt-1">Actual: {detail.actual}</p>
-                    {detail.threshold ? (
-                      <p className="m-0">
-                        Umbral recomendado: {detail.threshold}
-                      </p>
-                    ) : null}
+                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Measurement label="Actual" value={detail.actual} />
+                      {detail.threshold ? (
+                        <Measurement
+                          label="Umbral recomendado"
+                          value={detail.threshold}
+                        />
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -246,6 +261,15 @@ function ValidationDetails({
       ) : section === "warnings" && !warnings.length ? (
         <p className="m-0">No hay advertencias de validación.</p>
       ) : null}
+    </div>
+  );
+}
+
+function Measurement({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-control bg-surface-elevated px-3 py-2">
+      <p className="m-0 text-xs text-muted">{label}</p>
+      <p className="m-0 mt-1 break-words font-medium text-text">{value}</p>
     </div>
   );
 }
@@ -264,7 +288,7 @@ function DetailTab({
       type="button"
       role="tab"
       aria-selected={active}
-      className={`shrink-0 rounded-t-control px-3 py-2 text-xs ${active ? "bg-primary text-primary-foreground" : "text-secondary hover:bg-surface-hover"}`}
+      className={`shrink-0 rounded-control px-3 py-2 text-xs ${active ? "bg-primary-soft text-text" : "text-secondary hover:bg-surface-hover"}`}
       onClick={onClick}
     >
       {children}

@@ -1,5 +1,12 @@
 "use client";
 
+import {
+  CircleAlert,
+  CircleCheckBig,
+  CircleX,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import type { UploadCenterRecord } from "../../../lib/domains/uploads/upload-center-view-model";
 
@@ -112,7 +119,7 @@ export function UploadOutcomeMessage({
   return (
     <article
       role={message.tone === "error" ? "alert" : "status"}
-      className="rounded-control border border-[var(--border-subtle)] bg-surface-elevated p-3 shadow-panel"
+      className="rounded-control bg-surface-elevated p-3 shadow-panel"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -122,24 +129,41 @@ export function UploadOutcomeMessage({
       }}
     >
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="m-0 text-sm font-semibold text-text">{message.title}</p>
-          <p className="m-0 mt-1 text-sm text-secondary">{message.copy}</p>
+        <div className="flex min-w-0 items-start gap-2">
+          <span
+            className={`mt-0.5 ${message.tone === "success" ? "text-success" : message.tone === "warning" ? "text-warning-text" : "text-destructive-text"}`}
+          >
+            {message.tone === "success" ? (
+              <CircleCheckBig aria-hidden="true" className="size-4" />
+            ) : message.tone === "warning" ? (
+              <TriangleAlert aria-hidden="true" className="size-4" />
+            ) : operation.status === "rejected" ? (
+              <CircleX aria-hidden="true" className="size-4" />
+            ) : (
+              <CircleAlert aria-hidden="true" className="size-4" />
+            )}
+          </span>
+          <div>
+            <p className="m-0 text-sm font-semibold text-text">
+              {message.title}
+            </p>
+            <p className="m-0 mt-1 text-sm text-secondary">{message.copy}</p>
+          </div>
         </div>
         <button
           type="button"
           aria-label="Cerrar notificación"
-          className="text-secondary"
+          className="rounded-control p-1 text-secondary hover:bg-surface-hover"
           onClick={onDismiss}
         >
-          ×
+          <X aria-hidden="true" className="size-4" />
         </button>
       </div>
       <div className="mt-2 flex gap-3 text-sm">
         {batchSummary && onCenter ? (
           <button
             type="button"
-            className="text-primary underline"
+            className="rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
             onClick={onCenter}
           >
             Ver Centro de cargas
@@ -148,7 +172,7 @@ export function UploadOutcomeMessage({
         {!batchSummary && message.detail ? (
           <button
             type="button"
-            className="text-primary underline"
+            className="rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
             onClick={onDetails}
           >
             Ver detalles
@@ -157,7 +181,7 @@ export function UploadOutcomeMessage({
         {operation.status === "retry_exhausted" && onRetry ? (
           <button
             type="button"
-            className="text-primary underline"
+            className="rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
             onClick={onRetry}
           >
             Reintentar

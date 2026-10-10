@@ -969,8 +969,12 @@ test.describe("M4-B real upload processing", () => {
         page.getByRole("heading", { name: /Detalle de carga/ }),
       ).toBeVisible();
       await expect(page.getByText("01.jpg")).toBeVisible();
-      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
-      await expect(page.getByText("Umbral recomendado: 1 MB")).toBeVisible();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Umbral recomendado", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
       await page
         .getByRole("dialog")
         .getByRole("button", { name: "Cerrar diálogo" })
@@ -1048,8 +1052,12 @@ test.describe("M4-B real upload processing", () => {
         .filter({ hasText: "Carga rechazada" });
       await expect(rejectedResult).toBeVisible({ timeout: 30_000 });
       await rejectedResult.getByRole("button", { name: /Ver detalle/ }).click();
-      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
-      await expect(page.getByText("Máximo: 1 MB")).toBeVisible();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Máximo", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
       await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
       await expect(page.getByRole("tab", { name: /Errores 1/ })).toBeVisible();
       await page
@@ -1065,8 +1073,12 @@ test.describe("M4-B real upload processing", () => {
         .filter({ hasText: "hard-limit.zip" });
       await expect(rejectedRow).toBeVisible();
       await rejectedRow.getByRole("button", { name: "Ver detalles" }).click();
-      await expect(page.getByText("Actual: 1 MB")).toBeVisible();
-      await expect(page.getByText("Máximo: 1 MB")).toBeVisible();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Máximo", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
       await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
       await page
         .getByRole("dialog")

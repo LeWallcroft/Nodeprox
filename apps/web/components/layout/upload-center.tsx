@@ -3,10 +3,19 @@
 import {
   Check,
   CircleAlert,
+  CircleCheckBig,
+  CircleX,
+  Eye,
+  EyeOff,
   FileArchive,
+  Image,
+  ListX,
   LoaderCircle,
   Minus,
   RefreshCw,
+  Replace,
+  RotateCcw,
+  TriangleAlert,
   Upload,
   UploadCloud,
   X,
@@ -383,9 +392,9 @@ export function UploadCenter() {
         {open ? (
           <section
             aria-label="Centro de cargas"
-            className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(44rem,calc(100dvh-7rem))] w-[min(38rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
+            className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(38rem,calc(100dvh-7rem))] w-[min(31rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
           >
-            <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
+            <header className="flex min-h-[4.5rem] shrink-0 items-start justify-between gap-4 px-5 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-control bg-accent-soft text-primary">
                   <UploadCloud aria-hidden="true" className="size-5" />
@@ -416,7 +425,7 @@ export function UploadCenter() {
             </header>
             <div
               aria-label="Estado de cargas"
-              className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)] px-3 pt-2"
+              className="mx-3 flex shrink-0 gap-1 rounded-control bg-surface p-1"
               role="tablist"
             >
               <CenterTab
@@ -439,9 +448,9 @@ export function UploadCenter() {
                 onClick={() => setTab("failed")}
               />
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
               {tabRecords.length ? (
-                <div className="divide-y divide-[var(--border-subtle)]">
+                <div className="space-y-2">
                   {tabRecords.map((record) => (
                     <UploadCenterRow
                       key={`${record.kind}:${record.id}`}
@@ -455,11 +464,11 @@ export function UploadCenter() {
                 <EmptyTab tab={tab} />
               )}
             </div>
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-4 py-3">
+            <footer className="flex min-h-[3.5rem] shrink-0 items-center justify-between gap-3 px-3 py-2">
               <Button
                 aria-label="Actualizar cargas"
                 type="button"
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={refreshing}
                 onClick={() => void refresh()}
@@ -475,10 +484,11 @@ export function UploadCenter() {
               {tab === "completed" ? (
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   disabled={!counts.completed}
                   onClick={() => dismissVisible(completed)}
+                  icon={<ListX aria-hidden="true" className="size-4" />}
                 >
                   Limpiar completadas
                 </Button>
@@ -486,10 +496,11 @@ export function UploadCenter() {
               {tab === "failed" ? (
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   disabled={!counts.failed}
                   onClick={() => dismissVisible(failed)}
+                  icon={<ListX aria-hidden="true" className="size-4" />}
                 >
                   Limpiar errores
                 </Button>
@@ -557,10 +568,17 @@ function UploadCenterRow({
     "terminal_failed",
   ].includes(record.status);
   return (
-    <article className="flex gap-3 py-3 first:pt-0 last:pb-0">
-      <span className="grid size-9 shrink-0 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface text-primary">
-        {["ready", "completed"].includes(record.status) ? (
-          <Check aria-hidden="true" className="size-4 text-success" />
+    <article className="flex min-h-[4.75rem] gap-3 rounded-control bg-surface p-3 transition-colors hover:bg-surface-hover">
+      <span
+        className={`grid size-9 shrink-0 place-items-center rounded-control ${rowIconTone(record.status, record.warningCount)}`}
+      >
+        {record.warningCount > 0 &&
+        ["ready", "completed"].includes(record.status) ? (
+          <TriangleAlert aria-hidden="true" className="size-4" />
+        ) : ["ready", "completed"].includes(record.status) ? (
+          <CircleCheckBig aria-hidden="true" className="size-4" />
+        ) : record.status === "rejected" ? (
+          <CircleX aria-hidden="true" className="size-4" />
         ) : [
             "rejected",
             "failed",
@@ -571,6 +589,12 @@ function UploadCenterRow({
             aria-hidden="true"
             className="size-4 text-destructive-text"
           />
+        ) : active ? (
+          <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+        ) : record.kind === "chapter_replacement" ? (
+          <Replace aria-hidden="true" className="size-4" />
+        ) : record.kind === "image_replacement" ? (
+          <Image aria-hidden="true" className="size-4" />
         ) : (
           <FileArchive aria-hidden="true" className="size-4" />
         )}
@@ -613,9 +637,10 @@ function UploadCenterRow({
           {canLoadValidationReport(record) ? (
             <button
               type="button"
-              className="text-primary underline"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
               onClick={onDetails}
             >
+              <Eye aria-hidden="true" className="size-3.5" />
               Ver detalles
             </button>
           ) : null}
@@ -640,9 +665,10 @@ function UploadCenterRow({
               />
               <button
                 type="button"
-                className="text-primary underline"
+                className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
                 onClick={() => fileInput.current?.click()}
               >
+                <RotateCcw aria-hidden="true" className="size-3.5" />
                 Reintentar ZIP
               </button>
             </>
@@ -651,7 +677,7 @@ function UploadCenterRow({
             <button
               type="button"
               disabled={busy}
-              className="text-primary underline disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover disabled:opacity-50"
               onClick={() => {
                 setBusy(true);
                 setRetryError(false);
@@ -667,6 +693,7 @@ function UploadCenterRow({
                   .finally(() => setBusy(false));
               }}
             >
+              <RotateCcw aria-hidden="true" className="size-3.5" />
               Reintentar procesamiento
             </button>
           ) : null}
@@ -677,18 +704,20 @@ function UploadCenterRow({
           ) : null}
           {canChangeChapter ? (
             <Link
-              className="text-primary underline"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
               href={`/series/${record.seriesId}/chapters`}
             >
+              <Replace aria-hidden="true" className="size-3.5" />
               Cambiar capítulo
             </Link>
           ) : null}
           {!active ? (
             <button
               type="button"
-              className="text-secondary underline"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-secondary hover:bg-surface-hover"
               onClick={onDismiss}
             >
+              <EyeOff aria-hidden="true" className="size-3.5" />
               Ocultar
             </button>
           ) : null}
@@ -714,7 +743,7 @@ function CenterTab({
   return (
     <button
       aria-selected={active}
-      className={`relative inline-flex min-h-10 items-center gap-2 px-3 text-sm font-medium transition-colors ${active ? "text-text" : "text-secondary hover:text-text"}`}
+      className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1 px-1 text-xs font-medium transition-colors sm:text-sm ${active ? "rounded-control bg-primary-soft text-text" : "rounded-control text-secondary hover:bg-surface-hover hover:text-text"}`}
       role="tab"
       type="button"
       onClick={onClick}
@@ -725,9 +754,6 @@ function CenterTab({
       >
         {count}
       </span>
-      {active ? (
-        <span className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-primary" />
-      ) : null}
     </button>
   );
 }
@@ -752,7 +778,7 @@ function EmptyTab({ tab }: { tab: Tab }) {
   }[tab] as [typeof Check, string, string];
   const [Icon, title, copy] = content;
   return (
-    <div className="grid h-full min-h-52 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface px-6 text-center">
+    <div className="grid h-full min-h-52 place-items-center rounded-control bg-surface px-6 text-center">
       <div className="grid max-w-xs justify-items-center gap-2">
         <span className="grid size-11 place-items-center rounded-full bg-accent-soft text-primary">
           <Icon aria-hidden="true" className="size-5" />
@@ -776,7 +802,7 @@ function IconButton({
   return (
     <button
       aria-label={label}
-      className="grid size-8 place-items-center rounded-control border border-[var(--border-subtle)] text-secondary transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      className="grid size-8 place-items-center rounded-control text-secondary transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       type="button"
       onClick={onClick}
     >
@@ -832,4 +858,17 @@ function summaryToneClass(tone: "success" | "warning" | "danger" | "info") {
     danger: "bg-destructive-surface text-destructive-text",
     info: "bg-primary/10 text-primary",
   }[tone];
+}
+function rowIconTone(status: string, warningCount: number) {
+  if (["ready", "completed"].includes(status) && warningCount > 0)
+    return "bg-warning/10 text-warning-text";
+  if (["ready", "completed"].includes(status))
+    return "bg-success/10 text-success";
+  if (
+    ["rejected", "failed", "retry_exhausted", "terminal_failed"].includes(
+      status,
+    )
+  )
+    return "bg-destructive-surface text-destructive-text";
+  return "bg-primary-soft text-primary-hover";
 }

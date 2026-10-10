@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { BackgroundUploadOperation } from "../../lib/domains/uploads/background-operations";
 import {
@@ -17,13 +18,17 @@ import {
 } from "../../lib/domains/uploads/upload-center-view-model";
 import {
   mediaWarningPresentation,
+  UploadOperationDetailDialog,
   validationIssueMeasurement,
 } from "../domains/uploads/upload-operation-detail-dialog";
 import {
   uploadBatchOutcomePresentation,
   uploadOutcomeMessage,
 } from "../domains/uploads/upload-outcome-message";
-import { uploadResultPresentation } from "../domains/uploads/upload-result-dialog";
+import {
+  UploadResultDialog,
+  uploadResultPresentation,
+} from "../domains/uploads/upload-result-dialog";
 import { uploadQueueStorageKey } from "../providers/upload-queue-provider";
 
 function operation(
@@ -92,6 +97,40 @@ function record(
 }
 
 describe("Upload Center view model and state", () => {
+  it("gives result outcomes a fixed soft modal geometry", () => {
+    for (const status of ["ready", "rejected", "retry_exhausted"] as const) {
+      const markup = renderToStaticMarkup(
+        <UploadResultDialog
+          open
+          operation={record({
+            status,
+            warningCount: status === "ready" ? 2 : 0,
+          })}
+          onOpenChange={() => undefined}
+          onDetails={() => undefined}
+          onCenter={() => undefined}
+        />,
+      );
+      expect(markup).toContain("max-w-[560px]");
+      expect(markup).toContain("h-[min(26.25rem,calc(100dvh-3rem))]");
+    }
+  });
+
+  it("gives detail tabs and validation states one stable scrolling workspace", () => {
+    const markup = renderToStaticMarkup(
+      <UploadOperationDetailDialog
+        open
+        operation={record({ status: "ready", warningCount: 25 })}
+        onOpenChange={() => undefined}
+      />,
+    );
+    expect(markup).toContain("max-w-[760px]");
+    expect(markup).toContain("h-[min(42rem,calc(100dvh-3rem))]");
+    expect(markup).toContain("overflow-y-auto rounded-control bg-surface/50");
+    expect(markup).toContain("rounded-control bg-surface p-1");
+    expect(markup).not.toContain("border-b border-[var(--border-subtle)]");
+  });
+
   it("orders active work by latest activity and uses deterministic tie-breaks", () => {
     const older = operation({
       id: "a",

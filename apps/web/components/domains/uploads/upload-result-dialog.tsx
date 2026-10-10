@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleAlert, CircleCheckBig, CircleX } from "lucide-react";
 import Link from "next/link";
 import type { UploadCenterRecord } from "../../../lib/domains/uploads/upload-center-view-model";
 import { AppDialog } from "../../ui/app-dialog";
@@ -84,14 +85,16 @@ export function UploadResultDialog({
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={result.title}
+      title="Resultado de carga"
       size="md"
+      chrome="soft"
+      geometry="compact-stable"
       footer={
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex min-h-10 flex-wrap items-center justify-end gap-2">
           {result.details ? (
             <button
               type="button"
-              className="rounded-control border border-[var(--border-subtle)] px-3 py-2 text-sm text-primary hover:bg-surface-hover"
+              className={`rounded-control px-3 py-2 text-sm ${operation.status !== "rejected" && result.tone === "warning" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-primary hover:bg-surface-hover"}`}
               onClick={closeForDetails}
             >
               Ver detalle
@@ -113,7 +116,7 @@ export function UploadResultDialog({
           ) : result.tone === "warning" || result.tone === "danger" ? (
             <button
               type="button"
-              className="rounded-control border border-[var(--border-subtle)] px-3 py-2 text-sm"
+              className="rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
               onClick={() => {
                 onOpenChange(false);
                 onCenter();
@@ -123,7 +126,7 @@ export function UploadResultDialog({
             </button>
           ) : (
             <Link
-              className="rounded-control border border-[var(--border-subtle)] px-3 py-2 text-sm"
+              className={`rounded-control px-3 py-2 text-sm ${result.tone === "success" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-secondary hover:bg-surface-hover"}`}
               href={chapterHref}
               onClick={() => onOpenChange(false)}
             >
@@ -132,7 +135,7 @@ export function UploadResultDialog({
           )}
           <button
             type="button"
-            className="rounded-control bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary-hover"
+            className="rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
             onClick={() => onOpenChange(false)}
           >
             Cerrar
@@ -140,40 +143,56 @@ export function UploadResultDialog({
         </div>
       }
     >
-      <div
-        className={`rounded-control border p-4 ${resultToneClass(result.tone)}`}
-      >
-        <p className="m-0 text-sm">{result.copy}</p>
-      </div>
-      <div className="mt-4 rounded-control border border-[var(--border-subtle)] bg-surface p-4">
-        <p className="m-0 font-semibold text-text">
-          {operation.chapterNumber === null
-            ? operation.seriesTitle
-            : `Capítulo ${operation.chapterNumber} · ${operation.seriesTitle}`}
-        </p>
-        <p className="m-0 mt-1 break-all text-sm text-secondary">
-          {operation.filename}
-        </p>
-        {operation.fileCount !== null || operation.totalSizeBytes !== null ? (
-          <p className="m-0 mt-2 text-sm text-secondary">
-            {operation.fileCount === null
-              ? ""
-              : `${operation.fileCount} archivos`}
-            {operation.fileCount !== null && operation.totalSizeBytes !== null
-              ? " · "
-              : ""}
-            {operation.totalSizeBytes === null
-              ? ""
-              : formatMiB(operation.totalSizeBytes)}
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-5">
+        <div
+          className={`flex items-start gap-3 rounded-control p-4 ${resultToneClass(result.tone)}`}
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-full bg-current/10">
+            {result.tone === "success" ? (
+              <CircleCheckBig aria-hidden="true" className="size-6" />
+            ) : result.tone === "warning" ? (
+              <CircleAlert aria-hidden="true" className="size-6" />
+            ) : (
+              <CircleX aria-hidden="true" className="size-6" />
+            )}
+          </span>
+          <div>
+            <h3 className="m-0 text-base font-semibold text-text">
+              {result.title}
+            </h3>
+            <p className="m-0 mt-1 text-sm">{result.copy}</p>
+          </div>
+        </div>
+        <div className="rounded-control bg-surface p-4">
+          <p className="m-0 font-semibold text-text">
+            {operation.chapterNumber === null
+              ? operation.seriesTitle
+              : `Capítulo ${operation.chapterNumber} · ${operation.seriesTitle}`}
           </p>
-        ) : null}
-        <p className="m-0 mt-2 text-xs text-secondary">
-          {operation.status === "ready" || operation.status === "completed"
-            ? "Operación completada"
-            : operation.status === "rejected"
-              ? "Corrige los archivos indicados en el detalle."
-              : "Consulta el Centro de cargas para revisar el estado."}
-        </p>
+          <p className="m-0 mt-1 break-all text-sm text-secondary">
+            {operation.filename}
+          </p>
+          {operation.fileCount !== null || operation.totalSizeBytes !== null ? (
+            <p className="m-0 mt-2 text-sm text-secondary">
+              {operation.fileCount === null
+                ? ""
+                : `${operation.fileCount} archivos`}
+              {operation.fileCount !== null && operation.totalSizeBytes !== null
+                ? " · "
+                : ""}
+              {operation.totalSizeBytes === null
+                ? ""
+                : formatMiB(operation.totalSizeBytes)}
+            </p>
+          ) : null}
+          <p className="m-0 mt-2 text-xs text-secondary">
+            {operation.status === "ready" || operation.status === "completed"
+              ? "Operación completada"
+              : operation.status === "rejected"
+                ? "Corrige los archivos indicados en el detalle."
+                : "Consulta el Centro de cargas para revisar el estado."}
+          </p>
+        </div>
       </div>
     </AppDialog>
   );
@@ -181,10 +200,9 @@ export function UploadResultDialog({
 
 function resultToneClass(tone: "success" | "warning" | "danger") {
   return {
-    success: "border-success/30 bg-success/5 text-success",
-    warning: "border-warning/40 bg-warning/5 text-warning-text",
-    danger:
-      "border-destructive/30 bg-destructive-surface text-destructive-text",
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning-text",
+    danger: "bg-destructive-surface text-destructive-text",
   }[tone];
 }
 
