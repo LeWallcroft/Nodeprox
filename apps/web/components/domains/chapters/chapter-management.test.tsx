@@ -14,6 +14,7 @@ import {
   resolutionLabel,
 } from "./bulk-chapter-upload-dialog";
 import { ChapterDetailPanel } from "./chapter-detail-panel";
+import { GlobalChapterCreateDialog } from "./global-chapter-create-dialog";
 import { ChapterForm } from "./chapter-form";
 import { ChapterList } from "./chapter-list";
 
@@ -267,6 +268,25 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain('type="file"');
     expect(markup).toContain("multiple");
     expect(markup).not.toContain("Continuar con ZIP");
+    expect(markup).toContain("Requisitos para la carga");
+  });
+
+  it("makes the latest Chapter reference visually prominent without auto-filling", () => {
+    const markup = renderWithQueryClient(
+      <GlobalChapterCreateDialog
+        open
+        onOpenChange={() => undefined}
+        onCreated={() => undefined}
+        fixedSeries={{ id: "series-1", title: "Serie" }}
+        latestChapterBySeries={{ "series-1": 61 }}
+      />,
+    );
+    expect(markup).toContain("Referencia de la serie");
+    expect(markup).toContain("Último capítulo visible");
+    expect(markup).toContain("tabular-nums text-primary");
+    expect(markup).toContain(">61</span>");
+    expect(markup).toContain('value=""');
+    expect(markup).not.toContain('value="62"');
   });
 
   it("presents Smart Bulk target resolutions and typed conflicts", () => {

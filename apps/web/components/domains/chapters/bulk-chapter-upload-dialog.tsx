@@ -11,6 +11,7 @@ import { parseChapterNumber } from "../../../lib/domains/chapters/chapter-number
 import { useChapterList } from "../../../lib/domains/chapters/hooks";
 import { mediaWarningLabel } from "../../../lib/domains/ingestion/orchestration";
 import type { ImportCandidate } from "../../../lib/domains/ingestion/types";
+import { useUploadPolicy } from "../../../lib/domains/uploads/hooks";
 import {
   DEFAULT_MAX_ZIP_SIZE_BYTES,
   MAX_BULK_ZIP_FILES,
@@ -21,6 +22,7 @@ import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ProgressBar } from "../../ui/progress-bar";
 import { errorMessage } from "../feedback";
+import { UploadRequirements } from "../uploads/upload-requirements";
 import { ZipDropzone } from "../uploads/zip-dropzone";
 
 export function BulkChapterUploadDialog({
@@ -37,6 +39,7 @@ export function BulkChapterUploadDialog({
   seriesTitle: string;
 }) {
   const queue = useUploadQueue();
+  const policy = useUploadPolicy(open);
   const chapters = useChapterList(open ? seriesId : "");
   const [items, setItems] = useState<ImportCandidate[]>([]);
   const [running, setRunning] = useState(false);
@@ -147,6 +150,13 @@ export function BulkChapterUploadDialog({
       }
     >
       <div className="grid gap-4">
+        <UploadRequirements
+          policy={policy.data ?? null}
+          loading={policy.isPending}
+          error={policy.isError}
+          onRetry={() => void policy.refetch()}
+          compact
+        />
         <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <section className="grid content-start gap-2">
             <ZipDropzone
