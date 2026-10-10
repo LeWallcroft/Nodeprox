@@ -20,10 +20,11 @@ describe("same-origin API proxy", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
     await expect(response.json()).resolves.toEqual({ status: "ok" });
     expect(backend).toHaveBeenCalledWith(
       "http://localhost:3001/health?check=1",
-      expect.objectContaining({ method: "GET" }),
+      expect.objectContaining({ method: "GET", cache: "no-store" }),
     );
     vi.unstubAllGlobals();
   });
@@ -84,10 +85,11 @@ describe("same-origin API proxy", () => {
         ]),
       );
       expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
       await expect(response.json()).resolves.toEqual(report);
       expect(backend).toHaveBeenCalledWith(
         `http://localhost:3001/me/upload-operations/chapter_import/${operationId}/validation-report`,
-        expect.objectContaining({ method: "GET" }),
+        expect.objectContaining({ method: "GET", cache: "no-store" }),
       );
     } finally {
       vi.unstubAllGlobals();
@@ -123,7 +125,7 @@ describe("same-origin API proxy", () => {
       expect(response.status).toBe(200);
       expect(backend).toHaveBeenCalledWith(
         `http://localhost:3001/me/upload-operations/chapter_import/${operationId}/retry`,
-        expect.objectContaining({ method: "POST" }),
+        expect.objectContaining({ method: "POST", cache: "no-store" }),
       );
     } finally {
       vi.unstubAllGlobals();

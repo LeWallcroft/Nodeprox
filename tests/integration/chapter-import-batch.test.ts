@@ -237,8 +237,12 @@ describe("ChapterImportBatch admission control", () => {
         expect.objectContaining({
           kind: "chapter_import",
           id: item.itemId,
+          batchId: created.json().batchId,
           status: "ready",
           warningCount: 2,
+          issueCount: 0,
+          fileCount: 1,
+          totalSizeBytes: 2 * 1024 * 1024,
         }),
       ]),
     );

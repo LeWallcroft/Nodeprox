@@ -5,6 +5,7 @@ import { loadDatabaseConfig } from "@nodeprox/config";
 import {
   type APIRequestContext,
   expect,
+  type Page,
   request,
   test,
 } from "@playwright/test";
@@ -245,6 +246,43 @@ async function login(
   const session = await authenticated.get("/auth/session");
   expect(session.status()).toBe(200);
   return authenticated;
+}
+
+async function authenticatePage(
+  page: Page,
+  credentials: { email: string; password: string },
+) {
+  const browserSession = await request.newContext({ baseURL: e2eApiOrigin });
+  try {
+    const browserLogin = await browserSession.post("/auth/login", {
+      data: credentials,
+      headers: { origin: e2eApiOrigin },
+    });
+    expect(browserLogin.status()).toBe(204);
+    const browserToken = /^nodeprox_session=([^;]+)/.exec(
+      browserLogin.headers()["set-cookie"] ?? "",
+    )?.[1];
+    if (!browserToken)
+      throw new Error("browser authentication cookie was not issued");
+    await page.context().addCookies([
+      {
+        name: "nodeprox_session",
+        value: browserToken,
+        url: "http://127.0.0.1:3100",
+        httpOnly: true,
+        sameSite: "Lax",
+      },
+    ]);
+  } finally {
+    await browserSession.dispose();
+  }
+  await page.goto("/");
+  await expect(
+    page.getByRole("complementary", { name: "Navegación principal" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("region", { name: "Notificaciones de cargas" }),
+  ).toBeEmpty();
 }
 
 async function directUpload(
@@ -760,6 +798,15 @@ test.describe("M4-B real upload processing", () => {
             .where(eq(uploadValidationIssues.runId, run.id))
         : [];
       expect(issues.length).toBeGreaterThan(0);
+      const operationList = await api.get("/me/upload-operations");
+      expect((await operationList.json()).items).toContainEqual(
+        expect.objectContaining({
+          id: upload.id,
+          kind: "chapter_upload",
+          status: "rejected",
+          issueCount: issues.length,
+        }),
+      );
       expect(
         await database.db
           .select()
@@ -792,10 +839,17 @@ test.describe("M4-B real upload processing", () => {
     }
   });
 
-  test("reloads hard limits per Admission job and projects non-blocking warnings", async () => {
+  test("reloads hard limits per Admission job and projects non-blocking warnings", async ({
+    page,
+  }) => {
     test.setTimeout(120_000);
     let api = await request.newContext({ baseURL: e2eApiOrigin });
     const database = createDatabase(loadDatabaseConfig().DATABASE_URL);
+    const reportRequests: string[] = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/validation-report"))
+        reportRequests.push(request.url());
+    });
     const settingKeys = [
       "upload_warning_image_size_mb",
       "upload_max_image_size_mb",
@@ -814,7 +868,9 @@ test.describe("M4-B real upload processing", () => {
     let seriesId = "";
     const chapterIds: string[] = [];
     try {
-      api = await login(api, await createTestAdmin(database));
+      const credentials = await createTestAdmin(database);
+      api = await login(api, credentials);
+      await authenticatePage(page, credentials);
       const saveSettings = async (
         warningMb: number,
         hardMb: number,
@@ -885,6 +941,57 @@ test.describe("M4-B real upload processing", () => {
         expect.objectContaining({ id: warningUploadId, warningCount: 1 }),
       );
 
+      // This API-driven upload may complete before the browser observes an
+      // active state. Reload to verify terminal history is not announced.
+      await page.reload();
+      await expect(
+        page.getByRole("complementary", { name: "Navegación principal" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("dialog").filter({
+          hasText: "Carga completada con advertencias",
+        }),
+      ).toHaveCount(0);
+      expect(reportRequests).toHaveLength(0);
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Completadas/ }).click();
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
+      const warningRow = page
+        .locator("article")
+        .filter({ hasText: "warning.zip" });
+      await expect(warningRow).toBeVisible();
+      expect(reportRequests).toHaveLength(0);
+      await warningRow.getByRole("button", { name: "Ver detalles" }).click();
+      await expect.poll(() => reportRequests.length).toBe(1);
+      await expect(
+        page.getByRole("heading", { name: /Detalle de carga/ }),
+      ).toBeVisible();
+      await expect(page.getByText("01.jpg")).toBeVisible();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Umbral recomendado", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page.getByRole("button", { name: "Limpiar completadas" }).click();
+      await expect(warningRow).toHaveCount(0);
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
+      await expect(warningRow).toHaveCount(0);
+      await page.reload();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Completadas/ }).click();
+      await expect(
+        page.locator("article").filter({ hasText: "warning.zip" }),
+      ).toHaveCount(0);
+
       // This update occurs while the same Worker process is running.
       await saveSettings(1, 1);
       const rejectedChapterId = await createChapter(2);
@@ -940,6 +1047,55 @@ test.describe("M4-B real upload processing", () => {
           requestId: run?.requestId,
         }),
       );
+      const rejectedResult = page
+        .getByRole("dialog")
+        .filter({ hasText: "Carga rechazada" });
+      await expect(rejectedResult).toBeVisible({ timeout: 30_000 });
+      await rejectedResult.getByRole("button", { name: /Ver detalle/ }).click();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Máximo", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
+      await expect(page.getByRole("tab", { name: /Errores 1/ })).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Con errores/ }).click();
+      const rejectedRow = page
+        .locator("article")
+        .filter({ hasText: "hard-limit.zip" });
+      await expect(rejectedRow).toBeVisible();
+      await rejectedRow.getByRole("button", { name: "Ver detalles" }).click();
+      await expect(
+        page.getByText("Actual", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(
+        page.getByText("Máximo", { exact: true }).locator(".."),
+      ).toContainText("1 MB");
+      await expect(page.getByText("Código: IMAGE_SIZE_EXCEEDED")).toBeVisible();
+      await page
+        .getByRole("dialog")
+        .getByRole("button", { name: "Cerrar diálogo" })
+        .click();
+      await page.getByRole("button", { name: "Limpiar errores" }).click();
+      await expect(rejectedRow).toHaveCount(0);
+      await page.getByRole("button", { name: "Actualizar cargas" }).click();
+      await expect(rejectedRow).toHaveCount(0);
+      await page.reload();
+      await page
+        .getByRole("button", { name: "Abrir centro de cargas" })
+        .click();
+      await page.getByRole("tab", { name: /Con errores/ }).click();
+      await expect(
+        page.locator("article").filter({ hasText: "hard-limit.zip" }),
+      ).toHaveCount(0);
 
       await saveSettings(1, 64, 12000, 12000);
       const heightChapterId = await createChapter(3);

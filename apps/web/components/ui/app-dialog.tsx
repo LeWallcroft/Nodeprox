@@ -21,6 +21,9 @@ export function AppDialog({
   footer,
   size = "md",
   busy = false,
+  contentClassName = "",
+  chrome = "standard",
+  geometry = "content",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -30,6 +33,9 @@ export function AppDialog({
   footer?: ReactNode;
   size?: "sm" | "md" | "lg";
   busy?: boolean;
+  contentClassName?: string;
+  chrome?: "standard" | "soft";
+  geometry?: "content" | "compact-stable" | "workspace-stable";
 }) {
   const panelRef = useRef<HTMLElement>(null);
   const previousFocus = useRef<HTMLElement | null>(null);
@@ -85,6 +91,20 @@ export function AppDialog({
     md: "max-w-[620px]",
     lg: "max-w-[760px]",
   }[size];
+  const geometryClass = {
+    content: "max-h-[calc(100dvh-2rem)] sm:max-h-[calc(100dvh-3rem)]",
+    "compact-stable":
+      "h-[min(26.25rem,calc(100dvh-3rem))] max-h-[calc(100dvh-3rem)] sm:h-[min(26.25rem,calc(100dvh-3rem))]",
+    "workspace-stable":
+      "h-[min(42rem,calc(100dvh-3rem))] max-h-[calc(100dvh-2rem)] sm:h-[min(42rem,calc(100dvh-3rem))]",
+  }[geometry];
+  const stableWidth =
+    geometry === "compact-stable"
+      ? "max-w-[560px]"
+      : geometry === "workspace-stable"
+        ? "max-w-[760px]"
+        : width;
+  const soft = chrome === "soft";
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 sm:p-6">
@@ -99,11 +119,13 @@ export function AppDialog({
         aria-describedby={description ? descriptionId : undefined}
         aria-labelledby={titleId}
         aria-modal="true"
-        className={`relative z-10 flex max-h-[calc(100dvh-2rem)] w-full ${width} flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel sm:max-h-[calc(100dvh-3rem)]`}
+        className={`relative z-10 flex w-full ${stableWidth} ${geometryClass} flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel`}
         ref={panelRef}
         role="dialog"
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
+        <header
+          className={`flex shrink-0 items-start justify-between gap-4 px-5 py-4 ${soft ? "" : "border-b border-[var(--border-subtle)]"}`}
+        >
           <div>
             <h2 id={titleId} className="m-0 text-xl font-semibold">
               {title}
@@ -116,7 +138,7 @@ export function AppDialog({
           </div>
           <button
             aria-label="Cerrar diálogo"
-            className="grid h-8 w-8 shrink-0 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface text-secondary hover:bg-surface-hover hover:text-text"
+            className={`grid h-8 w-8 shrink-0 place-items-center rounded-control text-secondary hover:bg-surface-hover hover:text-text ${soft ? "bg-transparent" : "border border-[var(--border-subtle)] bg-surface"}`}
             disabled={busy}
             type="button"
             onClick={() => onOpenChange(false)}
@@ -124,11 +146,15 @@ export function AppDialog({
             <X aria-hidden="true" className="size-4" />
           </button>
         </header>
-        <div className="min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4">
+        <div
+          className={`min-h-0 overflow-x-hidden overflow-y-auto px-5 py-4 ${geometry === "content" ? "" : "flex-1"} ${contentClassName}`}
+        >
           {children}
         </div>
         {footer ? (
-          <footer className="shrink-0 border-t border-[var(--border-subtle)] px-5 py-4">
+          <footer
+            className={`shrink-0 px-5 py-4 ${geometry === "content" ? "" : "min-h-[4.5rem]"} ${soft ? "" : "border-t border-[var(--border-subtle)]"}`}
+          >
             {footer}
           </footer>
         ) : null}

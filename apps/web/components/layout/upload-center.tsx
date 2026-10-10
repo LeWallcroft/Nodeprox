@@ -1,169 +1,255 @@
 "use client";
 
-import type { MediaWarning } from "@nodeprox/types";
 import {
   Check,
-  CheckCheck,
-  ChevronRight,
   CircleAlert,
+  CircleCheckBig,
+  CircleX,
+  Eye,
+  EyeOff,
   FileArchive,
+  Image,
+  ListX,
   LoaderCircle,
   Minus,
   RefreshCw,
+  Replace,
+  RotateCcw,
+  TriangleAlert,
   Upload,
   UploadCloud,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import type { ImportBatchProjection } from "../../lib/domains/ingestion/types";
 import {
-  getUploadValidationReport,
-  retryBackgroundUploadOperation,
-  type UploadValidationReport,
-} from "../../lib/domains/uploads/background-operations";
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { retryBackgroundUploadOperation } from "../../lib/domains/uploads/background-operations";
 import {
-  type UploadCenterBatch,
-  useUploadQueue,
-} from "../providers/upload-queue-provider";
-import { AppDialog } from "../ui/app-dialog";
+  type DismissedUploadOutcome,
+  fillOutcomeNoticeSlots,
+  isTerminalUploadStatus,
+  isUploadOutcomeDismissed,
+  observeUploadOutcomeTransitions,
+  sanitizeDismissedUploadOutcomes,
+  uploadCenterDismissalStorageKey,
+} from "../../lib/domains/uploads/upload-center-state";
+import {
+  canLoadValidationReport,
+  compareUploadCenterRecords,
+  mergeUploadCenterRecords,
+  type UploadCenterRecord,
+  uploadCenterSummary,
+} from "../../lib/domains/uploads/upload-center-view-model";
+import { UploadOperationDetailDialog } from "../domains/uploads/upload-operation-detail-dialog";
+import { UploadOutcomeMessage } from "../domains/uploads/upload-outcome-message";
+import { UploadResultDialog } from "../domains/uploads/upload-result-dialog";
+import { useUploadQueue } from "../providers/upload-queue-provider";
 import { Button } from "../ui/button";
 import { ProgressBar } from "../ui/progress-bar";
 
-type UploadCenterTab = "active" | "completed" | "failed";
-type UploadCenterItemRecord = {
-  batch: UploadCenterBatch;
-  item: ImportBatchProjection["items"][number];
-  retryable: boolean;
-  kind: "chapter_import" | "chapter_upload" | "chapter_replacement" | null;
-  warningCount: number;
+type Tab = "active" | "completed" | "failed";
+type Notice = {
+  key: string;
+  record: UploadCenterRecord;
+  batchSummary?: {
+    completed: number;
+    warnings: number;
+    rejected: number;
+    failed: number;
+  };
 };
 
 export function UploadCenter() {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const pathname = usePathname();
-  const previousPathname = useRef(pathname);
-  const [tab, setTab] = useState<UploadCenterTab>("active");
-  const [dismissedCompletedBatchIds, setDismissedCompletedBatchIds] = useState<
-    ReadonlySet<string>
-  >(new Set());
-  const [dismissedCompletedOperationIds, setDismissedCompletedOperationIds] =
-    useState<ReadonlySet<string>>(new Set());
-  const [refreshing, setRefreshing] = useState(false);
-  const [notice, setNotice] = useState<{
-    title: string;
-    body: string;
-    seriesId: string;
-    operationId: string;
-  } | null>(null);
-  const previousStatuses = useRef<Map<string, string> | null>(null);
-  const announcedTransitions = useRef(new Set<string>());
   const queue = useUploadQueue();
+  const pathname = usePathname();
+  const root = useRef<HTMLDivElement>(null);
+  const previousPathname = useRef(pathname);
+  const previousOperations = useRef<Map<string, string> | null>(null);
+  const announced = useRef(new Set<string>());
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<Tab>("active");
+  const [refreshing, setRefreshing] = useState(false);
+  const [detail, setDetail] = useState<UploadCenterRecord | null>(null);
+  const [resultQueue, setResultQueue] = useState<UploadCenterRecord[]>([]);
+  const [dismissed, setDismissed] = useState<readonly DismissedUploadOutcome[]>(
+    [],
+  );
+  const [dismissalLoaded, setDismissalLoaded] = useState(false);
+  const [dismissalUserId, setDismissalUserId] = useState<string | null>(null);
+  const [visibleNotices, setVisibleNotices] = useState<Notice[]>([]);
+  const [pendingNotices, setPendingNotices] = useState<Notice[]>([]);
+  const records = useMemo(
+    () =>
+      mergeUploadCenterRecords({
+        operations: queue.operations,
+        batches: queue.batches,
+      }),
+    [queue.batches, queue.operations],
+  );
+  const recordsById = useMemo(
+    () => new Map(records.map((record) => [record.id, record])),
+    [records],
+  );
 
   useEffect(() => {
-    const current = new Map(
-      queue.operations.map((operation) => [operation.id, operation.status]),
+    setDismissalLoaded(false);
+    if (!queue.userId || typeof window === "undefined") {
+      setDismissed([]);
+      setDismissalUserId(queue.userId);
+      setDismissalLoaded(true);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(
+        uploadCenterDismissalStorageKey(queue.userId),
+      );
+      setDismissed(
+        sanitizeDismissedUploadOutcomes(raw ? JSON.parse(raw) : [], Date.now()),
+      );
+    } catch {
+      setDismissed([]);
+    }
+    setDismissalUserId(queue.userId);
+    setDismissalLoaded(true);
+  }, [queue.userId]);
+
+  const persistDismissed = useCallback(
+    (next: readonly DismissedUploadOutcome[]) => {
+      const sanitized = sanitizeDismissedUploadOutcomes(next, Date.now());
+      setDismissed(sanitized);
+      if (!queue.userId || typeof window === "undefined") return;
+      try {
+        window.localStorage.setItem(
+          uploadCenterDismissalStorageKey(queue.userId),
+          JSON.stringify(sanitized),
+        );
+      } catch {
+        /* UI dismissal remains available for this session. */
+      }
+    },
+    [queue.userId],
+  );
+
+  const dismissRecord = useCallback(
+    (record: UploadCenterRecord) => {
+      persistDismissed([
+        ...dismissed.filter(
+          (entry) =>
+            !(
+              entry.operationId === record.id &&
+              entry.fingerprint === record.outcomeFingerprint
+            ),
+        ),
+        {
+          operationId: record.id,
+          fingerprint: record.outcomeFingerprint,
+          dismissedAt: Date.now(),
+        },
+      ]);
+    },
+    [dismissed, persistDismissed],
+  );
+
+  useEffect(() => {
+    if (!queue.operationsLoaded) return;
+    const previous = previousOperations.current;
+    const observed = observeUploadOutcomeTransitions({
+      operations: queue.operations,
+      recordsById,
+      previousStatuses: previous,
+      announcedKeys: announced.current,
+    });
+    previousOperations.current = observed.currentStatuses;
+    if (!observed.notices.length) return;
+
+    const groups = new Map<string, UploadCenterRecord[]>();
+    for (const record of records) {
+      if (record.kind !== "chapter_import" || !record.batchId) continue;
+      groups.set(record.batchId, [
+        ...(groups.get(record.batchId) ?? []),
+        record,
+      ]);
+    }
+    const isBulkImport = (record: UploadCenterRecord) =>
+      record.kind === "chapter_import" &&
+      Boolean(record.batchId && (groups.get(record.batchId)?.length ?? 0) > 1);
+    const individual = observed.notices.filter(
+      (notice) => !isBulkImport(notice.record),
     );
-    if (previousStatuses.current) {
-      for (const operation of queue.operations) {
-        const previous = previousStatuses.current.get(operation.id);
-        const rejected = operation.status === "rejected";
-        const warned =
-          operation.status === "ready" && operation.warningCount > 0;
+    if (individual.length)
+      setResultQueue((old) => {
+        const known = new Set(old.map((record) => record.outcomeFingerprint));
+        return [
+          ...old,
+          ...individual
+            .map((notice) => notice.record)
+            .filter((record) => !known.has(record.outcomeFingerprint)),
+        ];
+      });
+
+    const notices: Notice[] = observed.notices
+      .filter((notice) => isBulkImport(notice.record))
+      .map(({ key, record }) => ({ key, record }));
+    if (previous) {
+      for (const [batchId, group] of groups) {
         if (
-          !previous ||
-          previous === operation.status ||
-          (!rejected && !warned)
+          group.length < 2 ||
+          !group.every((record) => isTerminalUploadStatus(record.status))
         )
           continue;
-        const key = `${operation.id}:${operation.status}:${operation.warningCount}`;
-        if (announcedTransitions.current.has(key)) continue;
-        announcedTransitions.current.add(key);
-        const body = rejected
-          ? `${operation.filename}: el ZIP no superó la validación.`
-          : `Carga completada. Se detectaron ${operation.warningCount} advertencias; no bloquearon el procesamiento.`;
-        setNotice({
-          title: rejected
-            ? "Carga rechazada"
-            : "Carga completada con advertencias",
-          body,
-          seriesId: operation.seriesId,
-          operationId: operation.id,
+        const newlyCompleted = group.some((record) => {
+          const oldStatus = previous.get(record.id)?.split(":")[0];
+          return oldStatus !== undefined && !isTerminalUploadStatus(oldStatus);
         });
-        if (
-          (rejected || warned) &&
-          ["chapter_import", "chapter_upload", "chapter_replacement"].includes(
-            operation.kind,
+        if (!newlyCompleted) continue;
+        const ordered = [...group].sort(compareUploadCenterRecords);
+        const record = ordered[0];
+        if (!record) continue;
+        const key = `batch:${batchId}:${group
+          .map(
+            (item) =>
+              `${item.id}:${item.status}:${item.warningCount}:${item.outcomeAt}`,
           )
-        ) {
-          const kind = operation.kind as
-            | "chapter_import"
-            | "chapter_upload"
-            | "chapter_replacement";
-          void getUploadValidationReport(kind, operation.id)
-            .then((report) => {
-              const details = rejected
-                ? report.issues
-                    .map((issue) => {
-                      const measurement = validationIssueMeasurement(issue);
-                      return `${issue.filename ?? operation.filename} — ${validationIssueLabel(issue.code)}${measurement.actual ? `\nActual: ${measurement.actual}` : ""}${measurement.expected ? `\nMáximo: ${measurement.expected}` : ""}\nCódigo: ${issue.code}`;
-                    })
-                    .join("\n")
-                : report.warnings
-                    .map((warning) => {
-                      const presentation = mediaWarningPresentation(warning);
-                      return `${warning.filename}\n${presentation.title}\nActual: ${presentation.actual}${presentation.threshold ? `\nUmbral recomendado: ${presentation.threshold}` : ""}`;
-                    })
-                    .join("\n");
-              setNotice((currentNotice) =>
-                currentNotice?.operationId === operation.id
-                  ? {
-                      ...currentNotice,
-                      body: `${body}${details ? `\n${details}` : ""}${rejected && report.requestId ? `\nRequest ID: ${report.requestId}` : ""}`,
-                    }
-                  : currentNotice,
-              );
-            })
-            .catch(() => {
-              setNotice((currentNotice) =>
-                currentNotice?.operationId === operation.id
-                  ? {
-                      ...currentNotice,
-                      body: `${body}\nNo se pudo cargar el detalle. Consulta el Centro de cargas.`,
-                    }
-                  : currentNotice,
-              );
-            });
-        }
-        break;
+          .sort()
+          .join("|")}`;
+        if (announced.current.has(key)) continue;
+        announced.current.add(key);
+        notices.push({
+          key,
+          record,
+          batchSummary: {
+            completed: group.filter(
+              (item) =>
+                ["ready", "completed"].includes(item.status) &&
+                !item.warningCount,
+            ).length,
+            warnings: group.filter((item) => item.warningCount > 0).length,
+            rejected: group.filter((item) => item.status === "rejected").length,
+            failed: group.filter((item) =>
+              ["failed", "retry_exhausted", "terminal_failed"].includes(
+                item.status,
+              ),
+            ).length,
+          },
+        });
       }
     }
-    previousStatuses.current = current;
-  }, [queue.operations]);
+    if (notices.length) setPendingNotices((old) => [...old, ...notices]);
+  }, [queue.operations, queue.operationsLoaded, records, recordsById]);
 
   useEffect(() => {
-    if (!open) return;
-
-    function closeWhenLeaving(event: PointerEvent | FocusEvent) {
-      if (
-        !(event.target instanceof Node) ||
-        !root.current?.contains(event.target)
-      ) {
-        setOpen(false);
-      }
-    }
-
-    document.addEventListener("pointerdown", closeWhenLeaving);
-    document.addEventListener("focusin", closeWhenLeaving);
-    window.addEventListener("blur", closeWhenLeaving);
-    return () => {
-      document.removeEventListener("pointerdown", closeWhenLeaving);
-      document.removeEventListener("focusin", closeWhenLeaving);
-      window.removeEventListener("blur", closeWhenLeaving);
-    };
-  }, [open]);
+    if (visibleNotices.length >= 3 || !pendingNotices.length) return;
+    const filled = fillOutcomeNoticeSlots(visibleNotices, pendingNotices);
+    setVisibleNotices([...filled.visible]);
+    setPendingNotices([...filled.pending]);
+  }, [pendingNotices, visibleNotices]);
 
   useEffect(() => {
     if (previousPathname.current !== pathname) {
@@ -172,114 +258,66 @@ export function UploadCenter() {
     }
   }, [pathname]);
 
-  const records = useMemo(() => {
-    const batchRecords = queue.batches.flatMap((batch) =>
-      batch.projection
-        ? batch.projection.items.map((item) => ({
-            batch,
-            item,
-            retryable: isRetryableImportFailure(item.errorCode),
-            kind: "chapter_import" as const,
-            warningCount: item.warnings.length,
-          }))
-        : [],
-    );
-    const batchItemIds = new Set(batchRecords.map(({ item }) => item.itemId));
-    const operationRecords = queue.operations
-      .filter((operation) => !batchItemIds.has(operation.id))
-      .filter((operation) => !dismissedCompletedOperationIds.has(operation.id))
-      .map(
-        (operation): UploadCenterItemRecord => ({
-          batch: {
-            batchId: operation.id,
-            seriesId: operation.seriesId,
-            seriesTitle: operation.seriesTitle,
-            trackedAt: new Date(operation.createdAt).getTime(),
-            projection: null,
-          },
-          item: {
-            itemId: operation.id,
-            clientId: operation.id,
-            chapterNumber: operation.chapterNumber ?? 0,
-            filename: operation.filename,
-            chapterId: operation.chapterId,
-            uploadId: null,
-            status: normalizeOperationStatus(operation.status),
-            errorCode: operation.errorCode,
-            resolution: null,
-            warnings: [],
-          },
-          retryable: false,
-          kind: operation.kind === "image_replacement" ? null : operation.kind,
-          warningCount: operation.warningCount,
-        }),
-      );
-    return [...batchRecords, ...operationRecords];
-  }, [dismissedCompletedOperationIds, queue.batches, queue.operations]);
-  const visibleBatches = useMemo(
-    () =>
-      queue.batches.filter(
-        (batch) =>
-          !dismissedCompletedBatchIds.has(batch.batchId) ||
-          !isReadyBatch(batch),
-      ),
-    [dismissedCompletedBatchIds, queue.batches],
-  );
-  const visibleBatchIds = useMemo(
-    () => new Set(visibleBatches.map((batch) => batch.batchId)),
-    [visibleBatches],
-  );
+  useEffect(() => {
+    if (!open || detail) return;
+    function closeWhenLeaving(event: PointerEvent | FocusEvent) {
+      if (!(event.target instanceof Element)) return;
+      if (
+        root.current?.contains(event.target) ||
+        event.target.closest('[aria-label="Notificaciones de cargas"]')
+      )
+        return;
+      setOpen(false);
+    }
+    document.addEventListener("pointerdown", closeWhenLeaving);
+    document.addEventListener("focusin", closeWhenLeaving);
+    window.addEventListener("blur", closeWhenLeaving);
+    return () => {
+      document.removeEventListener("pointerdown", closeWhenLeaving);
+      document.removeEventListener("focusin", closeWhenLeaving);
+      window.removeEventListener("blur", closeWhenLeaving);
+    };
+  }, [detail, open]);
+
   const visibleRecords = useMemo(
     () =>
-      records.filter(({ batch, item }) => {
-        const dismissedOperation =
-          dismissedCompletedOperationIds.has(item.itemId) &&
-          item.status === "ready";
-        const dismissedBatch =
-          dismissedCompletedBatchIds.has(batch.batchId) &&
-          item.status === "ready";
-        return !dismissedOperation && !dismissedBatch;
+      records.filter((record) => {
+        const terminal = [
+          "ready",
+          "completed",
+          "rejected",
+          "failed",
+          "retry_exhausted",
+          "terminal_failed",
+        ].includes(record.status);
+        if (!terminal) return true;
+        if (!dismissalLoaded || dismissalUserId !== queue.userId) return false;
+        return !isUploadOutcomeDismissed(record, dismissed);
       }),
-    [dismissedCompletedBatchIds, dismissedCompletedOperationIds, records],
+    [dismissalLoaded, dismissalUserId, dismissed, queue.userId, records],
   );
-  const counts = useMemo(
-    () => ({
-      active: visibleRecords.filter(({ item }) => isActiveItem(item.status))
-        .length,
-      completed: visibleRecords.filter(({ item }) => item.status === "ready")
-        .length,
-      failed: visibleRecords.filter(({ item }) => isFailedItem(item.status))
-        .length,
-    }),
-    [visibleRecords],
-  );
-  const tabItems = useMemo(
-    () =>
-      visibleRecords
-        .filter(
-          ({ batch, retryable }) =>
-            !retryable || visibleBatchIds.has(batch.batchId),
-        )
-        .filter(({ item }) => itemMatchesTab(item, tab)),
-    [tab, visibleBatchIds, visibleRecords],
-  );
-  const readyBatchIds = visibleBatches
-    .filter(isReadyBatch)
-    .map((batch) => batch.batchId);
-
-  useEffect(() => {
-    setDismissedCompletedBatchIds((current) => {
-      const next = new Set(
-        [...current].filter((batchId) => {
-          const batch = queue.batches.find(
-            (candidate) => candidate.batchId === batchId,
-          );
-          return Boolean(batch && isReadyBatch(batch));
-        }),
-      );
-      return next.size === current.size ? current : next;
-    });
-  }, [queue.batches]);
+  const completed = (record: UploadCenterRecord) =>
+    ["ready", "completed"].includes(record.status);
+  const failed = (record: UploadCenterRecord) =>
+    ["rejected", "failed", "retry_exhausted", "terminal_failed"].includes(
+      record.status,
+    );
+  const active = (record: UploadCenterRecord) =>
+    !completed(record) && !failed(record);
+  const counts = {
+    active: visibleRecords.filter(active).length,
+    completed: visibleRecords.filter(completed).length,
+    failed: visibleRecords.filter(failed).length,
+  };
+  const tabRecords = visibleRecords
+    .filter((record) =>
+      tab === "active"
+        ? active(record)
+        : tab === "completed"
+          ? completed(record)
+          : failed(record),
+    )
+    .sort(compareUploadCenterRecords);
 
   async function refresh() {
     setRefreshing(true);
@@ -289,33 +327,64 @@ export function UploadCenter() {
       setRefreshing(false);
     }
   }
+  function dismissVisible(predicate: (record: UploadCenterRecord) => boolean) {
+    const additions = visibleRecords.filter(predicate).map((record) => ({
+      operationId: record.id,
+      fingerprint: record.outcomeFingerprint,
+      dismissedAt: Date.now(),
+    }));
+    persistDismissed([...dismissed, ...additions]);
+  }
+  function closeNotice(key: string) {
+    setVisibleNotices((items) => items.filter((item) => item.key !== key));
+  }
+  function openDetails(record: UploadCenterRecord) {
+    setDetail(record);
+  }
+  async function retryRetained(record: UploadCenterRecord) {
+    if (record.kind === "image_replacement") return;
+    await retryBackgroundUploadOperation(record.kind, record.id);
+    await queue.refresh();
+  }
 
   return (
     <>
-      <AppDialog
-        open={Boolean(notice)}
-        onOpenChange={(next) => {
-          if (!next) setNotice(null);
-        }}
-        title={notice?.title ?? "Carga"}
+      <section
+        aria-label="Notificaciones de cargas"
+        className="fixed right-5 top-5 z-40 flex w-[min(24rem,calc(100vw-2rem))] flex-col gap-2"
+        aria-live="polite"
       >
-        <p className="m-0 whitespace-pre-line text-sm text-secondary">
-          {notice?.body}
-        </p>
-        {notice?.title === "Carga rechazada" ? (
-          <button
-            className="mt-3 text-sm text-primary underline"
-            type="button"
-            onClick={() => {
-              setNotice(null);
-              setOpen(true);
-              setTab("failed");
-            }}
-          >
-            Ver en Centro de cargas
-          </button>
-        ) : null}
-      </AppDialog>
+        {visibleNotices.map(({ key, record, batchSummary }) => (
+          <UploadOutcomeMessage
+            key={key}
+            operation={record}
+            {...(batchSummary ? { batchSummary } : {})}
+            onDismiss={() => closeNotice(key)}
+            onDetails={() => openDetails(recordsById.get(record.id) ?? record)}
+            onCenter={() => setOpen(true)}
+            onRetry={() => void retryRetained(record)}
+          />
+        ))}
+      </section>
+      <UploadResultDialog
+        open={resultQueue.length > 0}
+        operation={resultQueue[0] ?? null}
+        onOpenChange={(next) => {
+          if (!next) setResultQueue((old) => old.slice(1));
+        }}
+        onCenter={() => setOpen(true)}
+        onDetails={() => {
+          const selected = resultQueue[0];
+          if (selected) openDetails(recordsById.get(selected.id) ?? selected);
+        }}
+      />
+      <UploadOperationDetailDialog
+        open={detail !== null}
+        operation={detail}
+        onOpenChange={(next) => {
+          if (!next) setDetail(null);
+        }}
+      />
       <div
         ref={root}
         className="fixed bottom-5 right-5 z-30 max-[767px]:bottom-3 max-[767px]:right-3"
@@ -323,9 +392,9 @@ export function UploadCenter() {
         {open ? (
           <section
             aria-label="Centro de cargas"
-            className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(44rem,calc(100dvh-7rem))] w-[min(38rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
+            className="absolute bottom-[calc(100%+0.875rem)] right-0 flex h-[min(38rem,calc(100dvh-7rem))] w-[min(31rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-panel border border-[var(--border-subtle)] bg-surface-elevated shadow-panel"
           >
-            <header className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-5 py-4">
+            <header className="flex min-h-[4.5rem] shrink-0 items-start justify-between gap-4 px-5 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-control bg-accent-soft text-primary">
                   <UploadCloud aria-hidden="true" className="size-5" />
@@ -354,10 +423,9 @@ export function UploadCenter() {
                 </IconButton>
               </div>
             </header>
-
             <div
               aria-label="Estado de cargas"
-              className="flex shrink-0 gap-1 border-b border-[var(--border-subtle)] px-3 pt-2"
+              className="mx-3 flex shrink-0 gap-1 rounded-control bg-surface p-1"
               role="tablist"
             >
               <CenterTab
@@ -380,46 +448,27 @@ export function UploadCenter() {
                 onClick={() => setTab("failed")}
               />
             </div>
-
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              {tabItems.length ? (
-                <div className="divide-y divide-[var(--border-subtle)]">
-                  {tabItems.map(
-                    ({ batch, item, retryable, kind, warningCount }) => (
-                      <UploadCenterItem
-                        key={`${batch.batchId}:${item.itemId}`}
-                        batch={batch}
-                        item={item}
-                        retryable={retryable}
-                        kind={kind}
-                        warningCount={warningCount}
-                      />
-                    ),
-                  )}
+            <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+              {tabRecords.length ? (
+                <div className="space-y-2">
+                  {tabRecords.map((record) => (
+                    <UploadCenterRow
+                      key={`${record.kind}:${record.id}`}
+                      record={record}
+                      onDetails={() => openDetails(record)}
+                      onDismiss={() => dismissRecord(record)}
+                    />
+                  ))}
                 </div>
               ) : (
                 <EmptyTab tab={tab} />
               )}
             </div>
-
-            {tab === "active" && counts.active ? (
-              <div className="mx-4 mb-4 flex gap-3 rounded-control border border-[var(--border-subtle)] bg-primary-soft px-3 py-3 text-sm text-secondary">
-                <CircleAlert
-                  aria-hidden="true"
-                  className="mt-0.5 size-4 shrink-0 text-primary"
-                />
-                <p className="m-0">
-                  Puedes cerrar este panel y seguir navegando. Si cierras el
-                  navegador, una transferencia directa puede requerir reintento.
-                </p>
-              </div>
-            ) : null}
-
-            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-4 py-3">
+            <footer className="flex min-h-[3.5rem] shrink-0 items-center justify-between gap-3 px-3 py-2">
               <Button
                 aria-label="Actualizar cargas"
                 type="button"
-                variant="secondary"
+                variant="ghost"
                 size="sm"
                 disabled={refreshing}
                 onClick={() => void refresh()}
@@ -435,35 +484,30 @@ export function UploadCenter() {
               {tab === "completed" ? (
                 <Button
                   type="button"
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
                   disabled={!counts.completed}
-                  onClick={() => {
-                    setDismissedCompletedBatchIds(
-                      (current) => new Set([...current, ...readyBatchIds]),
-                    );
-                    setDismissedCompletedOperationIds(
-                      (current) =>
-                        new Set([
-                          ...current,
-                          ...records
-                            .filter(
-                              ({ item, retryable }) =>
-                                !retryable && item.status === "ready",
-                            )
-                            .map(({ item }) => item.itemId),
-                        ]),
-                    );
-                  }}
-                  icon={<CheckCheck aria-hidden="true" className="size-4" />}
+                  onClick={() => dismissVisible(completed)}
+                  icon={<ListX aria-hidden="true" className="size-4" />}
                 >
                   Limpiar completadas
+                </Button>
+              ) : null}
+              {tab === "failed" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={!counts.failed}
+                  onClick={() => dismissVisible(failed)}
+                  icon={<ListX aria-hidden="true" className="size-4" />}
+                >
+                  Limpiar errores
                 </Button>
               ) : null}
             </footer>
           </section>
         ) : null}
-
         <button
           aria-label={
             open ? "Cerrar centro de cargas" : "Abrir centro de cargas"
@@ -489,6 +533,200 @@ export function UploadCenter() {
   );
 }
 
+function UploadCenterRow({
+  record,
+  onDetails,
+  onDismiss,
+}: {
+  record: UploadCenterRecord;
+  onDetails(): void;
+  onDismiss(): void;
+}) {
+  const queue = useUploadQueue();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [retryError, setRetryError] = useState(false);
+  const progress = record.batchId
+    ? queue.progressFor(record.batchId, record.id)
+    : undefined;
+  const retryable =
+    record.retryable && record.status === "failed" && Boolean(record.batchId);
+  const canRetrySame =
+    record.status === "retry_exhausted" && record.kind !== "image_replacement";
+  const canChangeChapter = Boolean(
+    record.chapterId &&
+      ["chapter-uploaded", "chapter-ready", "chapter-media-exists"].includes(
+        record.errorCode ?? "",
+      ),
+  );
+  const active = ![
+    "ready",
+    "completed",
+    "rejected",
+    "failed",
+    "retry_exhausted",
+    "terminal_failed",
+  ].includes(record.status);
+  return (
+    <article className="flex min-h-[4.75rem] gap-3 rounded-control bg-surface p-3 transition-colors hover:bg-surface-hover">
+      <span
+        className={`grid size-9 shrink-0 place-items-center rounded-control ${rowIconTone(record.status, record.warningCount)}`}
+      >
+        {record.warningCount > 0 &&
+        ["ready", "completed"].includes(record.status) ? (
+          <TriangleAlert aria-hidden="true" className="size-4" />
+        ) : ["ready", "completed"].includes(record.status) ? (
+          <CircleCheckBig aria-hidden="true" className="size-4" />
+        ) : record.status === "rejected" ? (
+          <CircleX aria-hidden="true" className="size-4" />
+        ) : [
+            "rejected",
+            "failed",
+            "retry_exhausted",
+            "terminal_failed",
+          ].includes(record.status) ? (
+          <CircleAlert
+            aria-hidden="true"
+            className="size-4 text-destructive-text"
+          />
+        ) : active ? (
+          <LoaderCircle aria-hidden="true" className="size-4 animate-spin" />
+        ) : record.kind === "chapter_replacement" ? (
+          <Replace aria-hidden="true" className="size-4" />
+        ) : record.kind === "image_replacement" ? (
+          <Image aria-hidden="true" className="size-4" />
+        ) : (
+          <FileArchive aria-hidden="true" className="size-4" />
+        )}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="m-0 truncate text-sm font-semibold text-text">
+              {record.seriesTitle}
+              {record.chapterNumber === null
+                ? ""
+                : ` · Capítulo ${record.chapterNumber}`}
+            </p>
+            <p className="m-0 truncate text-xs text-secondary">
+              {record.filename}
+            </p>
+          </div>
+          <span
+            className={`shrink-0 rounded-full px-2 py-1 text-xs ${summaryToneClass(uploadCenterSummary(record).tone)}`}
+          >
+            {uploadCenterSummary(record).label}
+          </span>
+        </div>
+        <p className="m-0 mt-1 text-xs text-secondary">
+          {formatActivityAt(record.activityAt)}
+        </p>
+        {active ? (
+          <div className="mt-2">
+            <div className="flex justify-between text-xs text-secondary">
+              <span>{statusLabel(record.status)}</span>
+              {progress === undefined ? null : <span>{progress}%</span>}
+            </div>
+            <ProgressBar
+              value={progress ?? 0}
+              label={`Progreso de ${record.filename}`}
+            />
+          </div>
+        ) : null}
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+          {canLoadValidationReport(record) ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
+              onClick={onDetails}
+            >
+              <Eye aria-hidden="true" className="size-3.5" />
+              Ver detalles
+            </button>
+          ) : null}
+          {retryable && record.batchId ? (
+            <>
+              <input
+                ref={fileInput}
+                className="sr-only"
+                type="file"
+                accept=".zip,application/zip,application/x-zip-compressed"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file && record.batchId)
+                    void queue.retryWithFile({
+                      batchId: record.batchId,
+                      seriesId: record.seriesId,
+                      itemId: record.id,
+                      file,
+                    });
+                  event.currentTarget.value = "";
+                }}
+              />
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
+                onClick={() => fileInput.current?.click()}
+              >
+                <RotateCcw aria-hidden="true" className="size-3.5" />
+                Reintentar ZIP
+              </button>
+            </>
+          ) : null}
+          {canRetrySame ? (
+            <button
+              type="button"
+              disabled={busy}
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover disabled:opacity-50"
+              onClick={() => {
+                setBusy(true);
+                setRetryError(false);
+                void retryBackgroundUploadOperation(
+                  record.kind as
+                    | "chapter_import"
+                    | "chapter_upload"
+                    | "chapter_replacement",
+                  record.id,
+                )
+                  .then(() => queue.refresh())
+                  .catch(() => setRetryError(true))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              <RotateCcw aria-hidden="true" className="size-3.5" />
+              Reintentar procesamiento
+            </button>
+          ) : null}
+          {retryError ? (
+            <span role="alert" className="text-destructive-text">
+              No se pudo solicitar el reintento.
+            </span>
+          ) : null}
+          {canChangeChapter ? (
+            <Link
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-primary hover:bg-surface-hover"
+              href={`/series/${record.seriesId}/chapters`}
+            >
+              <Replace aria-hidden="true" className="size-3.5" />
+              Cambiar capítulo
+            </Link>
+          ) : null}
+          {!active ? (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-control px-2 py-1 text-secondary hover:bg-surface-hover"
+              onClick={onDismiss}
+            >
+              <EyeOff aria-hidden="true" className="size-3.5" />
+              Ocultar
+            </button>
+          ) : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function CenterTab({
   active,
   count,
@@ -505,7 +743,7 @@ function CenterTab({
   return (
     <button
       aria-selected={active}
-      className={`relative inline-flex min-h-10 items-center gap-2 px-3 text-sm font-medium transition-colors ${active ? "text-text" : "text-secondary hover:text-text"}`}
+      className={`inline-flex min-h-9 flex-1 items-center justify-center gap-1 px-1 text-xs font-medium transition-colors sm:text-sm ${active ? "rounded-control bg-primary-soft text-text" : "rounded-control text-secondary hover:bg-surface-hover hover:text-text"}`}
       role="tab"
       type="button"
       onClick={onClick}
@@ -516,360 +754,39 @@ function CenterTab({
       >
         {count}
       </span>
-      {active ? (
-        <span className="absolute inset-x-1 bottom-0 h-0.5 rounded-full bg-primary" />
-      ) : null}
     </button>
   );
 }
 
-function EmptyTab({ tab }: { tab: UploadCenterTab }) {
-  const detail = {
-    active: {
-      icon: UploadCloud,
-      title: "No hay cargas en progreso",
-      copy: "Aquí se mostrarán los archivos que estés subiendo en segundo plano.",
-    },
-    completed: {
-      icon: Check,
-      title: "No hay cargas completadas",
-      copy: "Las cargas finalizadas aparecerán aquí hasta que las limpies.",
-    },
-    failed: {
-      icon: CircleAlert,
-      title: "No hay cargas con errores",
-      copy: "Los archivos que necesiten atención aparecerán aquí.",
-    },
-  }[tab];
-  const Icon = detail.icon;
+function EmptyTab({ tab }: { tab: Tab }) {
+  const content = {
+    active: [
+      UploadCloud,
+      "No hay cargas en progreso",
+      "Aquí se mostrarán los archivos que estés subiendo en segundo plano.",
+    ],
+    completed: [
+      Check,
+      "No hay cargas completadas",
+      "Las cargas finalizadas aparecerán aquí hasta que las ocultes.",
+    ],
+    failed: [
+      CircleAlert,
+      "No hay cargas con errores",
+      "Los archivos que necesiten atención aparecerán aquí.",
+    ],
+  }[tab] as [typeof Check, string, string];
+  const [Icon, title, copy] = content;
   return (
-    <div className="grid h-full min-h-52 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface px-6 text-center">
+    <div className="grid h-full min-h-52 place-items-center rounded-control bg-surface px-6 text-center">
       <div className="grid max-w-xs justify-items-center gap-2">
         <span className="grid size-11 place-items-center rounded-full bg-accent-soft text-primary">
           <Icon aria-hidden="true" className="size-5" />
         </span>
-        <p className="m-0 font-medium text-text">{detail.title}</p>
-        <p className="m-0 text-sm text-secondary">{detail.copy}</p>
+        <p className="m-0 font-medium text-text">{title}</p>
+        <p className="m-0 text-sm text-secondary">{copy}</p>
       </div>
     </div>
-  );
-}
-
-export function isReadyBatch(batch: UploadCenterBatch) {
-  return (
-    batch.projection?.status === "completed" &&
-    batch.projection.items.every((item) => item.status === "ready")
-  );
-}
-
-export function isActiveItem(status: string) {
-  return status !== "ready" && !isFailedItem(status);
-}
-
-function isFailedItem(status: string) {
-  return ["failed", "rejected", "retry_exhausted", "terminal_failed"].includes(
-    status,
-  );
-}
-
-function itemMatchesTab(
-  item: ImportBatchProjection["items"][number],
-  tab: UploadCenterTab,
-) {
-  return tab === "active"
-    ? isActiveItem(item.status)
-    : tab === "completed"
-      ? item.status === "ready"
-      : isFailedItem(item.status);
-}
-
-function normalizeOperationStatus(
-  status:
-    | "pending"
-    | "pending_upload"
-    | "uploading"
-    | "validating"
-    | "rejected"
-    | "retry_exhausted"
-    | "terminal_failed"
-    | "uploaded"
-    | "processing"
-    | "ready"
-    | "completing"
-    | "completed"
-    | "failed",
-): ImportBatchProjection["items"][number]["status"] {
-  if (status === "completed") return "ready";
-  if (status === "pending_upload") return "pending";
-  if (status === "completing") return "processing";
-  return status;
-}
-
-function UploadCenterItem({
-  batch,
-  item,
-  retryable,
-  kind,
-  warningCount,
-}: UploadCenterItemRecord) {
-  const queue = useUploadQueue();
-  const input = useRef<HTMLInputElement>(null);
-  const [report, setReport] = useState<UploadValidationReport | null>(null);
-  const [reportState, setReportState] = useState<
-    "idle" | "loading" | "loaded" | "error"
-  >("idle");
-  const [retrying, setRetrying] = useState(false);
-  const [retryError, setRetryError] = useState<string | null>(null);
-  useEffect(() => {
-    const needsReport =
-      item.status === "rejected" ||
-      (item.status === "ready" && warningCount > 0);
-    if (!needsReport || !kind) {
-      setReport(null);
-      setReportState("idle");
-      return;
-    }
-    let active = true;
-    setReportState("loading");
-    void getUploadValidationReport(kind, item.itemId)
-      .then((value) => {
-        if (active) {
-          setReport(value);
-          setReportState("loaded");
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setReport(null);
-          setReportState("error");
-        }
-      });
-    return () => {
-      active = false;
-    };
-  }, [item.status, warningCount, item.itemId, kind]);
-  const progress = queue.progressFor(batch.batchId, item.itemId);
-  const canRetry = retryable && item.status === "failed";
-  const requiresReplacement = requiresChapterReplacement(item.errorCode);
-  const canAbort =
-    item.status === "uploading" && Boolean(item.chapterId && item.uploadId);
-  const isCompleted = item.status === "ready";
-  const title = `Capítulo ${item.chapterNumber} · ${batch.seriesTitle}`;
-  return (
-    <article className="flex gap-3 py-3 first:pt-0 last:pb-0">
-      <span className="grid size-11 shrink-0 place-items-center rounded-control border border-[var(--border-subtle)] bg-surface text-primary">
-        {isCompleted ? (
-          <Check aria-hidden="true" className="size-5 text-success" />
-        ) : isFailedItem(item.status) ? (
-          <CircleAlert
-            aria-hidden="true"
-            className="size-5 text-destructive-text"
-          />
-        ) : (
-          <FileArchive aria-hidden="true" className="size-5" />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="m-0 truncate text-sm font-semibold text-text">
-              {title}
-            </p>
-            <p className="m-0 truncate text-xs text-secondary">
-              {item.filename}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1.5">
-            {isCompleted && item.chapterId ? (
-              <Link
-                aria-label={`Abrir ${title}`}
-                className="grid size-8 place-items-center rounded-control border border-[var(--border-subtle)] text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                href={`/series/${batch.seriesId}/chapters`}
-              >
-                <ChevronRight aria-hidden="true" className="size-4" />
-              </Link>
-            ) : null}
-            {requiresReplacement && item.chapterId ? (
-              <Link
-                aria-label={`Gestionar ${title}`}
-                className="inline-flex h-8 items-center rounded-control border border-[var(--border-subtle)] px-2 text-xs font-medium text-secondary hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                href={`/series/${batch.seriesId}/chapters`}
-              >
-                Cambiar capítulo
-              </Link>
-            ) : null}
-            {canAbort && item.chapterId && item.uploadId ? (
-              <IconButton
-                label={`Cancelar transferencia de ${title}`}
-                onClick={() =>
-                  void queue.abortTransfer({
-                    batchId: batch.batchId,
-                    chapterId: item.chapterId as string,
-                    uploadId: item.uploadId as string,
-                  })
-                }
-              >
-                <X aria-hidden="true" className="size-4" />
-              </IconButton>
-            ) : null}
-          </div>
-        </div>
-        {isActiveItem(item.status) ? (
-          <div className="mt-2 grid gap-1.5">
-            <div className="flex items-center justify-between gap-3 text-xs text-secondary">
-              <span>{statusLabel(item.status)}</span>
-              {progress !== undefined ? <span>{progress}%</span> : null}
-            </div>
-            <ProgressBar value={progress ?? 0} label={`Progreso de ${title}`} />
-          </div>
-        ) : null}
-        {isCompleted ? (
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-secondary">
-            <Check aria-hidden="true" className="size-3.5 text-success" />
-            {warningCount > 0
-              ? `Completada con ${warningCount} advertencias`
-              : "Completada"}
-          </p>
-        ) : null}
-        {item.errorCode ? (
-          <p className="mt-2 text-xs text-destructive-text">
-            {errorLabel(item.errorCode)}
-          </p>
-        ) : null}
-        {item.status === "rejected" || (isCompleted && warningCount > 0) ? (
-          <div
-            className={`mt-2 space-y-1 text-xs ${item.status === "rejected" ? "text-destructive-text" : "text-secondary"}`}
-          >
-            {item.status === "rejected" ? <p>Carga rechazada</p> : null}
-            {item.status === "rejected"
-              ? report?.issues.map((issue) => (
-                  <p key={issue.id}>
-                    {issue.filename ??
-                      (issue.fileIndex
-                        ? `Archivo ${issue.fileIndex}`
-                        : "ZIP")}{" "}
-                    — {validationIssueLabel(issue.code)}
-                    {validationIssueMeasurement(issue).actual
-                      ? ` · Actual: ${validationIssueMeasurement(issue).actual}`
-                      : ""}
-                    {validationIssueMeasurement(issue).expected
-                      ? ` · Máximo: ${validationIssueMeasurement(issue).expected}`
-                      : ""}
-                    {` · Código: ${issue.code}`}
-                  </p>
-                ))
-              : null}
-            {report?.warnings.map((warning) => (
-              <p key={JSON.stringify(warning)} className="text-warning">
-                <span>
-                  {warning.filename} — {mediaWarningPresentation(warning).title}
-                </span>
-                <span>Actual: {mediaWarningPresentation(warning).actual}</span>
-                {mediaWarningPresentation(warning).threshold ? (
-                  <span>
-                    Umbral recomendado:{" "}
-                    {mediaWarningPresentation(warning).threshold}
-                  </span>
-                ) : null}
-              </p>
-            ))}
-            {reportState === "loading" ? (
-              <p>Cargando informe de validación…</p>
-            ) : null}
-            {reportState === "error" ? (
-              <p role="alert">
-                No se pudo cargar el detalle.{" "}
-                <button
-                  className="underline"
-                  type="button"
-                  onClick={() => {
-                    if (!kind) return;
-                    setReportState("loading");
-                    void getUploadValidationReport(kind, item.itemId)
-                      .then((value) => {
-                        setReport(value);
-                        setReportState("loaded");
-                      })
-                      .catch(() => setReportState("error"));
-                  }}
-                >
-                  Reintentar detalle
-                </button>
-              </p>
-            ) : null}
-            {report?.requestId ? <p>Request ID: {report.requestId}</p> : null}
-          </div>
-        ) : null}
-        {item.status === "retry_exhausted" ? (
-          <div className="mt-2 space-y-2 text-xs text-secondary">
-            <p>
-              No se pudo continuar por un problema temporal. El archivo original
-              se conserva.
-            </p>
-            {kind ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="secondary"
-                disabled={retrying}
-                icon={<RefreshCw aria-hidden="true" className="size-3.5" />}
-                onClick={() => {
-                  setRetrying(true);
-                  setRetryError(null);
-                  void retryBackgroundUploadOperation(kind, item.itemId)
-                    .then(() => queue.refresh())
-                    .catch(() =>
-                      setRetryError("No se pudo solicitar el reintento."),
-                    )
-                    .finally(() => setRetrying(false));
-                }}
-              >
-                Reintentar procesamiento
-              </Button>
-            ) : null}
-            {retryError ? (
-              <p className="text-destructive-text">{retryError}</p>
-            ) : null}
-          </div>
-        ) : null}
-        {item.status === "terminal_failed" ? (
-          <p className="mt-2 text-xs text-destructive-text">
-            La carga se detuvo por un error de configuración. El archivo
-            original se conserva.
-          </p>
-        ) : null}
-        {canRetry ? (
-          <div className="mt-2">
-            <input
-              ref={input}
-              className="sr-only"
-              type="file"
-              accept=".zip,application/zip,application/x-zip-compressed"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file)
-                  void queue.retryWithFile({
-                    batchId: batch.batchId,
-                    seriesId: batch.seriesId,
-                    itemId: item.itemId,
-                    file,
-                  });
-                event.currentTarget.value = "";
-              }}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              icon={<RefreshCw aria-hidden="true" className="size-3.5" />}
-              onClick={() => input.current?.click()}
-            >
-              Reintentar ZIP
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </article>
   );
 }
 
@@ -885,7 +802,7 @@ function IconButton({
   return (
     <button
       aria-label={label}
-      className="grid size-8 place-items-center rounded-control border border-[var(--border-subtle)] text-secondary transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      className="grid size-8 place-items-center rounded-control text-secondary transition-colors hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       type="button"
       onClick={onClick}
     >
@@ -893,180 +810,65 @@ function IconButton({
     </button>
   );
 }
-
 function statusLabel(status: string) {
   return (
-    {
-      pending: "En espera",
-      uploading: "Subiendo archivo…",
-      validating: "Validando archivo…",
-      uploaded: "Archivo subido. Procesando…",
-      processing: "Procesando imágenes…",
-      ready: "Completada",
-      failed: "Error",
-      rejected: "Carga rechazada",
-      retry_exhausted: "Reintento necesario",
-      terminal_failed: "Error de configuración",
-    }[status] ?? status
+    (
+      {
+        pending: "En espera",
+        pending_upload: "En espera",
+        uploading: "Subiendo…",
+        validating: "Validando archivo…",
+        uploaded: "Archivo subido",
+        processing: "Procesando…",
+        completing: "Completando…",
+        ready: "Completada",
+        completed: "Completada",
+        failed: "Error",
+        rejected: "Rechazada",
+        retry_exhausted: "Requiere atención",
+        terminal_failed: "Error técnico",
+      } as Record<string, string>
+    )[status] ?? status
   );
 }
-
-export function mediaWarningPresentation(warning: MediaWarning): {
-  title: string;
-  actual: string;
-  threshold?: string;
-} {
-  switch (warning.code) {
-    case "large-file":
-      return {
-        title: "Archivo grande",
-        actual: formatMiB(warning.sizeBytes),
-        ...(warning.thresholdBytes !== undefined
-          ? { threshold: formatMiB(warning.thresholdBytes) }
-          : {}),
-      };
-    case "wide-image":
-      return {
-        title: "Imagen muy ancha",
-        actual: `${formatInteger(warning.width)} px`,
-        ...(warning.thresholdWidth !== undefined
-          ? { threshold: `${formatInteger(warning.thresholdWidth)} px` }
-          : {}),
-      };
-    case "tall-image":
-      return {
-        title: "Imagen muy alta",
-        actual: `${formatInteger(warning.height)} px`,
-        ...(warning.thresholdHeight !== undefined
-          ? { threshold: `${formatInteger(warning.thresholdHeight)} px` }
-          : {}),
-      };
-  }
+function formatCreatedAt(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("es-PE", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(date);
 }
-
-export function validationIssueMeasurement(issue: {
-  code: string;
-  actual?: Record<string, unknown> | null;
-  expected?: Record<string, unknown> | null;
-}): { actual?: string; expected?: string } {
-  const actual = issue.actual ?? {};
-  const expected = issue.expected ?? {};
-  const number = (record: Record<string, unknown>, ...keys: string[]) => {
-    for (const key of keys) {
-      const value = record[key];
-      if (typeof value === "number" && Number.isFinite(value)) return value;
-    }
-    return undefined;
-  };
-  let actualValue: number | undefined;
-  let expectedValue: number | undefined;
-  let format: (value: number) => string;
-  switch (issue.code) {
-    case "IMAGE_SIZE_EXCEEDED":
-      actualValue = number(actual, "sizeBytes");
-      expectedValue = number(expected, "maxImageBytes", "maxSizeBytes");
-      format = formatMiB;
-      break;
-    case "IMAGE_WIDTH_EXCEEDED":
-      actualValue = number(actual, "widthPx", "width");
-      expectedValue = number(expected, "maxWidthPx", "widthPx");
-      format = (value) => `${formatInteger(value)} px`;
-      break;
-    case "IMAGE_HEIGHT_EXCEEDED":
-      actualValue = number(actual, "heightPx", "height");
-      expectedValue = number(expected, "maxHeightPx", "heightPx");
-      format = (value) => `${formatInteger(value)} px`;
-      break;
-    case "IMAGE_PIXELS_EXCEEDED":
-      actualValue = number(actual, "pixels");
-      expectedValue = number(expected, "maxPixels");
-      format = (value) => formatInteger(value);
-      break;
-    case "ZIP_COMPRESSION_RATIO_EXCEEDED":
-      actualValue = number(actual, "compressionRatio", "ratio");
-      expectedValue = number(expected, "maxCompressionRatio");
-      format = (value) =>
-        `${new Intl.NumberFormat("es-PE", { maximumFractionDigits: 1 }).format(value)}×`;
-      break;
-    default:
-      return {};
-  }
+function formatActivityAt(value: string) {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "";
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  if (elapsed < 60_000) return "Hace menos de un minuto";
+  if (elapsed < 3_600_000)
+    return `Hace ${Math.floor(elapsed / 60_000)} minutos`;
+  if (elapsed < 86_400_000)
+    return `Hace ${Math.floor(elapsed / 3_600_000)} horas`;
+  return formatCreatedAt(value);
+}
+function summaryToneClass(tone: "success" | "warning" | "danger" | "info") {
   return {
-    ...(actualValue !== undefined ? { actual: format(actualValue) } : {}),
-    ...(expectedValue !== undefined ? { expected: format(expectedValue) } : {}),
-  };
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning-text",
+    danger: "bg-destructive-surface text-destructive-text",
+    info: "bg-primary/10 text-primary",
+  }[tone];
 }
-
-function formatMiB(bytes: number): string {
-  const value = bytes / (1024 * 1024);
-  return `${value.toFixed(1).replace(/\.0$/, "")} MB`;
-}
-
-function formatInteger(value: number): string {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
-    .format(value)
-    .replace(/,/g, " ");
-}
-
-function validationIssueLabel(code: string): string {
-  const labels: Record<string, string> = {
-    ZIP_INVALID: "ZIP inválido",
-    ZIP_INVALID_PATH: "Ruta no permitida",
-    ZIP_INVALID_LAYOUT: "Estructura inválida",
-    ZIP_ENTRY_LIMIT_EXCEEDED: "Demasiados archivos",
-    ZIP_TOTAL_SIZE_EXCEEDED: "Tamaño total excedido",
-    ZIP_COMPRESSION_RATIO_EXCEEDED: "Compresión ZIP excesiva",
-    IMAGE_FILENAME_INVALID: "Nombre de imagen inválido",
-    IMAGE_DUPLICATE_FILENAME: "Nombre duplicado",
-    IMAGE_DUPLICATE_SORT_ORDER: "Orden duplicado",
-    IMAGE_EXTENSION_UNSUPPORTED: "Extensión no compatible",
-    IMAGE_MAGIC_MISMATCH: "Contenido incompatible con la extensión",
-    IMAGE_SIZE_EXCEEDED: "Tamaño máximo excedido",
-    IMAGE_WIDTH_EXCEEDED: "Ancho máximo excedido",
-    IMAGE_HEIGHT_EXCEEDED: "Altura máxima excedida",
-    IMAGE_PIXELS_EXCEEDED: "Píxeles máximos excedidos",
-    IMAGE_DIMENSIONS_UNREADABLE: "Dimensiones ilegibles",
-  };
-  return labels[code] ?? code;
-}
-
-export function errorLabel(code: string) {
-  return (
-    {
-      "chapter-upload-active": "El capítulo ya tiene una carga activa.",
-      "chapter-processing": "El capítulo se está procesando.",
-      "chapter-uploaded":
-        "El capítulo ya tiene una carga completada. Usa Cambiar capítulo para reemplazar sus imágenes.",
-      "chapter-ready":
-        "El capítulo ya está listo. Usa Cambiar capítulo para reemplazar sus imágenes.",
-      "chapter-media-exists":
-        "El capítulo ya contiene imágenes. Usa Cambiar capítulo para reemplazarlas.",
-      "chapter-failed":
-        "El capítulo tiene una carga fallida. Gestiona ese capítulo para reintentarla.",
-      "chapter-deleting": "El capítulo se está eliminando.",
-      "bulk-item-limit": "El batch supera el máximo de 15 ZIP.",
-    }[code] ??
-    "La carga no se pudo completar. Selecciona el ZIP para reintentar."
-  );
-}
-
-export function requiresChapterReplacement(errorCode: string | null): boolean {
-  return ["chapter-uploaded", "chapter-ready", "chapter-media-exists"].includes(
-    errorCode ?? "",
-  );
-}
-
-export function isRetryableImportFailure(errorCode: string | null): boolean {
-  return ![
-    "chapter-upload-active",
-    "chapter-uploaded",
-    "chapter-processing",
-    "chapter-ready",
-    "chapter-failed",
-    "chapter-deleting",
-    "chapter-media-exists",
-    "import-batch-item-conflict",
-    "authorization-denied",
-    "resource-not-found",
-  ].includes(errorCode ?? "");
+function rowIconTone(status: string, warningCount: number) {
+  if (["ready", "completed"].includes(status) && warningCount > 0)
+    return "bg-warning/10 text-warning-text";
+  if (["ready", "completed"].includes(status))
+    return "bg-success/10 text-success";
+  if (
+    ["rejected", "failed", "retry_exhausted", "terminal_failed"].includes(
+      status,
+    )
+  )
+    return "bg-destructive-surface text-destructive-text";
+  return "bg-primary-soft text-primary-hover";
 }
