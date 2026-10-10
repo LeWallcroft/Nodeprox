@@ -8,6 +8,7 @@ import {
   uploadCenterDismissalStorageKey,
 } from "../../lib/domains/uploads/upload-center-state";
 import {
+  canLoadValidationReport,
   compareUploadCenterRecords,
   mergeUploadCenterRecords,
   type UploadCenterRecord,
@@ -276,6 +277,66 @@ describe("Upload Center view model and state", () => {
     expect(
       uploadOutcomeMessage(record({ status: "terminal_failed" })).title,
     ).toBe("La carga no pudo completarse");
+  });
+
+  it("does not request a validation report before admission or for image replacements", () => {
+    expect(
+      canLoadValidationReport(
+        record({ kind: "chapter_upload", status: "uploading" }),
+      ),
+    ).toBe(false);
+    expect(
+      canLoadValidationReport(
+        record({ kind: "chapter_import", status: "pending_upload" }),
+      ),
+    ).toBe(false);
+    expect(
+      canLoadValidationReport(
+        record({ kind: "chapter_replacement", status: "uploading" }),
+      ),
+    ).toBe(false);
+    expect(
+      canLoadValidationReport(
+        record({ kind: "image_replacement", status: "ready" }),
+      ),
+    ).toBe(false);
+    expect(canLoadValidationReport(record({ status: "rejected" }))).toBe(true);
+    expect(
+      canLoadValidationReport(record({ status: "ready", warningCount: 1 })),
+    ).toBe(true);
+    expect(
+      canLoadValidationReport(
+        record({ status: "failed", failureStage: "storage" }),
+      ),
+    ).toBe(false);
+    expect(
+      canLoadValidationReport(
+        record({ status: "failed", failureStage: "processing" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("uses operation-specific copy for successful outcomes", () => {
+    expect(uploadOutcomeMessage(record({ kind: "chapter_upload" })).copy).toBe(
+      "El capítulo se cargó correctamente.",
+    );
+    expect(uploadOutcomeMessage(record({ kind: "chapter_import" })).copy).toBe(
+      "El capítulo se cargó correctamente.",
+    );
+    expect(
+      uploadOutcomeMessage(record({ kind: "chapter_replacement" })),
+    ).toMatchObject({
+      title: "Reemplazo completado",
+      copy: "El capítulo se reemplazó correctamente.",
+    });
+    expect(
+      uploadOutcomeMessage(
+        record({ kind: "image_replacement", status: "completed" }),
+      ),
+    ).toMatchObject({
+      title: "Reemplazo completado",
+      copy: "La imagen se reemplazó correctamente.",
+    });
   });
 
   it("announces only observed transitions once and preserves FIFO with a three notice limit", () => {

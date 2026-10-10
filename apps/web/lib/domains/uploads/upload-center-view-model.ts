@@ -32,6 +32,24 @@ export type UploadCenterRecord = {
   uploadId: string | null;
 };
 
+export function canLoadValidationReport(
+  record: Pick<UploadCenterRecord, "kind" | "status" | "failureStage">,
+): boolean {
+  if (record.kind === "image_replacement") return false;
+  if (["pending", "pending_upload", "uploading"].includes(record.status))
+    return false;
+  if (record.status === "failed") return record.failureStage === "processing";
+  return [
+    "validating",
+    "rejected",
+    "uploaded",
+    "processing",
+    "ready",
+    "retry_exhausted",
+    "terminal_failed",
+  ].includes(record.status);
+}
+
 export function uploadOutcomeFingerprint(input: {
   id: string;
   status: string;

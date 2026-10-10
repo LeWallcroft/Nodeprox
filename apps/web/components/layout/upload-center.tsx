@@ -31,6 +31,7 @@ import {
   uploadCenterDismissalStorageKey,
 } from "../../lib/domains/uploads/upload-center-state";
 import {
+  canLoadValidationReport,
   mergeUploadCenterRecords,
   type UploadCenterRecord,
 } from "../../lib/domains/uploads/upload-center-view-model";
@@ -502,13 +503,15 @@ function UploadCenterRow({
           </div>
         ) : null}
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          <button
-            type="button"
-            className="text-primary underline"
-            onClick={onDetails}
-          >
-            Ver detalles
-          </button>
+          {canLoadValidationReport(record) ? (
+            <button
+              type="button"
+              className="text-primary underline"
+              onClick={onDetails}
+            >
+              Ver detalles
+            </button>
+          ) : null}
           {retryable && record.batchId ? (
             <>
               <input

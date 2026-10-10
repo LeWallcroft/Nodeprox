@@ -6,7 +6,10 @@ import {
   getUploadValidationReport,
   type UploadValidationReport,
 } from "../../../lib/domains/uploads/background-operations";
-import type { UploadCenterRecord } from "../../../lib/domains/uploads/upload-center-view-model";
+import {
+  canLoadValidationReport,
+  type UploadCenterRecord,
+} from "../../../lib/domains/uploads/upload-center-view-model";
 import { AppDialog } from "../../ui/app-dialog";
 
 export function UploadOperationDetailDialog({
@@ -23,10 +26,16 @@ export function UploadOperationDetailDialog({
   const operationId = operation?.id;
   const kind = operation?.kind;
   const supportsReport = Boolean(
-    operation && operation.kind !== "image_replacement",
+    operation && canLoadValidationReport(operation),
   );
   const load = useCallback(async () => {
-    if (!operationId || !kind || kind === "image_replacement") return;
+    if (
+      !operationId ||
+      !kind ||
+      kind === "image_replacement" ||
+      !supportsReport
+    )
+      return;
     setState("loading");
     try {
       const result = await getUploadValidationReport(kind, operationId);
@@ -36,17 +45,17 @@ export function UploadOperationDetailDialog({
       setReport(null);
       setState("error");
     }
-  }, [kind, operationId]);
+  }, [kind, operationId, supportsReport]);
 
   useEffect(() => {
     if (!open) return;
     setReport(null);
-    if (kind === "image_replacement" || !operationId) {
+    if (!operationId || !supportsReport) {
       setState("loaded");
       return;
     }
     void load();
-  }, [kind, load, open, operationId]);
+  }, [load, open, operationId, supportsReport]);
 
   const title = operation ? operationTitle(operation) : "Detalle de carga";
   return (
@@ -67,8 +76,7 @@ export function UploadOperationDetailDialog({
               <p className="m-0 mt-1">Etapa: {operation.failureStage}</p>
             ) : null}
           </div>
-          {operation.kind === "image_replacement" ? null : state ===
-            "loading" ? (
+          {!supportsReport ? null : state === "loading" ? (
             <p role="status">Cargando detalle…</p>
           ) : state === "error" ? (
             <div role="alert">

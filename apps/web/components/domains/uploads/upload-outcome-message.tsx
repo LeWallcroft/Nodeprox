@@ -13,8 +13,17 @@ export function uploadOutcomeMessage(record: UploadCenterRecord) {
           detail: true,
         }
       : {
-          title: "Carga completada",
-          copy: "El capítulo se cargó correctamente.",
+          title:
+            record.kind === "chapter_replacement" ||
+            record.kind === "image_replacement"
+              ? "Reemplazo completado"
+              : "Carga completada",
+          copy:
+            record.kind === "chapter_replacement"
+              ? "El capítulo se reemplazó correctamente."
+              : record.kind === "image_replacement"
+                ? "La imagen se reemplazó correctamente."
+                : "El capítulo se cargó correctamente.",
           tone: "success" as const,
           detail: false,
         };
