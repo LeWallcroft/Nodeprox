@@ -13,6 +13,7 @@ describe("same-origin proxy allowlist", () => {
       ["auth/session", ["GET"]],
       ["auth/password-reset/request", ["POST"]],
       ["me/profile", ["GET", "PATCH"]],
+      ["me/upload-policy", ["GET"]],
       ["me/sessions/id", ["DELETE"]],
       ["me/notifications/id/read", ["PATCH"]],
       ["admin/users", ["GET"]],
@@ -37,6 +38,8 @@ describe("same-origin proxy allowlist", () => {
       expect(isAllowedProxyRoute(path, "OPTIONS")).toBe(false);
     }
     expect(isAllowedProxyRoute("series/id", "POST")).toBe(false);
+    expect(isAllowedProxyRoute("me/upload-policy", "POST")).toBe(false);
+    expect(isAllowedProxyRoute("me/upload-policy", "DELETE")).toBe(false);
   });
 
   it("denies unknown, near-miss, and prefix-collision paths", () => {
