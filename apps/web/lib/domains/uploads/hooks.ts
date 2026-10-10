@@ -1,9 +1,21 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { invalidateChapterLifecycle } from "../chapters/lifecycle-invalidation";
 import { uploadChapter } from "./api";
+import { getUserUploadPolicy } from "./upload-policy";
+import { queryKeys } from "../query-keys";
+
+export function useUploadPolicy(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.uploads.policy,
+    queryFn: getUserUploadPolicy,
+    enabled,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
+}
 
 export function useUploadChapter(seriesId: string, chapterId: string) {
   const queryClient = useQueryClient();

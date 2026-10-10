@@ -61,6 +61,7 @@ function DetailField({
 export function ChapterDetailPanel({
   chapter,
   globalChapter,
+  imageCount,
   capabilities,
   onClose,
   onUpdate,
@@ -74,6 +75,7 @@ export function ChapterDetailPanel({
 }: {
   chapter: Chapter | null;
   globalChapter?: GlobalChapter | null;
+  imageCount?: number;
   capabilities: readonly string[] | undefined;
   onClose: () => void;
   onUpdate: (input: ChapterInput) => Promise<void>;
@@ -110,8 +112,9 @@ export function ChapterDetailPanel({
   const deleting = chapter.status === "deleting";
   const series = globalChapter?.series;
   const responsible = globalChapter?.responsibleUser;
+  const resolvedImageCount = imageCount ?? globalChapter?.imageCount ?? 0;
   const hasExistingImages =
-    (globalChapter?.imageCount ?? 0) > 0 || chapter.status === "ready";
+    resolvedImageCount > 0 || chapter.status === "ready";
   async function remove() {
     setActionError(null);
     try {
@@ -171,9 +174,7 @@ export function ChapterDetailPanel({
             />
           </DetailField>
           <DetailField label="Imágenes">
-            <span className="font-medium">
-              {globalChapter?.imageCount ?? 0}
-            </span>
+            <span className="font-medium">{resolvedImageCount}</span>
           </DetailField>
           <DetailField label="Última actualización">
             <span className="text-muted">

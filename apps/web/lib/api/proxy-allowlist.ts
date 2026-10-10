@@ -30,6 +30,7 @@ export const PROXY_ROUTE_RULES: readonly ProxyRouteRule[] = [
   { pattern: /^me\/sessions\/[^/]+$/, methods: DELETE },
   { pattern: "me/discord/series-channels", methods: GET },
   { pattern: "me/series-creation-grants", methods: GET },
+  { pattern: "me/upload-policy", methods: GET },
   { pattern: "me/upload-operations", methods: GET },
   {
     pattern:

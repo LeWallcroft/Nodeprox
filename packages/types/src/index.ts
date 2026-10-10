@@ -16,6 +16,18 @@ export {
   CHAPTER_TRANSITIONS,
   evaluateChapterTransition,
 } from "./chapter-state.js";
+export {
+  BROWSER_DIRECT_UPLOAD_CONCURRENCY_MAX,
+  CHAPTER_IMAGE_EXTENSIONS,
+  CHAPTER_IMAGE_FILENAME_PATTERN,
+  DEFAULT_DIRECT_UPLOAD_CONCURRENCY,
+  buildUploadProcessingPolicy,
+  minDefined,
+  resolveDirectUploadConcurrency,
+  type ChapterImageExtension,
+  type UploadProcessingPolicy,
+  type UserUploadPolicy,
+} from "./upload-policy.js";
 
 export interface RequestContext {
   requestId: string;

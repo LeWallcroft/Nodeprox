@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import {
   DEFAULT_PUBLIC_MEDIA_ORIGIN,
+  loadUploadAdmissionConfig,
   loadStorageProfileConfig,
   type NodeProxConfig,
   type NodeProxStorageConfig,
@@ -63,6 +64,8 @@ import { ListUploadOperationsService } from "../modules/uploads/application/serv
 import { RetryUploadOperationService } from "../modules/uploads/application/services/retry-upload-operation.service.js";
 import { DrizzleRetryUploadOperationRepository } from "../modules/uploads/infrastructure/persistence/drizzle/retry-upload-operation.repository.js";
 import { DrizzleUploadOperationReadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload-operation-read.repository.js";
+import { GetUserUploadPolicyService } from "../modules/uploads/application/services/get-user-upload-policy.service.js";
+import { DrizzleUploadPolicySettingsRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload-policy-settings.repository.js";
 import { UnavailableUploadTransfer } from "../modules/uploads/infrastructure/storage/unavailable-upload-transfer.js";
 import {
   DrizzleOperationAuditWriter,
@@ -98,6 +101,7 @@ export type ApiCompositionInput = AppDependencies & {
 
 export function createApiDependencies(input: ApiCompositionInput = {}) {
   const environment = input.environment ?? process.env;
+  const uploadAdmission = loadUploadAdmissionConfig(environment);
   const connection =
     input.config && !input.database
       ? createDatabase(input.config.DATABASE_URL)
@@ -306,6 +310,33 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
       if (!database) throw new Error("api-database-required");
       return new ListUploadOperationsService(
         new DrizzleUploadOperationReadRepository(database),
+      );
+    },
+    createUserUploadPolicyService() {
+      if (!database) throw new Error("api-database-required");
+      return new GetUserUploadPolicyService(
+        new DrizzleUploadPolicySettingsRepository(database),
+        {
+          maxUploadBytes: storageConfig.uploadMaxSizeBytes,
+          maxEntries: uploadAdmission.PROCESSING_MAX_ENTRIES,
+          maxExpandedBytes: uploadAdmission.PROCESSING_MAX_TOTAL_SIZE_BYTES,
+          maxImageBytes: uploadAdmission.PROCESSING_MAX_IMAGE_SIZE_BYTES,
+          ...(uploadAdmission.ADMISSION_MAX_WIDTH_PX !== undefined
+            ? { maxWidthPx: uploadAdmission.ADMISSION_MAX_WIDTH_PX }
+            : {}),
+          ...(uploadAdmission.ADMISSION_MAX_HEIGHT_PX !== undefined
+            ? { maxHeightPx: uploadAdmission.ADMISSION_MAX_HEIGHT_PX }
+            : {}),
+          ...(uploadAdmission.ADMISSION_MAX_PIXELS !== undefined
+            ? { maxPixels: uploadAdmission.ADMISSION_MAX_PIXELS }
+            : {}),
+          ...(uploadAdmission.ADMISSION_MAX_COMPRESSION_RATIO !== undefined
+            ? {
+                maxCompressionRatio:
+                  uploadAdmission.ADMISSION_MAX_COMPRESSION_RATIO,
+              }
+            : {}),
+        },
       );
     },
     createRetryUploadOperationService(

@@ -1,6 +1,10 @@
 import type { MediaWarning } from "@nodeprox/types";
+import {
+  DEFAULT_DIRECT_UPLOAD_CONCURRENCY,
+  resolveDirectUploadConcurrency,
+} from "@nodeprox/types";
 
-export const MAX_DIRECT_UPLOAD_CONCURRENCY = 3;
+export const MAX_DIRECT_UPLOAD_CONCURRENCY = DEFAULT_DIRECT_UPLOAD_CONCURRENCY;
 
 export type PersistedTrackedBatch = {
   batchId: string;
@@ -37,9 +41,7 @@ export function sanitizeTrackedBatches(
 }
 
 export function safeBulkUploadConcurrency(value?: number): number {
-  if (value === undefined || !Number.isInteger(value))
-    return MAX_DIRECT_UPLOAD_CONCURRENCY;
-  return Math.min(MAX_DIRECT_UPLOAD_CONCURRENCY, Math.max(1, value));
+  return resolveDirectUploadConcurrency(value);
 }
 
 export function canEnqueueDirectUpload(input: {

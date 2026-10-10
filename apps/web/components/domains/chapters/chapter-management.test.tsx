@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { queryKeys } from "../../../lib/domains/query-keys";
 import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
@@ -14,6 +15,7 @@ import {
   resolutionLabel,
 } from "./bulk-chapter-upload-dialog";
 import { ChapterDetailPanel } from "./chapter-detail-panel";
+import { GlobalChapterCreateDialog } from "./global-chapter-create-dialog";
 import { ChapterForm } from "./chapter-form";
 import { ChapterList } from "./chapter-list";
 
@@ -29,10 +31,16 @@ const chapter = {
   updatedAt: "2026-08-02T00:00:00.000Z",
 };
 
-function renderWithQueryClient(element: ReactNode) {
+function renderWithQueryClient(
+  element: ReactNode,
+  chapters?: readonly (typeof chapter & { imageCount: number })[],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  if (chapters) {
+    queryClient.setQueryData(queryKeys.series.chapters("series-1"), chapters);
+  }
   return renderToStaticMarkup(
     <QueryClientProvider client={queryClient}>
       <UploadQueueProvider>{element}</UploadQueueProvider>
@@ -131,6 +139,11 @@ describe("Chapter management presentation", () => {
     expect(createDialog).toContain('inputMode="decimal"');
     expect(createDialog).toContain('type="text"');
     expect(createDialog).not.toContain("normalizeChapterNumber");
+    expect(createDialog).not.toContain("Título (opcional)");
+    expect(createDialog).not.toContain('id="global-chapter-title"');
+    expect(createDialog).toContain("title: null");
+    expect(createDialog).toContain("latestChapterBySeries");
+    expect(createDialog).not.toContain("+ 1");
   });
 
   it("uses replacement instead of a second ZIP upload when a Chapter already has images", () => {
@@ -153,6 +166,22 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("bg-destructive-surface");
   });
 
+  it("uses the Series list image count when no global Chapter projection exists", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "draft" }}
+        imageCount={7}
+        capabilities={["images.upload", "chapters.replace"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+    expect(markup).toContain(">7</span>");
+    expect(markup).toContain("Cambiar capítulo");
+    expect(markup).not.toContain("Subir ZIP");
+  });
+
   it("keeps direct ZIP upload available before a Chapter has images", () => {
     const markup = renderWithQueryClient(
       <ChapterDetailPanel
@@ -165,6 +194,33 @@ describe("Chapter management presentation", () => {
     );
     expect(markup).toContain("Subir ZIP");
     expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("keeps ZIP upload for a draft Chapter with no images", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "draft" }}
+        imageCount={0}
+        capabilities={["images.upload", "chapters.replace"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+    expect(markup).toContain(">0</span>");
+    expect(markup).toContain("Subir ZIP");
+    expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("gets uploader policy without the admin settings dependency", () => {
+    const provider = readFileSync(
+      "apps/web/components/providers/upload-queue-provider.tsx",
+      "utf8",
+    );
+    expect(provider).toContain("useUploadPolicy(Boolean(userId))");
+    expect(provider).not.toContain("useProductSettings");
+    expect(provider).not.toContain("bulk_upload_concurrency");
+    expect(provider).not.toContain("/admin/settings");
   });
 
   it("hides contextual actions when the capability projection omits them", () => {
@@ -219,6 +275,49 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain('type="file"');
     expect(markup).toContain("multiple");
     expect(markup).not.toContain("Continuar con ZIP");
+    expect(markup).toContain("Requisitos para la carga");
+  });
+
+  it("shows the latest visible chapter in the bulk upload modal without filling numbers", () => {
+    const markup = renderWithQueryClient(
+      <BulkChapterUploadDialog
+        open
+        onOpenChange={() => undefined}
+        seriesId="series-1"
+        seriesTitle="Serie"
+      />,
+      [
+        { ...chapter, chapterNumber: 58, imageCount: 1 },
+        { ...chapter, id: "chapter-61", chapterNumber: 61, imageCount: 0 },
+      ],
+    );
+
+    expect(markup).toContain("Referencia de la serie");
+    expect(markup).toContain("Último capítulo visible");
+    expect(markup).toContain("tabular-nums text-primary");
+    expect(markup).toContain(">61</span>");
+    expect(markup).toContain(
+      "Añade los ZIP para asignar el número de cada capítulo.",
+    );
+    expect(markup).not.toContain('value="62"');
+  });
+
+  it("makes the latest Chapter reference visually prominent without auto-filling", () => {
+    const markup = renderWithQueryClient(
+      <GlobalChapterCreateDialog
+        open
+        onOpenChange={() => undefined}
+        onCreated={() => undefined}
+        fixedSeries={{ id: "series-1", title: "Serie" }}
+        latestChapterBySeries={{ "series-1": 61 }}
+      />,
+    );
+    expect(markup).toContain("Referencia de la serie");
+    expect(markup).toContain("Último capítulo visible");
+    expect(markup).toContain("tabular-nums text-primary");
+    expect(markup).toContain(">61</span>");
+    expect(markup).toContain('value=""');
+    expect(markup).not.toContain('value="62"');
   });
 
   it("presents Smart Bulk target resolutions and typed conflicts", () => {
