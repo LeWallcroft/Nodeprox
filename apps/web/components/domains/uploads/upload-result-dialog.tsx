@@ -1,7 +1,19 @@
 "use client";
 
-import { CircleAlert, CircleCheckBig, CircleX } from "lucide-react";
+import {
+  Archive,
+  CircleAlert,
+  CircleCheckBig,
+  CircleX,
+  Database,
+  ExternalLink,
+  Eye,
+  TriangleAlert,
+  UploadCloud,
+  X,
+} from "lucide-react";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import type { UploadCenterRecord } from "../../../lib/domains/uploads/upload-center-view-model";
 import { AppDialog } from "../../ui/app-dialog";
 
@@ -97,6 +109,7 @@ export function UploadResultDialog({
               className={`rounded-control px-3 py-2 text-sm ${operation.status !== "rejected" && result.tone === "warning" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-primary hover:bg-surface-hover"}`}
               onClick={closeForDetails}
             >
+              <Eye aria-hidden="true" className="size-4" />
               Ver detalle
               {operation.status === "rejected" && operation.issueCount
                 ? ` (${operation.issueCount})`
@@ -111,6 +124,7 @@ export function UploadResultDialog({
               href={`/series/${operation.seriesId}/chapters`}
               onClick={() => onOpenChange(false)}
             >
+              <UploadCloud aria-hidden="true" className="size-4" />
               Subir ZIP corregido
             </Link>
           ) : result.tone === "warning" || result.tone === "danger" ? (
@@ -122,6 +136,7 @@ export function UploadResultDialog({
                 onCenter();
               }}
             >
+              <Database aria-hidden="true" className="size-4" />
               Ir al Centro de cargas
             </button>
           ) : (
@@ -130,6 +145,7 @@ export function UploadResultDialog({
               href={chapterHref}
               onClick={() => onOpenChange(false)}
             >
+              <ExternalLink aria-hidden="true" className="size-4" />
               Ver en capítulos
             </Link>
           )}
@@ -138,6 +154,7 @@ export function UploadResultDialog({
             className="rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
             onClick={() => onOpenChange(false)}
           >
+            <X aria-hidden="true" className="size-4" />
             Cerrar
           </button>
         </div>
@@ -164,38 +181,162 @@ export function UploadResultDialog({
           </div>
         </div>
         <div className="rounded-control bg-surface p-4">
-          <p className="m-0 font-semibold text-text">
-            {operation.chapterNumber === null
-              ? operation.seriesTitle
-              : `Capítulo ${operation.chapterNumber} · ${operation.seriesTitle}`}
-          </p>
-          <p className="m-0 mt-1 break-all text-sm text-secondary">
-            {operation.filename}
-          </p>
-          {operation.fileCount !== null || operation.totalSizeBytes !== null ? (
-            <p className="m-0 mt-2 text-sm text-secondary">
-              {operation.fileCount === null
-                ? ""
-                : `${operation.fileCount} archivos`}
-              {operation.fileCount !== null && operation.totalSizeBytes !== null
-                ? " · "
-                : ""}
-              {operation.totalSizeBytes === null
-                ? ""
-                : formatMiB(operation.totalSizeBytes)}
-            </p>
+          <div className="flex items-center gap-3">
+            <span
+              className={`grid size-10 shrink-0 place-items-center rounded-control ${resultMetadataIconClass(result.tone)}`}
+            >
+              <Archive aria-hidden="true" className="size-5" />
+            </span>
+            <div className="min-w-0">
+              <p className="m-0 truncate font-semibold text-text">
+                {operation.chapterNumber === null
+                  ? operation.seriesTitle
+                  : `Capítulo ${operation.chapterNumber} · ${operation.seriesTitle}`}
+              </p>
+              <p className="m-0 mt-1 break-all text-sm text-secondary">
+                {operation.filename}
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 space-y-2">
+            {operation.fileCount !== null ? (
+              <ResultMetric
+                icon={
+                  operation.status === "rejected" ? (
+                    <CircleX aria-hidden="true" className="size-5" />
+                  ) : (
+                    <CircleCheckBig aria-hidden="true" className="size-5" />
+                  )
+                }
+                label="Archivos procesados"
+                value={
+                  operation.status === "rejected"
+                    ? `0 de ${operation.fileCount}`
+                    : `${operation.fileCount} de ${operation.fileCount}`
+                }
+                tone={operation.status === "rejected" ? "danger" : "success"}
+              />
+            ) : null}
+            {operation.totalSizeBytes !== null ? (
+              <ResultMetric
+                icon={<Database aria-hidden="true" className="size-5" />}
+                label="Tamaño total"
+                value={formatMiB(operation.totalSizeBytes)}
+                tone="neutral"
+              />
+            ) : null}
+            {operation.warningCount > 0 ? (
+              <ResultMetric
+                icon={<TriangleAlert aria-hidden="true" className="size-5" />}
+                label="Advertencias"
+                value={String(operation.warningCount)}
+                tone="warning"
+              />
+            ) : operation.status === "rejected" && operation.issueCount > 0 ? (
+              <ResultMetric
+                icon={<CircleX aria-hidden="true" className="size-5" />}
+                label="Problemas encontrados"
+                value={String(operation.issueCount)}
+                tone="danger"
+              />
+            ) : result.tone === "success" ? (
+              <ResultMetric
+                icon={<CircleCheckBig aria-hidden="true" className="size-5" />}
+                label="Incidencias"
+                value="Sin incidencias"
+                tone="success"
+              />
+            ) : null}
+          </div>
+          {operation.warningCount > 0 || operation.status === "rejected" ? (
+            <div
+              className={`mt-3 flex items-start gap-3 rounded-control border p-3 ${resultSummaryClass(result.tone)}`}
+            >
+              {result.tone === "warning" ? (
+                <TriangleAlert
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0"
+                />
+              ) : (
+                <CircleX
+                  aria-hidden="true"
+                  className="mt-0.5 size-5 shrink-0"
+                />
+              )}
+              <p className="m-0 text-xs">
+                {operation.status === "rejected"
+                  ? "Corrige los problemas indicados en el detalle y vuelve a subir el ZIP."
+                  : "Las advertencias no impiden la carga, pero se recomienda revisarlas."}
+              </p>
+            </div>
           ) : null}
-          <p className="m-0 mt-2 text-xs text-secondary">
-            {operation.status === "ready" || operation.status === "completed"
-              ? "Operación completada"
-              : operation.status === "rejected"
-                ? "Corrige los archivos indicados en el detalle."
-                : "Consulta el Centro de cargas para revisar el estado."}
-          </p>
         </div>
       </div>
     </AppDialog>
   );
+}
+
+function ResultMetric({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: string;
+  tone: "success" | "warning" | "danger" | "neutral";
+}) {
+  return (
+    <div className="flex items-center gap-3 px-2 py-1">
+      <span className={resultMetricToneClass(tone)}>{icon}</span>
+      <span className="min-w-0 flex-1 text-sm text-secondary">{label}</span>
+      <span
+        className={`shrink-0 text-sm font-semibold ${resultMetricValueClass(tone)}`}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function resultMetricToneClass(
+  tone: "success" | "warning" | "danger" | "neutral",
+) {
+  return {
+    success: "text-success",
+    warning: "text-warning-text",
+    danger: "text-destructive-text",
+    neutral: "text-secondary",
+  }[tone];
+}
+
+function resultMetricValueClass(
+  tone: "success" | "warning" | "danger" | "neutral",
+) {
+  return {
+    success: "text-success",
+    warning: "text-warning-text",
+    danger: "text-destructive-text",
+    neutral: "text-text",
+  }[tone];
+}
+
+function resultMetadataIconClass(tone: "success" | "warning" | "danger") {
+  return {
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning-text",
+    danger: "bg-destructive-surface text-destructive-text",
+  }[tone];
+}
+
+function resultSummaryClass(tone: "success" | "warning" | "danger") {
+  return {
+    success: "border-success/30 bg-success/10 text-success",
+    warning: "border-warning/30 bg-warning/10 text-warning-text",
+    danger:
+      "border-destructive/30 bg-destructive-surface text-destructive-text",
+  }[tone];
 }
 
 function resultToneClass(tone: "success" | "warning" | "danger") {

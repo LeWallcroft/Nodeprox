@@ -116,6 +116,50 @@ describe("Upload Center view model and state", () => {
     }
   });
 
+  it("colors result metadata and gives modal actions semantic icons", () => {
+    const renderResult = (operation: UploadCenterRecord) =>
+      renderToStaticMarkup(
+        <UploadResultDialog
+          open
+          operation={operation}
+          onOpenChange={() => undefined}
+          onDetails={() => undefined}
+          onCenter={() => undefined}
+        />,
+      );
+    const success = renderResult(
+      record({ fileCount: 15, totalSizeBytes: 42 * 1024 * 1024 }),
+    );
+    expect(success).toContain("bg-success/10 text-success");
+    expect(success).toContain("15 de 15");
+    expect(success).toContain("Sin incidencias");
+    expect(success).toContain('aria-label="Cerrar diálogo"');
+    expect(success).toContain("Ver en capítulos");
+    expect(success).toMatch(/<svg[^>]*aria-hidden="true"/);
+
+    const warning = renderResult(
+      record({
+        warningCount: 14,
+        fileCount: 15,
+        totalSizeBytes: 42 * 1024 * 1024,
+      }),
+    );
+    expect(warning).toContain("bg-warning/10 text-warning-text");
+    expect(warning).toContain("Advertencias");
+    expect(warning).toContain(">14</span>");
+    expect(warning).toContain("Ver detalle");
+    expect(warning).toMatch(/<svg[^>]*aria-hidden="true"/);
+
+    const rejected = renderResult(
+      record({ status: "rejected", issueCount: 3, fileCount: 5 }),
+    );
+    expect(rejected).toContain("bg-destructive-surface text-destructive-text");
+    expect(rejected).toContain("0 de 5");
+    expect(rejected).toContain("Problemas encontrados");
+    expect(rejected).toContain("Subir ZIP corregido");
+    expect(rejected).toMatch(/<svg[^>]*aria-hidden="true"/);
+  });
+
   it("gives detail tabs and validation states one stable scrolling workspace", () => {
     const markup = renderToStaticMarkup(
       <UploadOperationDetailDialog
