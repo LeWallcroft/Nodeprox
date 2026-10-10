@@ -1,13 +1,16 @@
 "use client";
 
 import {
-  Archive,
   CircleAlert,
   CircleCheckBig,
   CircleX,
-  Database,
   ExternalLink,
   Eye,
+  FileArchive,
+  Files,
+  HardDrive,
+  Image,
+  Replace,
   TriangleAlert,
   UploadCloud,
   X,
@@ -50,7 +53,7 @@ export function uploadResultPresentation(record: UploadCenterRecord) {
   if (record.status === "rejected")
     return {
       title: "Carga rechazada",
-      copy: `La carga no superó las validaciones. Se encontraron ${record.issueCount} problemas. Corrige los archivos indicados y vuelve a subir el ZIP.`,
+      copy: `La carga no superó las validaciones. Se encontraron ${record.issueCount} problemas.`,
       tone: "danger" as const,
       details: true,
     };
@@ -106,7 +109,7 @@ export function UploadResultDialog({
           {result.details ? (
             <button
               type="button"
-              className={`rounded-control px-3 py-2 text-sm ${operation.status !== "rejected" && result.tone === "warning" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-primary hover:bg-surface-hover"}`}
+              className={`inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm ${operation.status !== "rejected" && result.tone === "warning" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-primary hover:bg-surface-hover"}`}
               onClick={closeForDetails}
             >
               <Eye aria-hidden="true" className="size-4" />
@@ -120,7 +123,7 @@ export function UploadResultDialog({
           ) : null}
           {operation.status === "rejected" ? (
             <Link
-              className="rounded-control bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary-hover"
+              className="inline-flex items-center justify-center gap-2 rounded-control bg-primary px-3 py-2 text-sm text-primary-foreground hover:bg-primary-hover"
               href={`/series/${operation.seriesId}/chapters`}
               onClick={() => onOpenChange(false)}
             >
@@ -130,18 +133,18 @@ export function UploadResultDialog({
           ) : result.tone === "warning" || result.tone === "danger" ? (
             <button
               type="button"
-              className="rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
+              className="inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
               onClick={() => {
                 onOpenChange(false);
                 onCenter();
               }}
             >
-              <Database aria-hidden="true" className="size-4" />
+              <UploadCloud aria-hidden="true" className="size-4" />
               Ir al Centro de cargas
             </button>
           ) : (
             <Link
-              className={`rounded-control px-3 py-2 text-sm ${result.tone === "success" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-secondary hover:bg-surface-hover"}`}
+              className={`inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm ${result.tone === "success" ? "bg-primary text-primary-foreground hover:bg-primary-hover" : "text-secondary hover:bg-surface-hover"}`}
               href={chapterHref}
               onClick={() => onOpenChange(false)}
             >
@@ -151,7 +154,7 @@ export function UploadResultDialog({
           )}
           <button
             type="button"
-            className="rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
+            className="inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm text-secondary hover:bg-surface-hover"
             onClick={() => onOpenChange(false)}
           >
             <X aria-hidden="true" className="size-4" />
@@ -167,8 +170,18 @@ export function UploadResultDialog({
           <span className="grid size-10 shrink-0 place-items-center rounded-full bg-current/10">
             {result.tone === "success" ? (
               <CircleCheckBig aria-hidden="true" className="size-6" />
+            ) : operation.status === "retry_exhausted" ? (
+              <CircleAlert
+                aria-hidden="true"
+                className="size-6"
+                data-testid="result-icon-attention"
+              />
             ) : result.tone === "warning" ? (
-              <CircleAlert aria-hidden="true" className="size-6" />
+              <TriangleAlert
+                aria-hidden="true"
+                className="size-6"
+                data-testid="result-icon-warning"
+              />
             ) : (
               <CircleX aria-hidden="true" className="size-6" />
             )}
@@ -183,9 +196,9 @@ export function UploadResultDialog({
         <div className="rounded-control bg-surface p-4">
           <div className="flex items-center gap-3">
             <span
-              className={`grid size-10 shrink-0 place-items-center rounded-control ${resultMetadataIconClass(result.tone)}`}
+              className={`grid size-10 shrink-0 place-items-center rounded-full ${resultMetadataIconClass(result.tone)}`}
             >
-              <Archive aria-hidden="true" className="size-5" />
+              {resultOperationIcon(operation.kind)}
             </span>
             <div className="min-w-0">
               <p className="m-0 truncate font-semibold text-text">
@@ -201,25 +214,15 @@ export function UploadResultDialog({
           <div className="mt-4 space-y-2">
             {operation.fileCount !== null ? (
               <ResultMetric
-                icon={
-                  operation.status === "rejected" ? (
-                    <CircleX aria-hidden="true" className="size-5" />
-                  ) : (
-                    <CircleCheckBig aria-hidden="true" className="size-5" />
-                  )
-                }
-                label="Archivos procesados"
-                value={
-                  operation.status === "rejected"
-                    ? `0 de ${operation.fileCount}`
-                    : `${operation.fileCount} de ${operation.fileCount}`
-                }
-                tone={operation.status === "rejected" ? "danger" : "success"}
+                icon={<Files aria-hidden="true" className="size-5" />}
+                label="Archivos"
+                value={String(operation.fileCount)}
+                tone={result.tone}
               />
             ) : null}
             {operation.totalSizeBytes !== null ? (
               <ResultMetric
-                icon={<Database aria-hidden="true" className="size-5" />}
+                icon={<HardDrive aria-hidden="true" className="size-5" />}
                 label="Tamaño total"
                 value={formatMiB(operation.totalSizeBytes)}
                 tone="neutral"
@@ -242,7 +245,7 @@ export function UploadResultDialog({
             ) : result.tone === "success" ? (
               <ResultMetric
                 icon={<CircleCheckBig aria-hidden="true" className="size-5" />}
-                label="Incidencias"
+                label="Validación"
                 value="Sin incidencias"
                 tone="success"
               />
@@ -250,7 +253,7 @@ export function UploadResultDialog({
           </div>
           {operation.warningCount > 0 || operation.status === "rejected" ? (
             <div
-              className={`mt-3 flex items-start gap-3 rounded-control border p-3 ${resultSummaryClass(result.tone)}`}
+              className={`mt-3 flex items-start gap-3 rounded-control p-3 ${resultSummaryClass(operation.status === "rejected" ? "danger" : "warning")}`}
             >
               {result.tone === "warning" ? (
                 <TriangleAlert
@@ -330,13 +333,19 @@ function resultMetadataIconClass(tone: "success" | "warning" | "danger") {
   }[tone];
 }
 
-function resultSummaryClass(tone: "success" | "warning" | "danger") {
+function resultSummaryClass(tone: "warning" | "danger") {
   return {
-    success: "border-success/30 bg-success/10 text-success",
-    warning: "border-warning/30 bg-warning/10 text-warning-text",
-    danger:
-      "border-destructive/30 bg-destructive-surface text-destructive-text",
+    warning: "bg-warning/10 text-warning-text",
+    danger: "bg-destructive-surface text-destructive-text",
   }[tone];
+}
+
+function resultOperationIcon(kind: UploadCenterRecord["kind"]): ReactNode {
+  if (kind === "chapter_replacement")
+    return <Replace aria-hidden="true" className="size-5" />;
+  if (kind === "image_replacement")
+    return <Image aria-hidden="true" className="size-5" />;
+  return <FileArchive aria-hidden="true" className="size-5" />;
 }
 
 function resultToneClass(tone: "success" | "warning" | "danger") {

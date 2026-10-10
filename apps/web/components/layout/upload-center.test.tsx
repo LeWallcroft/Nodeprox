@@ -131,10 +131,15 @@ describe("Upload Center view model and state", () => {
       record({ fileCount: 15, totalSizeBytes: 42 * 1024 * 1024 }),
     );
     expect(success).toContain("bg-success/10 text-success");
-    expect(success).toContain("15 de 15");
+    expect(success).toContain("Archivos");
+    expect(success).toContain(">15</span>");
+    expect(success).toContain("Tamaño total");
+    expect(success).toContain("Validación");
     expect(success).toContain("Sin incidencias");
+    expect(success).toContain("rounded-full bg-success/10 text-success");
     expect(success).toContain('aria-label="Cerrar diálogo"');
     expect(success).toContain("Ver en capítulos");
+    expect(success).toContain("inline-flex items-center justify-center gap-2");
     expect(success).toMatch(/<svg[^>]*aria-hidden="true"/);
 
     const warning = renderResult(
@@ -148,14 +153,20 @@ describe("Upload Center view model and state", () => {
     expect(warning).toContain("Advertencias");
     expect(warning).toContain(">14</span>");
     expect(warning).toContain("Ver detalle");
+    expect(warning).toContain('data-testid="result-icon-warning"');
+    expect(warning).not.toContain("border-warning/30");
     expect(warning).toMatch(/<svg[^>]*aria-hidden="true"/);
 
     const rejected = renderResult(
       record({ status: "rejected", issueCount: 3, fileCount: 5 }),
     );
     expect(rejected).toContain("bg-destructive-surface text-destructive-text");
-    expect(rejected).toContain("0 de 5");
+    expect(rejected).toContain("Archivos");
+    expect(rejected).toContain(">5</span>");
     expect(rejected).toContain("Problemas encontrados");
+    expect(rejected).toContain(">3</span>");
+    expect(rejected).not.toContain("0 de 5");
+    expect(rejected).not.toContain("border-destructive/30");
     expect(rejected).toContain("Subir ZIP corregido");
     expect(rejected).toMatch(/<svg[^>]*aria-hidden="true"/);
   });
