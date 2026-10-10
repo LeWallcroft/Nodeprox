@@ -2,6 +2,7 @@
 
 import { Ban, Check, Copy, History, Ticket, X } from "lucide-react";
 import { useState } from "react";
+import { userPrimaryLabel } from "../../../lib/domains/users/presentation";
 import type {
   AdminSeriesCreationGrantListItem,
   SeriesCreationGrantListItem,
@@ -64,7 +65,7 @@ export function AuthorizationDetailPanel({
     selectedGrant.applicable === true;
   const owner =
     "targetUser" in selectedGrant
-      ? selectedGrant.targetUser.displayName
+      ? userPrimaryLabel(selectedGrant.targetUser)
       : "Tu autorización";
 
   async function copyCode() {

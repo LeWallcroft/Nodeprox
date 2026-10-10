@@ -81,6 +81,7 @@ export class UserRepository implements UserRepositoryPort {
             or(
               ilike(users.email, `%${input.search}%`),
               ilike(users.discordUsername, `%${input.search}%`),
+              ilike(users.displayName, `%${input.search}%`),
             ),
           ]
         : []),
@@ -141,6 +142,7 @@ export class UserRepository implements UserRepositoryPort {
             or(
               ilike(users.email, `%${input.search}%`),
               ilike(users.discordUsername, `%${input.search}%`),
+              ilike(users.displayName, `%${input.search}%`),
             ),
           ]
         : []),

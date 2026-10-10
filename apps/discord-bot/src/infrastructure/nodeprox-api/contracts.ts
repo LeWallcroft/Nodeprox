@@ -2,6 +2,7 @@ export type ConfirmDiscordLinkInput = {
   code: string;
   discordId: string;
   discordUsername: string;
+  discordAvatarUrl: string | null;
   guildId: string;
   channelId: string;
   interactionId: string;

@@ -13,6 +13,10 @@ import {
 import type { Series } from "../../../lib/domains/series/types";
 import { AppDialog } from "../../ui/app-dialog";
 import { SearchableCombobox } from "../../ui/searchable-combobox";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 import { Button } from "../../ui/button";
 
 export function ManageSeriesHelpersDialog({
@@ -92,9 +96,8 @@ export function ManageSeriesHelpersDialog({
               value={userId}
               options={(candidates.data ?? []).map((candidate) => ({
                 id: candidate.id,
-                label: candidate.discordUsername
-                  ? `${candidate.discordUsername} · ${candidate.email}`
-                  : candidate.email,
+                label: userPrimaryLabel(candidate),
+                description: userSecondaryLabel(candidate),
               }))}
               loading={candidates.isPending}
               onChange={setUserId}
@@ -137,9 +140,22 @@ export function ManageSeriesHelpersDialog({
                     className="flex items-center justify-between gap-3 rounded-control border border-border bg-surface p-3 text-sm"
                   >
                     <span className="min-w-0 truncate">
-                      {helper.discordUsername
-                        ? `${helper.discordUsername} · ${helper.email}`
-                        : helper.email}
+                      <span className="min-w-0">
+                        <span className="block truncate">
+                          {userPrimaryLabel({ ...helper, id: helper.userId })}
+                        </span>
+                        {userSecondaryLabel({
+                          ...helper,
+                          id: helper.userId,
+                        }) ? (
+                          <span className="block truncate text-xs text-secondary">
+                            {userSecondaryLabel({
+                              ...helper,
+                              id: helper.userId,
+                            })}
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
                     <Button
                       variant="destructive"

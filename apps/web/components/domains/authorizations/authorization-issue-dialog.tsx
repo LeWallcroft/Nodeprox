@@ -11,6 +11,10 @@ import { Button } from "../../ui/button";
 import { AppDialog } from "../../ui/app-dialog";
 import { FieldShell } from "../../ui/field-shell";
 import { SearchableCombobox } from "../../ui/searchable-combobox";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 export function AuthorizationIssueDialog({
   open,
@@ -27,10 +31,8 @@ export function AuthorizationIssueDialog({
   const issue = useIssueSeriesCreationGrant();
   const options = (users.data?.items ?? []).map((user) => ({
     id: user.id,
-    label:
-      user.displayName && user.email && user.displayName !== user.email
-        ? `${user.displayName} — ${user.email}`
-        : (user.displayName ?? user.email ?? "Usuario"),
+    label: userPrimaryLabel(user),
+    description: userSecondaryLabel(user),
   }));
 
   function close(nextOpen: boolean) {

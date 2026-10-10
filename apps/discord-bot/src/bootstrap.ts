@@ -16,7 +16,7 @@ import { registerGuildCommands } from "./discord/register-commands.js";
 import { BotHealthState } from "./health/health.js";
 import type { NodeProxDiscordApi } from "./infrastructure/nodeprox-api/contracts.js";
 import { NodeProxApiClient } from "./infrastructure/nodeprox-api/nodeprox-api.client.js";
-import { createGuildRoleVerifierServer } from "./internal/guild-role-verifier.server.js";
+import { createDiscordInternalServer } from "./internal/discord-internal.server.js";
 import { createBotLogger } from "./observability/logger.js";
 import {
   DEFAULT_STARTUP_RETRY_POLICY,
@@ -102,7 +102,7 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
     logger.info("discord_bot.commands.registered");
     logger.info("discord_bot.gateway.login.start");
     await client.login(config.DISCORD_BOT_TOKEN);
-    const verifier = createGuildRoleVerifierServer({
+    const verifier = createDiscordInternalServer({
       client,
       expectedToken: config.DISCORD_BOT_INTERNAL_TOKEN,
       guildId: config.DISCORD_GUILD_ID,

@@ -1,6 +1,6 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import type { Client, GuildBasedChannel } from "discord.js";
+import { EmbedBuilder, type Client, type GuildBasedChannel } from "discord.js";
 import type { Logger } from "pino";
 import {
   canViewSeriesChannel,
@@ -14,6 +14,10 @@ const maxBodyBytes = 32 * 1024;
 
 type VerifyRequest = { guildId: string; roleIds: string[] };
 type ValidateSeriesChannelRequest = { channelId: string };
+type SeriesGrantNotificationRequest = {
+  sourceEventId: string;
+  reference: string | null;
+};
 
 export type DiscordGuildRoleVerification = {
   guildId: string;
@@ -63,6 +67,33 @@ function validSeriesChannelRequest(
   );
 }
 
+function validGrantNotification(
+  value: unknown,
+): value is SeriesGrantNotificationRequest {
+  if (!value || typeof value !== "object") return false;
+  const input = value as Record<string, unknown>;
+  return (
+    typeof input.sourceEventId === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      input.sourceEventId,
+    ) &&
+    (input.reference === null ||
+      (typeof input.reference === "string" && input.reference.length <= 240))
+  );
+}
+
+export function notificationNonce(sourceEventId: string): string {
+  return createHash("sha256")
+    .update(sourceEventId)
+    .digest("base64url")
+    .slice(0, 25);
+}
+
+function discordErrorCode(error: unknown): number | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  return typeof error.code === "number" ? error.code : null;
+}
+
 function send(
   response: import("node:http").ServerResponse,
   status: number,
@@ -110,8 +141,8 @@ function isUnknownDiscordChannel(error: unknown) {
   );
 }
 
-export function createGuildRoleVerifierServer(input: {
-  client: Pick<Client, "guilds" | "channels" | "user">;
+export function createDiscordInternalServer(input: {
+  client: Pick<Client, "guilds" | "channels" | "users" | "user">;
   expectedToken: string;
   guildId: string;
   controlChannelId: string;
@@ -133,6 +164,90 @@ export function createGuildRoleVerifierServer(input: {
       return;
     }
     const pathname = request.url?.split("?", 1)[0];
+    const profileMatch = /^\/internal\/discord\/users\/([^/]+)\/profile$/.exec(
+      pathname ?? "",
+    );
+    if (request.method === "GET" && profileMatch) {
+      const profileDiscordId = profileMatch[1];
+      if (!profileDiscordId || !snowflake.test(profileDiscordId)) {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      try {
+        const user = await input.client.users.fetch(profileDiscordId);
+        send(response, 200, {
+          id: user.id,
+          username: user.username,
+          avatarUrl: user.displayAvatarURL({ extension: "webp", size: 128 }),
+        });
+      } catch (error) {
+        if (discordErrorCode(error) === 10013) {
+          send(response, 404, { code: "discord-user-not-found" });
+          return;
+        }
+        input.logger.warn(
+          { err: error },
+          "discord_bot.user_profile.fetch.failed",
+        );
+        send(response, 503, { code: "discord-user-profile-unavailable" });
+      }
+      return;
+    }
+    const grantNotificationMatch =
+      /^\/internal\/discord\/users\/([^/]+)\/notifications\/series-grant$/.exec(
+        pathname ?? "",
+      );
+    if (request.method === "POST" && grantNotificationMatch) {
+      const grantDiscordId = grantNotificationMatch[1];
+      if (!grantDiscordId || !snowflake.test(grantDiscordId)) {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      let body: unknown;
+      try {
+        body = await readJson(request);
+      } catch {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      if (!validGrantNotification(body)) {
+        send(response, 400, { code: "validation-failed" });
+        return;
+      }
+      try {
+        const user = await input.client.users.fetch(grantDiscordId);
+        const description = [
+          "Tienes una nueva autorización para crear una Serie en NodeProx.",
+          ...(body.reference ? [`Referencia: ${body.reference}`] : []),
+        ].join("\n");
+        const message = await user.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("🎟️ Nueva autorización disponible")
+              .setDescription(description),
+          ],
+          nonce: notificationNonce(body.sourceEventId),
+          enforceNonce: true,
+        });
+        send(response, 200, { status: "sent", messageId: message.id });
+      } catch (error) {
+        const code = discordErrorCode(error);
+        if (code === 50007) {
+          send(response, 200, { status: "skipped", reason: "dm-unavailable" });
+          return;
+        }
+        if (code === 10013) {
+          send(response, 200, {
+            status: "skipped",
+            reason: "user-unavailable",
+          });
+          return;
+        }
+        input.logger.warn({ err: error }, "discord_bot.grant_dm.send.failed");
+        send(response, 503, { code: "discord-grant-dm-unavailable" });
+      }
+      return;
+    }
     if (
       request.method === "GET" &&
       pathname === "/internal/discord/series-channels"

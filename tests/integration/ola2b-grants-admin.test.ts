@@ -64,6 +64,8 @@ beforeAll(async () => {
     {
       id: targetId,
       email: targetEmail,
+      displayName: "Grant Target",
+      discordUsername: "manual_target",
       passwordHash,
       status: "active",
       role: "uploader",
@@ -96,9 +98,23 @@ describe("OLA 2B public grant administration", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().items).toContainEqual({
       id: targetId,
-      displayName: targetEmail,
+      displayName: "Grant Target",
       email: targetEmail,
+      discordUsername: "manual_target",
+      avatarUrl: null,
+      discordLinked: false,
     });
+    for (const search of ["Grant Target", "manual_target"]) {
+      const byIdentity = await app.inject({
+        method: "GET",
+        url: `/admin/users/lookup?search=${encodeURIComponent(search)}`,
+        headers: { cookie: adminCookie },
+      });
+      expect(byIdentity.statusCode).toBe(200);
+      expect(byIdentity.json().items).toContainEqual(
+        expect.objectContaining({ id: targetId }),
+      );
+    }
 
     const gestorLookup = await app.inject({
       method: "GET",
@@ -108,8 +124,11 @@ describe("OLA 2B public grant administration", () => {
     expect(gestorLookup.statusCode).toBe(200);
     expect(gestorLookup.json().items).toContainEqual({
       id: targetId,
-      displayName: targetEmail,
+      displayName: "Grant Target",
       email: targetEmail,
+      discordUsername: "manual_target",
+      avatarUrl: null,
+      discordLinked: false,
     });
   });
 

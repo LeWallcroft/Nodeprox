@@ -9,6 +9,10 @@ export interface UserRecord {
   id: string;
   email: string;
   discordUsername?: string | null;
+  discordId?: string | null;
+  discordLinkedAt?: Date | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
   passwordHash: string;
   status: UserStatus;
   role?: "admin" | "gestor" | "uploader";

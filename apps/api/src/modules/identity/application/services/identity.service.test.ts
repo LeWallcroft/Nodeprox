@@ -25,7 +25,14 @@ describe("IdentityService admin lookup", () => {
       expect.objectContaining({ search: "example", limit: 1 }),
     );
     expect(result.items).toEqual([
-      { id: "1", displayName: "a@example.com", email: "a@example.com" },
+      {
+        id: "1",
+        displayName: null,
+        email: "a@example.com",
+        discordUsername: null,
+        avatarUrl: null,
+        discordLinked: false,
+      },
     ]);
     expect(result.nextCursor).toEqual(expect.any(String));
   });

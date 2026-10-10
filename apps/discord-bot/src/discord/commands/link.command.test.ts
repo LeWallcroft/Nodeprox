@@ -9,7 +9,15 @@ function interaction() {
     id: "interaction-1",
     guildId: "guild-1",
     channelId: "channel-1",
-    user: { id: "discord-user-1", username: "discord-user" },
+    user: {
+      id: "discord-user-1",
+      username: "discord-user",
+      displayAvatarURL: vi
+        .fn()
+        .mockReturnValue(
+          "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
+        ),
+    },
     options: { getString: vi.fn().mockReturnValue("NPX-LINK-code") },
     reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue(undefined),
@@ -38,6 +46,8 @@ describe("/vincular", () => {
       code: "NPX-LINK-code",
       discordId: "discord-user-1",
       discordUsername: "discord-user",
+      discordAvatarUrl:
+        "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
       actorDiscordId: "discord-user-1",
       guildId: "guild-1",
       channelId: "channel-1",

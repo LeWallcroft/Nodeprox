@@ -3,7 +3,12 @@
 import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { UserAvatar } from "../users/user-avatar";
 import { hasCapability } from "../../../lib/auth/visibility";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 import type {
   Series,
   SeriesInput,
@@ -160,8 +165,23 @@ export function SeriesDetailPanel({
             <dt className="text-xs font-medium uppercase tracking-[0.08em] text-muted">
               Responsable
             </dt>
-            <dd className="mt-1 text-muted">
-              {series.responsibleUser?.email ?? "Sin responsable asignado."}
+            <dd className="mt-1 flex items-center gap-2 text-muted">
+              {series.responsibleUser ? (
+                <>
+                  <UserAvatar user={series.responsibleUser} size="sm" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-text">
+                      {userPrimaryLabel(series.responsibleUser)}
+                    </span>
+                    <span className="block truncate text-xs text-secondary">
+                      {userSecondaryLabel(series.responsibleUser) ??
+                        series.responsibleUser.role}
+                    </span>
+                  </span>
+                </>
+              ) : (
+                "Sin responsable asignado."
+              )}
             </dd>
           </div>
           <div>

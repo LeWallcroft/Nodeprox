@@ -1,13 +1,10 @@
 import { apiRequestBrowser } from "../../api/browser";
+import type { UserReference } from "@nodeprox/types";
 
-export type Profile = {
-  id: string;
-  email: string;
-  displayName: string | null;
+export type Profile = UserReference & {
   role: "admin" | "gestor" | "uploader";
   status: string;
   createdAt: string;
-  discordUsername: string | null;
   discordLinkedAt: string | null;
 };
 export type AccountSession = {

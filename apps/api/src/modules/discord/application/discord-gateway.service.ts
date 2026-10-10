@@ -19,6 +19,7 @@ import {
   projectDiscordAuthorizedRole,
 } from "./discord-authorization-policy.js";
 import type { DiscordGuildRoleVerifier } from "./discord-guild-role-verifier.js";
+import { isTrustedDiscordAvatarUrl } from "./discord-user-profile.gateway.js";
 import type {
   DiscordSeriesChannelGateway,
   SelectableSeriesChannel,
@@ -259,6 +260,7 @@ export class DiscordGatewayService {
     code: string;
     discordId: string;
     discordUsername: string;
+    discordAvatarUrl: string | null;
     guildId: string;
     channelId: string;
     interactionId: string;
@@ -320,6 +322,11 @@ export class DiscordGatewayService {
           .set({
             discordId: input.discordId,
             discordUsername: input.discordUsername,
+            avatarUrl:
+              input.discordAvatarUrl &&
+              isTrustedDiscordAvatarUrl(input.discordAvatarUrl)
+                ? input.discordAvatarUrl
+                : null,
             discordLinkedAt: new Date(),
             updatedAt: new Date(),
           })
@@ -472,6 +479,7 @@ export class DiscordGatewayService {
             guildId: input.guildId,
             channelId: input.channelId,
             reference: grant.reference,
+            source: "discord",
           },
           occurredAt: new Date(),
         },

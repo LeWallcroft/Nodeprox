@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, lt, or } from "drizzle-orm";
+import { and, desc, eq, ilike, lt, or, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
   series,
@@ -81,7 +81,11 @@ export class ListSeriesCreationGrantsForAdministrationService {
         createdSeriesTitle: series.title,
         createdSeriesSlug: series.slug,
         targetUserId: users.id,
-        targetDisplayName: users.email,
+        targetEmail: users.email,
+        targetDisplayName: users.displayName,
+        targetDiscordUsername: users.discordUsername,
+        targetAvatarUrl: users.avatarUrl,
+        targetDiscordLinked: sql<boolean>`${users.discordId} is not null`,
       })
       .from(seriesCreationGrants)
       .innerJoin(users, eq(users.id, seriesCreationGrants.targetUserId))
@@ -111,7 +115,11 @@ export class ListSeriesCreationGrantsForAdministrationService {
           : null,
         targetUser: {
           id: row.targetUserId,
+          email: row.targetEmail,
           displayName: row.targetDisplayName,
+          discordUsername: row.targetDiscordUsername,
+          avatarUrl: row.targetAvatarUrl,
+          discordLinked: row.targetDiscordLinked,
         },
       })),
       nextCursor:

@@ -1,6 +1,9 @@
 import { ChannelType } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
-import { createGuildRoleVerifierServer } from "./guild-role-verifier.server.js";
+import {
+  createDiscordInternalServer,
+  notificationNonce,
+} from "./discord-internal.server.js";
 
 const guildId = "12345678901234567";
 const controlChannelId = "12345678901234568";
@@ -16,7 +19,7 @@ function setup() {
       ]),
     },
   } as never;
-  const server = createGuildRoleVerifierServer({
+  const server = createDiscordInternalServer({
     client,
     expectedToken: "internal-token",
     guildId,
@@ -27,6 +30,107 @@ function setup() {
 }
 
 describe("guild role verifier internal endpoint", () => {
+  it("creates a stable bounded nonce for a domain event", () => {
+    expect(notificationNonce("00000000-0000-4000-8000-000000000001")).toBe(
+      notificationNonce("00000000-0000-4000-8000-000000000001"),
+    );
+    expect(
+      notificationNonce("00000000-0000-4000-8000-000000000001"),
+    ).toHaveLength(25);
+  });
+
+  it("serves the minimal Discord user profile through the authenticated internal API", async () => {
+    const profileUser = {
+      id: "12345678901234567",
+      username: "reader",
+      displayAvatarURL: vi
+        .fn()
+        .mockReturnValue(
+          "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
+        ),
+    };
+    const client = {
+      users: { fetch: vi.fn().mockResolvedValue(profileUser) },
+      guilds: { cache: new Map() },
+      channels: { fetch: vi.fn() },
+      user: null,
+    } as never;
+    const server = createDiscordInternalServer({
+      client,
+      expectedToken: "internal-token",
+      guildId,
+      controlChannelId,
+      logger: { info: vi.fn(), warn: vi.fn() } as never,
+    });
+    const port = await server.start("127.0.0.1", 0);
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/internal/discord/users/12345678901234567/profile`,
+        {
+          headers: { authorization: "Bearer internal-token" },
+        },
+      );
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        id: "12345678901234567",
+        username: "reader",
+        avatarUrl:
+          "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
+      });
+      expect(profileUser.displayAvatarURL).toHaveBeenCalledWith({
+        extension: "webp",
+        size: 128,
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("sends an idempotent direct grant DM using the event nonce", async () => {
+    const send = vi.fn().mockResolvedValue({ id: "message-1" });
+    const user = { send };
+    const client = {
+      users: { fetch: vi.fn().mockResolvedValue(user) },
+      guilds: { cache: new Map() },
+      channels: { fetch: vi.fn() },
+      user: null,
+    } as never;
+    const server = createDiscordInternalServer({
+      client,
+      expectedToken: "internal-token",
+      guildId,
+      controlChannelId,
+      logger: { info: vi.fn(), warn: vi.fn() } as never,
+    });
+    const port = await server.start("127.0.0.1", 0);
+    const sourceEventId = "00000000-0000-4000-8000-000000000001";
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/internal/discord/users/12345678901234567/notifications/series-grant`,
+        {
+          method: "POST",
+          headers: {
+            authorization: "Bearer internal-token",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ sourceEventId, reference: "case-1" }),
+        },
+      );
+      await expect(response.json()).resolves.toEqual({
+        status: "sent",
+        messageId: "message-1",
+      });
+      expect(send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nonce: notificationNonce(sourceEventId),
+          enforceNonce: true,
+        }),
+      );
+    } finally {
+      await server.stop();
+    }
+  });
+
   it("verifies only roles in the configured guild with M2M authentication", async () => {
     const { server } = setup();
     const port = await server.start("127.0.0.1", 0);
@@ -143,7 +247,7 @@ describe("guild role verifier internal endpoint", () => {
         ),
       },
     } as never;
-    const server = createGuildRoleVerifierServer({
+    const server = createDiscordInternalServer({
       client,
       expectedToken: "internal-token",
       guildId,

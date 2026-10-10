@@ -9,6 +9,10 @@ import {
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { SearchableCombobox } from "../../ui/searchable-combobox";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 export function AssignChapterCollaboratorDialog({
   chapterId,
@@ -73,9 +77,8 @@ export function AssignChapterCollaboratorDialog({
         emptyMessage="No hay colaboradores disponibles."
         options={(candidates.data ?? []).map((candidate) => ({
           id: candidate.id,
-          label: candidate.discordUsername
-            ? `${candidate.discordUsername} · ${candidate.email}`
-            : candidate.email,
+          label: userPrimaryLabel(candidate),
+          description: userSecondaryLabel(candidate),
         }))}
         onChange={setUserId}
       />

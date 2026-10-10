@@ -28,11 +28,22 @@ export type PublicUserRecord = Pick<
   | "id"
   | "email"
   | "discordUsername"
+  | "displayName"
+  | "avatarUrl"
   | "status"
   | "role"
   | "createdAt"
   | "updatedAt"
->;
+> & { discordLinked: boolean };
+
+export type SafeUserReference = {
+  id: string;
+  email: string;
+  displayName: string | null;
+  discordUsername: string | null;
+  avatarUrl: string | null;
+  discordLinked: boolean;
+};
 
 export type ManagedUserProjection = PublicUserRecord & {
   assignedSeriesCount: number;
@@ -44,6 +55,9 @@ function publicUser(user: UserRecord): PublicUserRecord {
     id: user.id,
     email: user.email,
     discordUsername: user.discordUsername ?? null,
+    displayName: user.displayName ?? null,
+    avatarUrl: user.avatarUrl ?? null,
+    discordLinked: Boolean(user.discordId),
     status: user.status,
     ...(user.role ? { role: user.role } : {}),
     createdAt: user.createdAt,
@@ -141,8 +155,11 @@ export class IdentityService {
     return {
       items: page.map((user) => ({
         id: user.id,
-        displayName: user.email,
+        displayName: user.displayName ?? null,
         email: user.email,
+        discordUsername: user.discordUsername ?? null,
+        avatarUrl: user.avatarUrl ?? null,
+        discordLinked: Boolean(user.discordId),
       })),
       nextCursor:
         rows.length > input.limit && last

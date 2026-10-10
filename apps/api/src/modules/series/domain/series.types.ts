@@ -2,7 +2,10 @@ export type SeriesResponsibleUser = {
   id: string;
   email: string;
   role: "admin" | "gestor" | "uploader";
-  discordUsername?: string | null;
+  discordUsername: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  discordLinked: boolean;
 };
 
 export type SeriesResponsibleCandidate = SeriesResponsibleUser;

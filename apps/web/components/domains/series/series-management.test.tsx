@@ -24,6 +24,9 @@ const series = {
     email: "uploader@example.com",
     role: "uploader" as const,
     discordUsername: "raven_reader",
+    displayName: null,
+    avatarUrl: null,
+    discordLinked: true,
   },
   createdBy: "user-1",
   createdAt: "2026-08-01T00:00:00.000Z",
@@ -142,7 +145,7 @@ describe("Series management presentation", () => {
     expect(markup).toContain(">72</td>");
     expect(markup).toContain("Última actualización");
     expect(markup).toContain("Responsable");
-    expect(markup).toContain("raven_reader");
+    expect(markup).toContain("@raven_reader");
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("Acciones");
     expect(markup).toContain("Activa");

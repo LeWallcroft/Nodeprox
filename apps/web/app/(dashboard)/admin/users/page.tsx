@@ -18,6 +18,7 @@ import { AppDialog } from "../../../../components/ui/app-dialog";
 import { Button } from "../../../../components/ui/button";
 import { ConfirmationDialog } from "../../../../components/ui/confirmation-dialog";
 import { ContentImage } from "../../../../components/ui/content-image";
+import { UserAvatar } from "../../../../components/domains/users/user-avatar";
 import { useCopyToClipboard } from "../../../../components/ui/copy-button";
 import {
   DataTable,
@@ -49,6 +50,7 @@ import type {
   ManagedUserRole,
   ManagedUserStatus,
 } from "../../../../lib/domains/users/types";
+import { userPrimaryLabel } from "../../../../lib/domains/users/presentation";
 
 const pageSize = 10;
 const roles = [
@@ -366,7 +368,9 @@ function UserRow({
     >
       <td className="truncate p-3 text-sm text-text">{user.email}</td>
       <td className="truncate p-3 text-sm text-secondary">
-        {user.discordUsername ?? "—"}
+        {user.discordLinked && user.discordUsername
+          ? `@${user.discordUsername}`
+          : "—"}
       </td>
       <td className="p-3">
         <RoleBadge role={user.role ?? "uploader"} />
@@ -436,13 +440,11 @@ function UserDetailPanel({
         {user ? (
           <div className="grid gap-4">
             <div className="grid min-w-0 grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-3 overflow-hidden">
-              <div className="grid size-14 shrink-0 place-items-center rounded-full bg-primary text-lg font-semibold text-primary-foreground">
-                {initials(user.discordUsername ?? user.email)}
-              </div>
+              <UserAvatar user={user} size="lg" />
               <div className="min-w-0 overflow-hidden">
                 <p className="relative m-0 min-w-0 overflow-hidden whitespace-nowrap text-base font-semibold text-text">
                   <span className="block truncate pr-7">
-                    {user.discordUsername ?? user.email}
+                    {userPrimaryLabel(user)}
                   </span>
                   <span
                     aria-hidden="true"
@@ -622,14 +624,6 @@ function UserStatusBadge({ status }: { status: ManagedUserStatus }) {
           : { label: "Rechazado", tone: "neutral" as const };
   return <StatusBadge label={presentation.label} tone={presentation.tone} />;
 }
-function initials(value: string) {
-  return value
-    .split(/[\s@._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
-}
 function formatDate(value: string | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -698,7 +692,7 @@ function UserSeriesDialog({
       title={mode === "assign" ? "Asignar series" : "Series asignadas"}
       {...(user
         ? {
-            description: `${user.discordUsername ?? user.email} · ${
+            description: `${userPrimaryLabel(user)} · ${
               mode === "assign"
                 ? "La actualización se aplicará de forma atómica."
                 : "Responsabilidades actuales del usuario."

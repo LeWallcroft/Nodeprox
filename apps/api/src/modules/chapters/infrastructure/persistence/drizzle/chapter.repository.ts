@@ -1,4 +1,4 @@
-import { and, eq, gt, isNull } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
@@ -404,6 +404,9 @@ export class DrizzleChapterRepository
         permission: chapterPermissions,
         email: users.email,
         discordUsername: users.discordUsername,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
       })
       .from(chapterPermissions)
       .innerJoin(users, eq(users.id, chapterPermissions.helperUserId))
@@ -417,6 +420,9 @@ export class DrizzleChapterRepository
       ...toPermission(row.permission),
       email: row.email,
       discordUsername: row.discordUsername,
+      displayName: row.displayName,
+      avatarUrl: row.avatarUrl,
+      discordLinked: row.discordLinked,
     }));
   }
 
@@ -428,6 +434,9 @@ export class DrizzleChapterRepository
         id: users.id,
         email: users.email,
         discordUsername: users.discordUsername,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
       })
       .from(users)
       .where(and(eq(users.status, "active"), eq(users.role, "uploader")));

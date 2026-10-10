@@ -433,6 +433,9 @@ export class DrizzleSeriesRepository
         email: users.email,
         role: users.role,
         discordUsername: users.discordUsername,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
       })
       .from(seriesAssignments)
       .innerJoin(users, eq(users.id, seriesAssignments.responsibleUserId))
@@ -445,6 +448,9 @@ export class DrizzleSeriesRepository
           email: row.email,
           role: row.role,
           discordUsername: row.discordUsername,
+          displayName: row.displayName,
+          avatarUrl: row.avatarUrl,
+          discordLinked: row.discordLinked,
         },
       ]),
     );
@@ -456,6 +462,10 @@ export class DrizzleSeriesRepository
         id: users.id,
         email: users.email,
         role: users.role,
+        discordUsername: users.discordUsername,
+        displayName: users.displayName,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
       })
       .from(users)
       .where(
@@ -979,6 +989,10 @@ export class DrizzleChapterCoreRepository
           id: users.id,
           email: users.email,
           role: users.role,
+          discordUsername: users.discordUsername,
+          displayName: users.displayName,
+          avatarUrl: users.avatarUrl,
+          discordLinked: sql<boolean>`${users.discordId} is not null`,
         },
       })
       .from(chapters)

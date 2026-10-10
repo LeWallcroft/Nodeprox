@@ -71,6 +71,10 @@ describe("Series list view model", () => {
         id: "current-user",
         email: "me@example.com",
         role: "gestor" as const,
+        discordUsername: null,
+        displayName: null,
+        avatarUrl: null,
+        discordLinked: false,
       },
     };
     const assignedToOther = {
@@ -80,6 +84,10 @@ describe("Series list view model", () => {
         id: "other-user",
         email: "other@example.com",
         role: "gestor" as const,
+        discordUsername: null,
+        displayName: null,
+        avatarUrl: null,
+        discordLinked: false,
       },
     };
 

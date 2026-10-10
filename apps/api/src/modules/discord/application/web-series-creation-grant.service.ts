@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
   auditLogs,
@@ -172,7 +172,14 @@ export class WebSeriesCreationGrantService {
     );
     const actors = actorIds.length
       ? await this.db
-          .select({ id: users.id, displayName: users.email })
+          .select({
+            id: users.id,
+            email: users.email,
+            displayName: users.displayName,
+            discordUsername: users.discordUsername,
+            avatarUrl: users.avatarUrl,
+            discordLinked: sql<boolean>`${users.discordId} is not null`,
+          })
           .from(users)
           .where(inArray(users.id, actorIds))
       : [];

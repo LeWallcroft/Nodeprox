@@ -357,6 +357,9 @@ describe("M3 Series and Chapters Core", () => {
       email: emails.uploaderTwo,
       role: "uploader",
       discordUsername: "m3_uploader_two",
+      displayName: null,
+      avatarUrl: null,
+      discordLinked: false,
     });
 
     const returnToOwner = await app.inject({

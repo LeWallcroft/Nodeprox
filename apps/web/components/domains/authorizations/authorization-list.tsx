@@ -3,6 +3,7 @@ import type {
   AdminSeriesCreationGrantListItem,
   SeriesCreationGrantListItem,
 } from "../../../lib/domains/authorizations/types";
+import { userPrimaryLabel } from "../../../lib/domains/users/presentation";
 import {
   authorizationStatusLabel,
   authorizationStatusTone,
@@ -106,7 +107,9 @@ export function AuthorizationList({
                 </td>
                 {showsTarget ? (
                   <td className="max-w-48 truncate px-4 py-3 align-middle text-sm text-muted">
-                    {"targetUser" in grant ? grant.targetUser.displayName : "—"}
+                    {"targetUser" in grant
+                      ? userPrimaryLabel(grant.targetUser)
+                      : "—"}
                   </td>
                 ) : null}
                 {showsActions ? (

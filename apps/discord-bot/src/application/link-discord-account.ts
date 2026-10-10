@@ -7,6 +7,7 @@ export class LinkDiscordAccount {
     code: string;
     discordId: string;
     discordUsername: string;
+    discordAvatarUrl: string | null;
     guildId: string;
     channelId: string;
     interactionId: string;

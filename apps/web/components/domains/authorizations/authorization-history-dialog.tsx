@@ -2,6 +2,7 @@
 
 import { CheckCircle2, CircleSlash2, Clock3, Ticket } from "lucide-react";
 import { useSeriesCreationGrantHistory } from "../../../lib/domains/authorizations/hooks";
+import { userPrimaryLabel } from "../../../lib/domains/users/presentation";
 import { errorMessage } from "../feedback";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
@@ -78,7 +79,7 @@ export function AuthorizationHistoryDialog({
                   </p>
                   {item.actor ? (
                     <p className="mt-1 text-sm text-text-secondary">
-                      {item.actor.displayName ?? "Usuario"}
+                      {userPrimaryLabel(item.actor)}
                     </p>
                   ) : null}
                   {item.series ? (

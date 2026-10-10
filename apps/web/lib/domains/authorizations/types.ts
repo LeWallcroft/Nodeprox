@@ -21,10 +21,7 @@ export interface AdminSeriesCreationGrantListItem
     title: string;
     slug: string;
   } | null;
-  targetUser: {
-    id: string;
-    displayName: string;
-  };
+  targetUser: UserReference;
 }
 
 export interface AdminSeriesCreationGrantPage {
@@ -32,11 +29,7 @@ export interface AdminSeriesCreationGrantPage {
   nextCursor: string | null;
 }
 
-export interface AdminUserLookupItem {
-  id: string;
-  displayName: string | null;
-  email: string | null;
-}
+export type AdminUserLookupItem = UserReference;
 
 export interface AdminUserLookupPage {
   items: AdminUserLookupItem[];
@@ -58,6 +51,8 @@ export interface IssuedSeriesCreationGrant {
 export interface GrantHistoryItem {
   type: "issued" | "consumed" | "invalidated";
   occurredAt: string;
-  actor: { id: string; displayName: string | null } | null;
+  actor: UserReference | null;
   series: { id: string; title: string; slug: string } | null;
 }
+
+import type { UserReference } from "@nodeprox/types";

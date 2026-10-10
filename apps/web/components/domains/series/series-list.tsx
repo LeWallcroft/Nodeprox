@@ -6,6 +6,10 @@ import {
   stopTableRowSelection,
 } from "../../ui/data-table";
 import { StatusBadge } from "../../ui/status-badge";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 import { SeriesCoverPreview } from "./series-cover-preview";
 
 function responsibleInitials(name: string | undefined) {
@@ -53,8 +57,9 @@ export function SeriesList({
           items.map((series, index) => {
             const selected = selectedId === series.id;
             const responsible = series.responsibleUser;
-            const responsibleName =
-              responsible?.discordUsername || responsible?.email;
+            const responsibleName = responsible
+              ? userPrimaryLabel(responsible)
+              : null;
             return (
               <tr
                 key={series.id}
@@ -121,9 +126,9 @@ export function SeriesList({
                         <span className="truncate font-medium text-text">
                           {responsibleName}
                         </span>
-                        {responsible?.discordUsername ? (
+                        {responsible && userSecondaryLabel(responsible) ? (
                           <span className="truncate text-xs text-muted">
-                            {responsible.email}
+                            {userSecondaryLabel(responsible)}
                           </span>
                         ) : null}
                       </span>

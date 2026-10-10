@@ -33,6 +33,7 @@ const confirmInput = z
     code: z.string().trim().min(1).max(64),
     discordId: z.string().trim().min(1).max(32),
     discordUsername: z.string().trim().min(1).max(64),
+    discordAvatarUrl: z.string().url().nullable(),
     guildId: z.string().trim().min(1).max(32),
     channelId: z.string().trim().min(1).max(32),
     interactionId: z.string().trim().min(1).max(128),

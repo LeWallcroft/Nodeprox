@@ -89,6 +89,7 @@ beforeAll(async () => {
       passwordHash: await hasher.hash(password),
       status: "active",
       role: "uploader",
+      displayName: "NodeProx Display",
     },
     {
       id: duplicateLinkUserId,
@@ -209,6 +210,7 @@ describe("BOT-M1A internal Discord gateway", () => {
         code: first.json().code,
         discordId: "discord-link-user",
         discordUsername: "Discord Link User",
+        discordAvatarUrl: null,
         actorDiscordId: "discord-link-user",
         guildId: "guild-1",
         channelId: "channel-1",
@@ -220,6 +222,8 @@ describe("BOT-M1A internal Discord gateway", () => {
       code: second.json().code as string,
       discordId: "discord-link-user",
       discordUsername: "Discord Link User",
+      discordAvatarUrl:
+        "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
       actorDiscordId: "discord-link-user",
       guildId: "guild-1",
       channelId: "channel-1",
@@ -250,6 +254,20 @@ describe("BOT-M1A internal Discord gateway", () => {
     });
     expect(linked.statusCode).toBe(200);
     expect(retry.json()).toEqual({ linked: true, idempotent: true });
+    const [linkedProfile] = await database.db
+      .select({
+        discordUsername: users.discordUsername,
+        avatarUrl: users.avatarUrl,
+        displayName: users.displayName,
+      })
+      .from(users)
+      .where(eq(users.id, linkUserId));
+    expect(linkedProfile).toEqual({
+      discordUsername: "Discord Link User",
+      avatarUrl:
+        "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
+      displayName: "NodeProx Display",
+    });
     await redis.set(
       `nodeprox:discord-link:user:${linkUserId}`,
       JSON.stringify({
@@ -307,6 +325,7 @@ describe("BOT-M1A internal Discord gateway", () => {
         code: challenge.json().code,
         discordId: "discord-link-user",
         discordUsername: "Discord Link User",
+        discordAvatarUrl: null,
         actorDiscordId: "discord-link-user",
         guildId: "guild-1",
         channelId: "channel-1",
