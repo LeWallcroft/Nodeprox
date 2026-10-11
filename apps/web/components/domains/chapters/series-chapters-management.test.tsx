@@ -12,8 +12,10 @@ describe("Series-scoped Chapters presentation", () => {
     expect(page).not.toContain("useGlobalChapterList");
     expect(page).toContain("xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]");
     expect(page).toContain('placeholder="Buscar capítulos..."');
-    expect(page).toContain('aria-label="Estado"');
-    expect(page).toContain('aria-label="Responsable"');
+    expect(page).toContain('id="chapter-status-filter"');
+    expect(page).toContain('label="Estado"');
+    expect(page).toContain('id="chapter-responsible-filter"');
+    expect(page).toContain('label="Responsable"');
     expect(page).not.toContain('aria-label="Serie"');
     expect(page).toContain("setSelectedChapterId(initialChapterId)");
   });
