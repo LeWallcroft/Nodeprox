@@ -18,6 +18,7 @@ import { ErrorState } from "../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../components/ui/loading-state";
 import { Pagination } from "../../../../../components/ui/pagination";
 import { SearchInput } from "../../../../../components/ui/search-input";
+import { SearchableCombobox } from "../../../../../components/ui/searchable-combobox";
 import { hasCapability } from "../../../../../lib/auth/visibility";
 import {
   useChapter,
@@ -221,29 +222,43 @@ export default function SeriesChaptersPage() {
                   placeholder="Buscar capítulos..."
                 />
               </div>
-              <select
-                aria-label="Estado"
-                className="h-control-lg w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                value={status}
-                onChange={(event) => {
-                  setStatus(event.target.value as ChapterStatus | "all");
-                  setPage(1);
-                }}
-              >
-                <option value="all">Estado: Todos</option>
-                {chapterStatuses.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Responsable"
-                className="h-control-lg w-48 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-                disabled
-              >
-                <option>Responsable: No disponible</option>
-              </select>
+              <div className="w-full shrink-0 sm:w-40">
+                <SearchableCombobox
+                  compact
+                  id="chapter-status-filter"
+                  label="Estado"
+                  labelHidden
+                  options={[
+                    { id: "all", label: "Estado: Todos" },
+                    ...chapterStatuses.map((value) => ({
+                      id: value,
+                      label: value,
+                    })),
+                  ]}
+                  value={status}
+                  onChange={(value) => {
+                    setStatus(value as ChapterStatus | "all");
+                    setPage(1);
+                  }}
+                />
+              </div>
+              <div className="w-full shrink-0 sm:w-48">
+                <SearchableCombobox
+                  compact
+                  disabled
+                  id="chapter-responsible-filter"
+                  label="Responsable"
+                  labelHidden
+                  options={[
+                    {
+                      id: "unavailable",
+                      label: "Responsable: No disponible",
+                    },
+                  ]}
+                  value="unavailable"
+                  onChange={() => undefined}
+                />
+              </div>
             </Card>
             <ChapterList
               items={items}

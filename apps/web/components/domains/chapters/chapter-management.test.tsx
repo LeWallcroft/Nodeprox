@@ -62,6 +62,10 @@ describe("Chapter management presentation", () => {
     expect(page).not.toContain(
       'className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap"',
     );
+    expect(page).toContain('id="chapter-status-filter"');
+    expect(page).toContain('id="chapter-responsible-filter"');
+    expect(page).toContain("<SearchableCombobox");
+    expect(page).not.toMatch(/<select\s+aria-label="Estado"/);
   });
 
   it("keeps the global Chapters master-detail contract and contextual actions", () => {
@@ -208,6 +212,10 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("lucide-triangle-alert");
     expect(markup).not.toContain("Subir ZIP");
     expect(markup).toContain("Gestionar capítulo");
+    expect(markup.indexOf("Gestionar capítulo")).toBeLessThan(
+      markup.indexOf("Editar capítulo"),
+    );
+    expect(markup).toContain("order-first inline-flex");
     expect(markup).not.toContain("Publicación e imágenes");
     expect(markup).toContain("bg-destructive-surface");
   });
