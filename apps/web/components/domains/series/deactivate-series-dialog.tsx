@@ -48,6 +48,7 @@ export function DeactivateSeriesDialog({
             Cancelar
           </Button>
           <Button
+            variant="destructive"
             type="button"
             disabled={pending || (reason === "other" && !detail.trim())}
             onClick={() => {

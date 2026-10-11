@@ -49,6 +49,8 @@ describe("Series management presentation", () => {
 
     expect(panel).toContain("Esta serie tiene imágenes asociadas");
     expect(panel).toContain("Usa «Deshabilitar serie»");
+    expect(panel).toContain("border border-warning/30 bg-warning-soft");
+    expect(panel).toContain("TriangleAlert");
     expect(panel).toContain("archivos subidos, historial de almacenamiento");
     expect(panel).toContain(
       'errorMessage(cause, "No se pudo eliminar la serie.")',
@@ -68,6 +70,24 @@ describe("Series management presentation", () => {
     expect(dialog).toContain('role="alert"');
   });
 
+  it("styles Series deactivation as a consequential action", () => {
+    const panel = readFileSync(
+      "apps/web/components/domains/series/series-detail-panel.tsx",
+      "utf8",
+    );
+    const dialog = readFileSync(
+      "apps/web/components/domains/series/deactivate-series-dialog.tsx",
+      "utf8",
+    );
+
+    expect(panel).toMatch(
+      /canManageLifecycle && onDeactivate \? \([\s\S]*?<Button\s+variant="destructive"/,
+    );
+    expect(dialog).toMatch(
+      /<Button\s+variant="destructive"[\s\S]*?>\s*Deshabilitar serie/,
+    );
+  });
+
   it("keeps the final compact master-detail layout contract", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/series/page.tsx",
@@ -84,6 +104,7 @@ describe("Series management presentation", () => {
     expect(page).not.toContain("Más filtros");
     expect(page).toContain("lg:flex-nowrap");
     expect(page).toContain("max-w-xs shrink");
+    expect(page).toContain('className="h-control-lg min-h-0 px-3"');
     expect(page).toContain('density="compact"');
     expect(page).toContain("responsibleUser?.id === responsibleId");
     expect(page).toContain("Estado: Activa");
