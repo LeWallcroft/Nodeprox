@@ -42,6 +42,7 @@ function subject(
 ) {
   const completing = { ...operation, status: "completing" as const };
   const operations: ImageReplacementOperationRepository = {
+    isChapterSeriesInactive: async () => false,
     create: vi.fn(),
     findById: vi.fn(async () => operation),
     markUploaded: vi.fn(),

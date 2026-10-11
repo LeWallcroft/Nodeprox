@@ -19,11 +19,14 @@ import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { DiscordSeriesChannelGateway } from "../../discord/application/discord-series-channel-gateway.js";
 import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
 import { SeriesService } from "../application/services/series.service.js";
+import { SeriesLifecycleService } from "../application/services/series-lifecycle.service.js";
 import { InvalidSeriesSlugError } from "../domain/series-slug.js";
+import { SeriesInactiveError } from "../domain/series-operational.policy.js";
 import {
   DrizzleChapterCoreRepository,
   DrizzleSeriesRepository,
 } from "../infrastructure/persistence/drizzle/series.repository.js";
+import { DrizzleSeriesLifecycleRepository } from "../infrastructure/persistence/drizzle/series-lifecycle.repository.js";
 
 const idSchema = z.object({ seriesId: z.uuid() }).strict();
 const userIdSchema = z.object({ userId: z.uuid() }).strict();
@@ -84,6 +87,26 @@ const bulkResponsibleAssignmentSchema = z
     }
   });
 const legacyAssignmentSchema = z.object({ uploaderId: z.uuid() }).strict();
+const seriesListQuerySchema = z
+  .object({
+    operationalState: z.enum(["active", "inactive"]).default("active"),
+  })
+  .strict();
+const deactivateSchema = z
+  .object({
+    reason: z.enum(["dropped", "hiatus", "completed", "other"]),
+    reasonDetail: z.string().max(1000).nullable().optional(),
+  })
+  .strict();
+const noteSchema = z
+  .object({ resolutionNote: z.string().max(1000).nullable().optional() })
+  .strict();
+const requestSchema = z
+  .object({ note: z.string().max(1000).nullable().optional() })
+  .strict();
+const requestIdSchema = z
+  .object({ seriesId: z.uuid(), requestId: z.uuid() })
+  .strict();
 
 const error = (
   code: string,
@@ -122,11 +145,47 @@ const conflict = error(
   409,
   "Conflict",
 );
-const seriesHasChapters = error(
-  "series-has-chapters",
-  "Delete all Chapters in this Series before deleting the Series.",
+const seriesInactive = error(
+  "series-inactive",
+  "The Series is inactive.",
   409,
-  "Series still has Chapters",
+  "Series inactive",
+);
+const seriesActiveOperation = error(
+  "series-active-operation",
+  "The Series has an active operation.",
+  409,
+  "Series operation active",
+);
+const seriesHasMedia = error(
+  "series-has-media",
+  "The Series has media or storage history.",
+  409,
+  "Series has media",
+);
+const lifecycleInvalid = error(
+  "series-lifecycle-transition-invalid",
+  "The lifecycle transition is invalid.",
+  409,
+  "Invalid lifecycle transition",
+);
+const reactivationPending = error(
+  "series-reactivation-already-pending",
+  "A reactivation request is already pending.",
+  409,
+  "Request pending",
+);
+const requestNotFound = error(
+  "series-reactivation-request-not-found",
+  "The reactivation request was not found.",
+  404,
+  "Request not found",
+);
+const requestInvalidState = error(
+  "series-reactivation-request-invalid-state",
+  "The reactivation request cannot be reviewed in its current state.",
+  409,
+  "Invalid request state",
 );
 const invalidChapterTransition = error(
   "invalid-chapter-transition",
@@ -201,6 +260,24 @@ export function registerSeriesPlugin(
     repository,
     seriesChannels,
   );
+  const lifecycleRepository = new DrizzleSeriesLifecycleRepository(db);
+  const lifecycleService = new SeriesLifecycleService(
+    lifecycleRepository,
+    lifecycleRepository,
+    seriesService,
+  );
+
+  function lifecycleOutcome(result: { outcome: string }) {
+    if (result.outcome === "denied") throw forbidden;
+    if (result.outcome === "not-found") throw notFound;
+    if (result.outcome === "inactive") throw seriesInactive;
+    if (result.outcome === "active-operation") throw seriesActiveOperation;
+    if (result.outcome === "invalid-transition") throw lifecycleInvalid;
+    if (result.outcome === "request-already-pending") throw reactivationPending;
+    if (result.outcome === "request-not-found") throw requestNotFound;
+    if (result.outcome === "request-invalid-state") throw requestInvalidState;
+    return result;
+  }
   const chapterCore = new ChapterCoreService(
     chapters,
     chapterPermissions,
@@ -278,8 +355,102 @@ export function registerSeriesPlugin(
     }
   });
 
-  app.get("/series", { preHandler: session }, async () =>
-    seriesService.list(context()),
+  app.get("/series", { preHandler: session }, async (request) =>
+    seriesService.list(
+      context(),
+      parse(seriesListQuerySchema, request.query).operationalState,
+    ),
+  );
+
+  app.get(
+    "/series/:seriesId/lifecycle",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const result = await lifecycleService.getDetail(context(), seriesId);
+      if (!result) throw notFound;
+      if ("forbidden" in result) throw forbidden;
+      return result;
+    },
+  );
+
+  app.post(
+    "/series/:seriesId/deactivate",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const body = parse(deactivateSchema, request.body);
+      return lifecycleOutcome(
+        await lifecycleService.deactivate(context(), {
+          seriesId,
+          ...body,
+          requestId: getRequestContext()?.requestId,
+        }),
+      );
+    },
+  );
+
+  app.post(
+    "/series/:seriesId/reactivate",
+    { preHandler: session },
+    async (request) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const body = parse(noteSchema, request.body ?? {});
+      return lifecycleOutcome(
+        await lifecycleService.reactivate(context(), {
+          seriesId,
+          ...body,
+          requestId: getRequestContext()?.requestId,
+        }),
+      );
+    },
+  );
+
+  app.post(
+    "/series/:seriesId/reactivation-requests",
+    { preHandler: session },
+    async (request, reply) => {
+      const { seriesId } = parse(idSchema, request.params);
+      const body = parse(requestSchema, request.body ?? {});
+      const result = lifecycleOutcome(
+        await lifecycleService.requestReactivation(context(), {
+          seriesId,
+          ...body,
+          requestId: getRequestContext()?.requestId,
+        }),
+      );
+      return reply.code(201).send(result);
+    },
+  );
+
+  app.post(
+    "/series/:seriesId/reactivation-requests/:requestId/approve",
+    { preHandler: session },
+    async (request) => {
+      const params = parse(requestIdSchema, request.params);
+      const body = parse(noteSchema, request.body ?? {});
+      return lifecycleOutcome(
+        await lifecycleService.approveReactivation(context(), {
+          ...params,
+          ...body,
+        }),
+      );
+    },
+  );
+
+  app.post(
+    "/series/:seriesId/reactivation-requests/:requestId/reject",
+    { preHandler: session },
+    async (request) => {
+      const params = parse(requestIdSchema, request.params);
+      const body = parse(noteSchema, request.body ?? {});
+      return lifecycleOutcome(
+        await lifecycleService.rejectReactivation(context(), {
+          ...params,
+          ...body,
+        }),
+      );
+    },
   );
 
   app.get("/chapters", { preHandler: session }, async () =>
@@ -334,6 +505,7 @@ export function registerSeriesPlugin(
       );
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("conflict" in result) throw conflict;
       return result;
     } catch (cause) {
@@ -350,7 +522,8 @@ export function registerSeriesPlugin(
       const result = await seriesService.remove(context(), seriesId);
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
-      if ("hasChapters" in result) throw seriesHasChapters;
+      if ("activeOperation" in result) throw seriesActiveOperation;
+      if ("hasMedia" in result) throw seriesHasMedia;
       if ("conflict" in result) throw conflict;
       return reply.code(204).send();
     },
@@ -372,6 +545,7 @@ export function registerSeriesPlugin(
       );
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return { assigned: true };
@@ -394,6 +568,7 @@ export function registerSeriesPlugin(
       );
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return {
@@ -417,6 +592,7 @@ export function registerSeriesPlugin(
       );
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return { assigned: true };
@@ -431,6 +607,7 @@ export function registerSeriesPlugin(
       const result = await seriesService.releaseUploader(context(), seriesId);
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("invalidTarget" in result) throw invalid;
       if ("conflict" in result) throw conflict;
       return reply.code(204).send();
@@ -468,6 +645,7 @@ export function registerSeriesPlugin(
         markOperationAuditRecorded();
         return reply.code(201).send(result);
       } catch (cause) {
+        if (cause instanceof SeriesInactiveError) throw seriesInactive;
         if (isUnique(cause)) {
           const requestContext = getRequestContext();
           request.log.info(
@@ -538,6 +716,7 @@ export function registerSeriesPlugin(
         );
         if ("notFound" in result) throw notFound;
         if ("denied" in result) throw forbidden;
+        if ("inactive" in result) throw seriesInactive;
         if ("conflict" in result) throw conflict;
         return result.chapter;
       } catch (cause) {
@@ -556,6 +735,7 @@ export function registerSeriesPlugin(
       if ("unauthenticated" in result) throw unauthorized;
       if ("notFound" in result) throw notFound;
       if ("denied" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
       if ("invalidTransition" in result) throw invalidChapterTransition;
       if ("conflict" in result) throw conflict;
       return reply.code(204).send();

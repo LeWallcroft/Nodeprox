@@ -15,6 +15,7 @@ import type {
 export type SeriesListProjection = SeriesRecord & {
   chapterCount: number;
   imageCount: number;
+  hasPendingReactivationRequest: boolean;
 };
 
 export interface SeriesRepositoryPort {
@@ -43,20 +44,15 @@ export interface SeriesRepositoryPort {
   >;
   isDiscordChannelBound?(discordChannelId: string): Promise<boolean>;
   listByOwner(ownerId: string): Promise<SeriesRecord[]>;
-  listAll(): Promise<SeriesListProjection[]>;
-  listWithHelperAccess(userId: string): Promise<SeriesListProjection[]>;
+  listAll(input?: {
+    operationalState: "active" | "inactive";
+  }): Promise<SeriesListProjection[]>;
+  listWithHelperAccess(
+    userId: string,
+    input?: { operationalState: "active" | "inactive" },
+  ): Promise<SeriesListProjection[]>;
   hasHelperAccess(seriesId: string, userId: string): Promise<boolean>;
   findById(id: string): Promise<SeriesRecord | null>;
-  update(
-    id: string,
-    input: {
-      title?: string | undefined;
-      description?: string | null | undefined;
-      coverUrl?: string | null | undefined;
-    },
-  ): Promise<SeriesRecord | null>;
-  delete(id: string): Promise<void>;
-  countChapters(id: string): Promise<number>;
 }
 
 export interface SeriesAssignmentRepositoryPort {
@@ -85,11 +81,12 @@ export type SeriesMutationFailure =
   | { outcome: "denied" }
   | { outcome: "not-found" }
   | { outcome: "conflict" }
-  | { outcome: "invalid-target" };
+  | { outcome: "invalid-target" }
+  | { outcome: "inactive" };
 
 export type SeriesDeleteFailure =
   | SeriesMutationFailure
-  | { outcome: "has-chapters" };
+  | { outcome: "active-operation" | "has-media" };
 
 export interface SeriesMutationBoundaryPort {
   updateIfAuthorized(input: {

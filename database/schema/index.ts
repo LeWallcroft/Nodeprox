@@ -71,7 +71,17 @@ export {
   processingOutbox,
   processingOutboxStatusEnum,
 } from "./processing-outbox.js";
-export { series, seriesAssignments } from "./series.js";
+export {
+  series,
+  seriesAssignments,
+  seriesOperationalStateEnum,
+  seriesInactiveReasonEnum,
+} from "./series.js";
+export {
+  seriesOperationalHistory,
+  seriesReactivationRequestStatusEnum,
+  seriesReactivationRequests,
+} from "./series-lifecycle.js";
 export {
   storageCleanupOutbox,
   storageCleanupReasonEnum,

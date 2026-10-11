@@ -9,6 +9,7 @@ import type {
 } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../authorization/domain/authorization.types.js";
 import type { ChapterImageAuthorizationPort } from "../../images/application/ports.js";
+import { SeriesInactiveError } from "../../series/domain/series-operational.policy.js";
 import { validateUploadMetadata } from "../../uploads/domain/upload.policy.js";
 import { createChapterReplacementSourceKey } from "../domain/chapter-replacement-source-key.js";
 import type { ChapterReplacementUploadRepository } from "./ports/chapter-replacement-upload.repository.js";
@@ -76,6 +77,7 @@ export class PrepareChapterReplacementService {
       sizeBytes: input.sizeBytes,
     });
     if (!operation) throw new ChapterReplacementPrepareConflictError();
+    if ("outcome" in operation) throw new SeriesInactiveError();
 
     try {
       const transfer = await this.storageExecution.uploadTransferFor(

@@ -44,7 +44,8 @@ async function pending() {
     contentType: "application/zip",
     sizeBytes: 100,
   });
-  if (!operation) throw new Error("fixture-operation-conflict");
+  if (!operation || "outcome" in operation)
+    throw new Error("fixture-operation-conflict");
   return { chapter, operation };
 }
 

@@ -43,6 +43,8 @@ export class ChapterImportBatchService {
     });
     if (reservation.outcome === "limited")
       throw new ImportBatchLimitError(reservation.reason);
+    if (reservation.outcome === "not-found")
+      throw new ImportBatchNotFoundError();
     const itemIds = new Map(
       reservation.items.map((item) => [item.clientId, item.itemId]),
     );

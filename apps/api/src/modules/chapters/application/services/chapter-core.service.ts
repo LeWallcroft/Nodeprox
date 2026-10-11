@@ -49,6 +49,7 @@ export class ChapterCoreService {
     });
     if (result.outcome === "denied") return { denied: true as const };
     if (result.outcome === "not-found") return { notFound: true as const };
+    if (result.outcome === "inactive") return { inactive: true as const };
     if (result.outcome === "conflict") return { conflict: true as const };
     return { chapter: result.chapter };
   }

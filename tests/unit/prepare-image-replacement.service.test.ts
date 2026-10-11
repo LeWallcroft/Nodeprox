@@ -55,6 +55,7 @@ function subject(options?: {
       })),
     },
     {
+      isChapterSeriesInactive: vi.fn(async () => false),
       create,
       findById: vi.fn(),
       markUploaded: vi.fn(),

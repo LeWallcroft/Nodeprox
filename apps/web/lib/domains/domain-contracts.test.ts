@@ -89,7 +89,7 @@ describe("frontend domain contract adapters", () => {
     await deleteSeries("series-1");
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      "/api/series",
+      "/api/series?operationalState=active",
       "/api/series/series-1/chapters",
       "/api/series/series-1/chapters",
       "/api/series/series-1",

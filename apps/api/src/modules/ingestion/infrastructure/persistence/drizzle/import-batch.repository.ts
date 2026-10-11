@@ -1,5 +1,7 @@
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
+import { SeriesInactiveError } from "../../../../series/domain/series-operational.policy.js";
 import {
   chapterImportBatches,
   chapterImportItems,
@@ -29,6 +31,10 @@ export class DrizzleImportBatchRepository
     }[];
   }): ReturnType<ImportBatchRepositoryPort["reserve"]> {
     return this.db.transaction(async (tx) => {
+      const lockedSeries = await lockSeriesOperationalRow(tx, input.seriesId);
+      if (!lockedSeries) return { outcome: "not-found" as const };
+      if (lockedSeries.operationalState !== "active")
+        throw new SeriesInactiveError();
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${input.createdBy}, 0))`,
       );
@@ -269,6 +275,10 @@ export class DrizzleImportBatchRepository
     itemId: string;
   }): ReturnType<ImportBatchRepositoryPort["claimResubmission"]> {
     return this.db.transaction(async (tx) => {
+      const lockedSeries = await lockSeriesOperationalRow(tx, input.seriesId);
+      if (!lockedSeries) return { outcome: "not-found" as const };
+      if (lockedSeries.operationalState !== "active")
+        throw new SeriesInactiveError();
       const [item] = await tx
         .select({
           id: chapterImportItems.id,

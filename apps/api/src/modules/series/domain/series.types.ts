@@ -18,6 +18,11 @@ export type SeriesRecord = {
   coverUrl: string | null;
   discordChannelId: string | null;
   discordChannelNameSnapshot: string | null;
+  operationalState: "active" | "inactive";
+  inactiveReason: "dropped" | "hiatus" | "completed" | "other" | null;
+  inactiveReasonDetail: string | null;
+  stateChangedAt: Date;
+  stateChangedBy: string | null;
   responsibleUser: SeriesResponsibleUser | null;
   createdBy: string;
   createdAt: Date;

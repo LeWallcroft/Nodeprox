@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   chapterReplacementOperations,
   chapterReplacementProcessingOutbox,
@@ -11,7 +12,6 @@ import type {
   ChapterReplacementProcessingOutboxPort,
   ChapterReplacementUploadRepository,
 } from "../../../application/ports/chapter-replacement-upload.repository.js";
-import type { ChapterReplacementOperation } from "../../../domain/chapter-replacement-operation.js";
 import type { ChapterReplacementResult } from "../../../domain/chapter-replacement-result.js";
 
 export class DrizzleChapterReplacementProcessingRepository
@@ -23,9 +23,22 @@ export class DrizzleChapterReplacementProcessingRepository
 
   async createPending(
     input: Parameters<ChapterReplacementUploadRepository["createPending"]>[0],
-  ): Promise<ChapterReplacementOperation | null> {
+  ): ReturnType<ChapterReplacementUploadRepository["createPending"]> {
     try {
       return await this.db.transaction(async (tx) => {
+        const [chapterSeries] = await tx
+          .select({ seriesId: chapters.seriesId })
+          .from(chapters)
+          .where(eq(chapters.id, input.chapterId))
+          .limit(1);
+        if (!chapterSeries) return null;
+        const lockedSeries = await lockSeriesOperationalRow(
+          tx,
+          chapterSeries.seriesId,
+        );
+        if (!lockedSeries) return null;
+        if (lockedSeries.operationalState !== "active")
+          return { outcome: "inactive" as const };
         const [chapter] = await tx
           .select({ id: chapters.id })
           .from(chapters)

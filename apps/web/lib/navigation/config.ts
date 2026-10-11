@@ -1,6 +1,7 @@
 import {
   FileText,
   Layers3,
+  Archive,
   LayoutDashboard,
   ScrollText,
   Settings,
@@ -23,6 +24,13 @@ export const navigationConfig: NavigationItem[] = [
     label: "Series",
     href: "/series",
     icon: Layers3,
+    capabilityKey: "series.read",
+  },
+  {
+    id: "inactive-series",
+    label: "Tablón olvidado",
+    href: "/series/inactive",
+    icon: Archive,
     capabilityKey: "series.read",
   },
   {
@@ -60,7 +68,7 @@ export const navigationSections = [
   {
     id: "content",
     label: "Contenido",
-    itemIds: ["series", "authorizations", "chapters"],
+    itemIds: ["series", "inactive-series", "authorizations", "chapters"],
   },
   {
     id: "administration",

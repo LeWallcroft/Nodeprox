@@ -19,6 +19,11 @@ const series = {
   discordChannelNameSnapshot: "serie-raven",
   chapterCount: 4,
   imageCount: 72,
+  operationalState: "active" as const,
+  inactiveReason: null,
+  inactiveReasonDetail: null,
+  stateChangedAt: "2026-08-01T00:00:00.000Z",
+  hasPendingReactivationRequest: false,
   responsibleUser: {
     id: "uploader-1",
     email: "uploader@example.com",
@@ -34,15 +39,15 @@ const series = {
 };
 
 describe("Series management presentation", () => {
-  it("explains that Chapters must be removed before deleting a Series", () => {
+  it("explains media deletion block and keeps empty Chapters eligible", () => {
     const panel = readFileSync(
       "apps/web/components/domains/series/series-detail-panel.tsx",
       "utf8",
     );
 
-    expect(panel).toContain('cause.code === "series-has-chapters"');
+    expect(panel).toContain('cause.code === "series-has-media"');
     expect(panel).toContain(
-      "Elimina primero los capítulos asociados y luego vuelve a intentarlo.",
+      "Puedes deshabilitarla para conservar su contenido.",
     );
   });
 

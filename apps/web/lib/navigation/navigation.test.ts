@@ -9,6 +9,7 @@ describe("M1 navigation contract", () => {
       "overview",
       "audit",
       "series",
+      "inactive-series",
       "authorizations",
       "chapters",
       "settings",
@@ -42,6 +43,9 @@ describe("M1 navigation contract", () => {
       false,
     );
     expect(isNavigationItemActive("/series", "/")).toBe(false);
+    expect(isNavigationItemActive("/series/inactive", "/series/inactive")).toBe(
+      true,
+    );
     expect(isNavigationItemActive("/", "/")).toBe(true);
   });
 
@@ -66,6 +70,7 @@ describe("M1 navigation contract", () => {
     ]);
     expect(sections.at(-1)?.items.map((item) => item.id)).toEqual([
       "series",
+      "inactive-series",
       "chapters",
     ]);
     expect(
@@ -76,7 +81,14 @@ describe("M1 navigation contract", () => {
       ])
         .flatMap((section) => section.items)
         .map((item) => item.id),
-    ).toEqual(["overview", "series", "users", "audit", "settings"]);
+    ).toEqual([
+      "overview",
+      "series",
+      "inactive-series",
+      "users",
+      "audit",
+      "settings",
+    ]);
   });
 
   it("keeps the supported sidebar IA free of duplicate or deferred items", () => {
@@ -93,7 +105,15 @@ describe("M1 navigation contract", () => {
     ]);
     expect(
       sections.flatMap((section) => section.items.map((item) => item.id)),
-    ).toEqual(["overview", "series", "chapters", "users", "audit", "settings"]);
+    ).toEqual([
+      "overview",
+      "series",
+      "inactive-series",
+      "chapters",
+      "users",
+      "audit",
+      "settings",
+    ]);
   });
 
   it("shows authorizations to actors who create Series with grants", () => {
@@ -101,6 +121,6 @@ describe("M1 navigation contract", () => {
       getVisibleNavigation(["series.read", "series.create.with-grant"])
         .flatMap((section) => section.items)
         .map((item) => item.id),
-    ).toEqual(["overview", "series", "authorizations"]);
+    ).toEqual(["overview", "series", "inactive-series", "authorizations"]);
   });
 });

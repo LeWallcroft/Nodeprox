@@ -1226,6 +1226,10 @@ describe("ChapterImportBatch metadata orchestration", () => {
         uploadId: string;
       }[];
     };
+    expect(
+      batch.items.every((item) => item.uploadId),
+      JSON.stringify(batch.items),
+    ).toBe(true);
     const originalUploadIds = new Map(
       batch.items.map((item) => [item.clientId, item.uploadId]),
     );

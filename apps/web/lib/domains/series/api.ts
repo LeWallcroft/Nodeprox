@@ -5,6 +5,7 @@ import type {
   SeriesCapabilitiesProjection,
   SeriesInput,
   SeriesListProjection,
+  SeriesLifecycleDetail,
   SeriesResponsibleCandidate,
 } from "./types";
 
@@ -14,8 +15,63 @@ export function getSelectableSeriesChannels() {
   );
 }
 
-export function listSeries() {
-  return apiRequestBrowser<SeriesListProjection[]>("/series");
+export function listSeries(operationalState: "active" | "inactive" = "active") {
+  return apiRequestBrowser<SeriesListProjection[]>(
+    `/series?operationalState=${operationalState}`,
+  );
+}
+
+export function getSeriesLifecycle(seriesId: string) {
+  return apiRequestBrowser<SeriesLifecycleDetail>(
+    `/series/${seriesId}/lifecycle`,
+  );
+}
+
+function lifecyclePost<T>(path: string, body: object = {}) {
+  return apiRequestBrowser<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+export function deactivateSeries(
+  seriesId: string,
+  input: {
+    reason: NonNullable<Series["inactiveReason"]>;
+    reasonDetail?: string;
+  },
+) {
+  return lifecyclePost(`/series/${seriesId}/deactivate`, input);
+}
+export function reactivateSeries(seriesId: string, resolutionNote?: string) {
+  return lifecyclePost(`/series/${seriesId}/reactivate`, { resolutionNote });
+}
+export function requestSeriesReactivation(seriesId: string, note?: string) {
+  return lifecyclePost<{ requestId: string }>(
+    `/series/${seriesId}/reactivation-requests`,
+    { note },
+  );
+}
+export function approveSeriesReactivation(
+  seriesId: string,
+  requestId: string,
+  resolutionNote?: string,
+) {
+  return lifecyclePost(
+    `/series/${seriesId}/reactivation-requests/${requestId}/approve`,
+    { resolutionNote },
+  );
+}
+export function rejectSeriesReactivation(
+  seriesId: string,
+  requestId: string,
+  resolutionNote?: string,
+) {
+  return lifecyclePost(
+    `/series/${seriesId}/reactivation-requests/${requestId}/reject`,
+    { resolutionNote },
+  );
 }
 
 export function getSeries(seriesId: string) {

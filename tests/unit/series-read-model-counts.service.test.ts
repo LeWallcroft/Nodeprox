@@ -90,6 +90,7 @@ describe("Series list read-model counts", () => {
     ]);
     expect(target.repository.listWithHelperAccess).toHaveBeenCalledWith(
       context.userId,
+      { operationalState: "active" },
     );
   });
 });

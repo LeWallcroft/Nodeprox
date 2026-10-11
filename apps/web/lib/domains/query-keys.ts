@@ -10,6 +10,9 @@ export const queryKeys = {
   },
   series: {
     list: ["series", "list"] as const,
+    listForState: (state: "active" | "inactive") =>
+      ["series", "list", state] as const,
+    lifecycle: (seriesId: string) => ["series", "lifecycle", seriesId] as const,
     detail: (seriesId: string) => ["series", "detail", seriesId] as const,
     capabilities: (seriesId: string) =>
       ["series", "capabilities", seriesId] as const,

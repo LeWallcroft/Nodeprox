@@ -151,7 +151,8 @@ describe("CASE-V1-MEDIA-01 persistence", () => {
       sizeBytes: 123,
       status: "pending_upload",
     });
-    if (!created) throw new Error("missing-replacement-operation");
+    if (!created || "outcome" in created)
+      throw new Error("missing-replacement-operation");
     expect(created.status).toBe("pending_upload");
     expect(await repository.findById(randomUUID())).toBeNull();
     expect((await repository.markUploaded(operationId, now))?.status).toBe(

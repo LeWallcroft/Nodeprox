@@ -3,7 +3,6 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
-import { DrizzleChapterDeletionRepository } from "../../apps/worker/src/deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
@@ -583,34 +582,19 @@ describe("M3 Series and Chapters Core", () => {
           headers: { cookie: adminCookie },
         })
       ).statusCode,
-    ).toBe(409);
-    expect(
-      (
-        await app.inject({
-          method: "DELETE",
-          url: `/chapters/${chapterId}`,
-          headers: { cookie: ownerCookie },
-        })
-      ).statusCode,
     ).toBe(204);
-    const [deletion] = await database.db
-      .select({ id: chapterDeletionOutbox.id })
-      .from(chapterDeletionOutbox)
-      .where(eq(chapterDeletionOutbox.chapterId, chapterId));
-    if (!deletion) throw new Error("expected-chapter-deletion-request");
-    await new DrizzleChapterDeletionRepository(database.db).finalize(
-      deletion.id,
-      chapterId,
-    );
     expect(
-      (
-        await app.inject({
-          method: "DELETE",
-          url: `/series/${seriesId}`,
-          headers: { cookie: adminCookie },
-        })
-      ).statusCode,
-    ).toBe(204);
+      await database.db
+        .select()
+        .from(chapters)
+        .where(eq(chapters.id, chapterId)),
+    ).toHaveLength(0);
+    expect(
+      await database.db
+        .select()
+        .from(chapterDeletionOutbox)
+        .where(eq(chapterDeletionOutbox.chapterId, chapterId)),
+    ).toHaveLength(0);
   });
 
   it("accepts exact non-negative decimal Chapter numbers and orders them numerically", async () => {

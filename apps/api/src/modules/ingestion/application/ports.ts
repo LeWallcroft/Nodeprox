@@ -88,6 +88,7 @@ export interface ImportBatchRepositoryPort {
         items: readonly { itemId: string; clientId: string }[];
       }
     | { outcome: "limited"; reason: ImportAdmissionLimitReason }
+    | { outcome: "not-found" }
   >;
   failReservation(input: { batchId: string; errorCode: string }): Promise<void>;
   attachUpload(input: { itemId: string; uploadId: string }): Promise<boolean>;

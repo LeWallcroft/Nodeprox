@@ -106,7 +106,10 @@ export class SeriesService {
     }
   }
 
-  async list(context: AuthorizationContext) {
+  async list(
+    context: AuthorizationContext,
+    operationalState: "active" | "inactive" = "active",
+  ) {
     this.requireSession(context);
     const decision = await this.authorization.authorize(
       context,
@@ -114,16 +117,25 @@ export class SeriesService {
     );
     if (!decision.allowed) return [];
     if (decision.role === "admin")
-      return this.withResponsibleUsers(await this.series.listAll());
+      return this.withResponsibleUsers(
+        await this.series.listAll({ operationalState }),
+      );
     if (decision.role === "gestor")
-      return this.withResponsibleUsers(await this.series.listAll());
+      return this.withResponsibleUsers(
+        await this.series.listAll({ operationalState }),
+      );
     const ids = new Set(
       await this.assignments.listAssignedSeriesIds(context.userId),
     );
-    const helperSeries = await this.series.listWithHelperAccess(context.userId);
+    const helperSeries = await this.series.listWithHelperAccess(
+      context.userId,
+      { operationalState },
+    );
     return this.withResponsibleUsers(
       [
-        ...(await this.series.listAll()).filter((item) => ids.has(item.id)),
+        ...(await this.series.listAll({ operationalState })).filter((item) =>
+          ids.has(item.id),
+        ),
         ...helperSeries,
       ].filter(
         (item, index, values) =>
@@ -143,6 +155,40 @@ export class SeriesService {
     if (!item || "forbidden" in item) return item;
 
     const capabilities: string[] = [PERMISSIONS.SERIES_READ];
+    if (item.operationalState === "inactive") {
+      if (
+        context &&
+        (
+          await this.authorization.authorize(
+            context,
+            PERMISSIONS.SERIES_LIFECYCLE_MANAGE,
+          )
+        ).allowed
+      )
+        capabilities.push(
+          PERMISSIONS.SERIES_LIFECYCLE_MANAGE,
+          PERMISSIONS.SERIES_DELETE,
+        );
+      else if (
+        (
+          await this.authorization.authorize(
+            context,
+            PERMISSIONS.SERIES_REACTIVATION_REQUEST,
+          )
+        ).allowed
+      )
+        capabilities.push(PERMISSIONS.SERIES_REACTIVATION_REQUEST);
+      return { capabilities };
+    }
+    if (
+      (
+        await this.authorization.authorize(
+          context,
+          PERMISSIONS.SERIES_LIFECYCLE_MANAGE,
+        )
+      ).allowed
+    )
+      capabilities.push(PERMISSIONS.SERIES_LIFECYCLE_MANAGE);
     const editable = await this.findEditable(context, id);
     if (editable && !("forbidden" in editable))
       capabilities.push(PERMISSIONS.SERIES_EDIT);
@@ -191,6 +237,7 @@ export class SeriesService {
     });
     if (result.outcome === "denied") return { forbidden: true as const };
     if (result.outcome === "not-found") return null;
+    if (result.outcome === "inactive") return { inactive: true as const };
     if (result.outcome === "conflict") return { conflict: true as const };
     if (result.outcome === "invalid-target") return { conflict: true as const };
     return result.series;
@@ -205,8 +252,9 @@ export class SeriesService {
     });
     if (result.outcome === "denied") return { forbidden: true as const };
     if (result.outcome === "not-found") return null;
-    if (result.outcome === "has-chapters")
-      return { hasChapters: true as const };
+    if (result.outcome === "active-operation")
+      return { activeOperation: true as const };
+    if (result.outcome === "has-media") return { hasMedia: true as const };
     if (result.outcome !== "deleted") return { conflict: true as const };
     return { deleted: true as const };
   }
@@ -273,6 +321,7 @@ export class SeriesService {
     if (result.outcome === "not-found") return null;
     if (result.outcome === "invalid-target")
       return { invalidTarget: true as const };
+    if (result.outcome === "inactive") return { inactive: true as const };
     if (result.outcome === "conflict") return { conflict: true as const };
     return { assigned: true as const };
   }
@@ -314,6 +363,7 @@ export class SeriesService {
     if (result.outcome === "not-found") return null;
     if (result.outcome === "invalid-target")
       return { invalidTarget: true as const };
+    if (result.outcome === "inactive") return { inactive: true as const };
     if (result.outcome === "conflict") return { conflict: true as const };
     return result;
   }

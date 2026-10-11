@@ -16,6 +16,7 @@ import type { SessionService } from "../../authentication/application/services/s
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
+import { SeriesInactiveError } from "../../series/domain/series-operational.policy.js";
 import {
   ChapterUploadService,
   UploadConflictError,
@@ -88,6 +89,12 @@ const conflict = problem(
   409,
   "Upload conflict",
 );
+const seriesInactive = problem(
+  "series-inactive",
+  "The Series is inactive.",
+  409,
+  "Series inactive",
+);
 const objectMissing = problem(
   "upload-object-missing",
   "The uploaded object is not available for verification.",
@@ -132,6 +139,7 @@ function context() {
 }
 
 export function mapUploadError(error: unknown): never {
+  if (error instanceof SeriesInactiveError) throw seriesInactive;
   if (error instanceof UploadDeniedError) throw forbidden;
   if (error instanceof UploadNotFoundError) throw notFound;
   if (error instanceof UploadConflictError) throw conflict;

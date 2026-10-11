@@ -4,7 +4,8 @@ import type { ChapterCoreRecord } from "../../../series/domain/series.types.js";
 export type ChapterMutationFailure =
   | { outcome: "denied" }
   | { outcome: "not-found" }
-  | { outcome: "conflict" };
+  | { outcome: "conflict" }
+  | { outcome: "inactive" };
 
 export interface ChapterMutationBoundaryPort {
   updateIfAuthorized(input: {

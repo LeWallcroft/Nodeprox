@@ -1,5 +1,10 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
+import {
+  chapters,
+  series,
+} from "../../../../../../../../database/schema/index.js";
 import {
   chapterReplacementOperations,
   domainEventOutbox,
@@ -15,6 +20,16 @@ export class DrizzleImageReplacementOperationRepository
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
+  async isChapterSeriesInactive(chapterId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ operationalState: series.operationalState })
+      .from(chapters)
+      .innerJoin(series, eq(series.id, chapters.seriesId))
+      .where(eq(chapters.id, chapterId))
+      .limit(1);
+    return row?.operationalState === "inactive";
+  }
+
   async create(
     input: Omit<
       ImageReplacementOperation,
@@ -27,6 +42,19 @@ export class DrizzleImageReplacementOperationRepository
   ) {
     try {
       return await this.db.transaction(async (tx) => {
+        const [chapterSeries] = await tx
+          .select({ seriesId: chapters.seriesId })
+          .from(chapters)
+          .where(eq(chapters.id, input.chapterId))
+          .limit(1);
+        if (!chapterSeries) return null;
+        const lockedSeries = await lockSeriesOperationalRow(
+          tx,
+          chapterSeries.seriesId,
+        );
+        if (!lockedSeries) return null;
+        if (lockedSeries.operationalState !== "active")
+          return { outcome: "inactive" as const };
         await tx.execute(
           sql`select id from chapters where id = ${input.chapterId} for update`,
         );

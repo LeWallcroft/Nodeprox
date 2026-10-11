@@ -48,7 +48,7 @@ export const seriesCreationGrants = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     consumedBySeriesId: uuid("consumed_by_series_id").references(
       () => series.id,
-      { onDelete: "restrict" },
+      { onDelete: "set null" },
     ),
     invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
     invalidatedByDiscordId: text("invalidated_by_discord_id"),

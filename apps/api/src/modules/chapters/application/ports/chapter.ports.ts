@@ -7,6 +7,7 @@ import type { AuthorizationContext } from "../../../authorization/domain/authori
 
 export interface ChapterRepositoryPort {
   findById(id: string): Promise<ChapterRecord | null>;
+  isSeriesActive?(seriesId: string): Promise<boolean>;
   isAssigned?(seriesId: string, userId: string): Promise<boolean>;
   isSeriesOwner?(seriesId: string, userId: string): Promise<boolean>;
 }
@@ -32,6 +33,7 @@ export interface ChapterPermissionRepositoryPort {
     | { outcome: "granted"; count: number }
     | { outcome: "conflict"; reason: "cooldown" | "already-granted" }
     | { outcome: "denied" }
+    | { outcome: "inactive" }
     | { outcome: "not-found" }
   >;
   revokeIfAuthorized(input: {
@@ -43,6 +45,7 @@ export interface ChapterPermissionRepositoryPort {
   }): Promise<
     | { outcome: "revoked"; count: number }
     | { outcome: "denied" }
+    | { outcome: "inactive" }
     | { outcome: "not-found" }
   >;
   hasActivePermission(input: {
