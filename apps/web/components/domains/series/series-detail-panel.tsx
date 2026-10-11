@@ -248,7 +248,7 @@ export function SeriesDetailPanel({
         {canDelete && hasMedia ? (
           <div
             role="status"
-            className="mt-4 flex items-start gap-3 rounded-control border border-warning/50 bg-warning-soft p-3 text-sm text-warning"
+            className="mt-4 flex items-start gap-3 rounded-control border border-warning-border bg-warning-soft p-3 text-sm text-warning"
           >
             <TriangleAlert
               aria-hidden="true"

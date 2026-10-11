@@ -49,7 +49,7 @@ describe("Series management presentation", () => {
 
     expect(panel).toContain("Esta serie tiene imágenes asociadas");
     expect(panel).toContain("Usa «Deshabilitar serie»");
-    expect(panel).toContain("border border-warning/50 bg-warning-soft");
+    expect(panel).toContain("border border-warning-border bg-warning-soft");
     expect(panel).toContain("TriangleAlert");
     expect(panel).toContain("archivos subidos, historial de almacenamiento");
     expect(panel).toContain(
