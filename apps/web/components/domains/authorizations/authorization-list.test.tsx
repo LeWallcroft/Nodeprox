@@ -65,7 +65,14 @@ describe("Series creation authorizations presentation", () => {
             reference: "Manga semanal",
             status: "available",
             issuedAt: "2026-09-11T12:00:00.000Z",
-            targetUser: { id: "user-1", displayName: "uploader@example.com" },
+            targetUser: {
+              id: "user-1",
+              discordUsername: null,
+              displayName: "uploader@example.com",
+              email: "uploader@example.com",
+              avatarUrl: null,
+              discordLinked: false,
+            },
           },
         ]}
       />,
@@ -74,6 +81,36 @@ describe("Series creation authorizations presentation", () => {
     expect(markup).toContain("Usuario");
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("targetUserId");
+  });
+
+  it("renders a web-issued grant recipient with the account name in the own list", () => {
+    const markup = renderToStaticMarkup(
+      <AuthorizationList
+        grants={[
+          {
+            id: "grant-issued-by-me",
+            displayCode: "NPX-SER-ISSUED",
+            reference: "Campaña",
+            status: "available",
+            issuedAt: "2026-09-11T12:00:00.000Z",
+            applicable: false,
+            direction: "issued",
+            targetUser: {
+              id: "user-1",
+              email: "reader@example.com",
+              displayName: "Reader Name",
+              discordUsername: "reader",
+              avatarUrl: null,
+              discordLinked: true,
+            },
+          },
+        ]}
+      />,
+    );
+
+    expect(markup).toContain("@reader");
+    expect(markup).toContain("Emitida por ti");
+    expect(markup).not.toContain("reader@example.com");
   });
 
   it("only exposes Usar for available applicable own grants", () => {
@@ -129,9 +166,20 @@ describe("Series creation authorizations presentation", () => {
     expect(page).toContain("Disponibles");
     expect(page).toContain("Consumidas");
     expect(page).toContain("Inválidas");
-    expect(page).toContain('id="authorization-status"');
     expect(page).toContain('id="authorization-user"');
     expect(page).toContain("SearchableCombobox");
+    expect(page).toContain("bg-surface-elevated p-1.5");
+    expect(page).toContain(
+      'legend className="text-sm font-semibold text-text"',
+    );
+    expect(page).toContain("Filtrar por estado");
+    expect(page).toContain("Todos los estados");
+    expect(page).toContain("!bg-primary-soft !text-primary");
+    expect(page).toContain('variant={selected ? "secondary" : "ghost"}');
+    expect(page).toContain("hover:!bg-primary/30");
+    expect(page).toContain('className="h-9 max-w-none rounded-control"');
+    expect(page).toContain("gap-1.5");
+    expect(page).toContain("compact");
   });
 
   it("uses the shared stable detail shell without exposing unavailable history", () => {

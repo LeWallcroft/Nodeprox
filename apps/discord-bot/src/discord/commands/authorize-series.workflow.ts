@@ -28,6 +28,16 @@ import { DiscordInteractionError } from "./discord-interaction-error.js";
 
 const EXPIRES_IN_MS = 10 * 60 * 1000;
 
+function targetGrantMentionPayload(targetDiscordId: string) {
+  return {
+    content: `<@${targetDiscordId}> tienes una nueva autorización disponible en NodeProx.`,
+    allowedMentions: {
+      parse: [],
+      users: [targetDiscordId],
+    },
+  };
+}
+
 type WorkflowStep = "target" | "reference" | "confirming" | "completed";
 type Workflow = {
   actorDiscordId: string;
@@ -224,6 +234,9 @@ export class AuthorizeSeriesWorkflow {
           reference: result.reference,
           displayCode: result.displayCode,
         }),
+      );
+      await interaction.followUp(
+        targetGrantMentionPayload(workflow.targetDiscordId),
       );
     } catch (error) {
       workflow.submitting = false;

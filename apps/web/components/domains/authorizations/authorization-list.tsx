@@ -7,6 +7,7 @@ import {
   authorizationStatusLabel,
   authorizationStatusTone,
 } from "../../../lib/domains/authorizations/view-model";
+import { userPrimaryLabel } from "../../../lib/domains/users/presentation";
 import { Button } from "../../ui/button";
 import {
   DataTable,
@@ -105,8 +106,23 @@ export function AuthorizationList({
                   }).format(new Date(grant.issuedAt))}
                 </td>
                 {showsTarget ? (
-                  <td className="max-w-48 truncate px-4 py-3 align-middle text-sm text-muted">
-                    {"targetUser" in grant ? grant.targetUser.displayName : "—"}
+                  <td className="max-w-48 px-4 py-3 align-middle text-sm text-muted">
+                    {grant.targetUser ? (
+                      <span className="grid min-w-0">
+                        <span className="truncate">
+                          {userPrimaryLabel(grant.targetUser)}
+                        </span>
+                        {grant.direction ? (
+                          <span className="truncate text-xs text-muted">
+                            {grant.direction === "issued"
+                              ? "Emitida por ti"
+                              : "Asignada a tu cuenta"}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                 ) : null}
                 {showsActions ? (

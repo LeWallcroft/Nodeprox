@@ -24,6 +24,9 @@ const series = {
     email: "uploader@example.com",
     role: "uploader" as const,
     discordUsername: "raven_reader",
+    displayName: null,
+    avatarUrl: null,
+    discordLinked: true,
   },
   createdBy: "user-1",
   createdAt: "2026-08-01T00:00:00.000Z",
@@ -31,6 +34,18 @@ const series = {
 };
 
 describe("Series management presentation", () => {
+  it("explains that Chapters must be removed before deleting a Series", () => {
+    const panel = readFileSync(
+      "apps/web/components/domains/series/series-detail-panel.tsx",
+      "utf8",
+    );
+
+    expect(panel).toContain('cause.code === "series-has-chapters"');
+    expect(panel).toContain(
+      "Elimina primero los capítulos asociados y luego vuelve a intentarlo.",
+    );
+  });
+
   it("keeps the final compact master-detail layout contract", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/series/page.tsx",
@@ -38,14 +53,14 @@ describe("Series management presentation", () => {
     );
 
     expect(page).toContain('placeholder="Buscar series..."');
-    expect(page).toContain('aria-label="Estado"');
-    expect(page).toContain('aria-label="Responsable"');
+    expect(page).toContain('id="series-status-filter"');
+    expect(page).toContain('id="series-responsible-filter"');
     expect(page).not.toContain("Género");
     expect(page).not.toContain("Más filtros");
     expect(page).toContain("lg:flex-nowrap");
     expect(page).toContain("max-w-xs shrink");
-    expect(page).toContain("w-36 shrink-0");
-    expect(page).toContain("w-48 shrink-0");
+    expect(page).toContain('density="compact"');
+    expect(page).toContain("responsibleUser?.id === responsibleId");
     expect(page).toContain("Estado: Activa");
     expect(page).toContain("Responsable: Todos");
     expect(page).toContain("<AppDialog");
@@ -97,6 +112,21 @@ describe("Series management presentation", () => {
     expect(page).toContain("<SeriesDetailPanel");
   });
 
+  it("shows the responsible account name without a space-consuming initials badge", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesList
+        items={[series]}
+        selectedId={null}
+        onSelect={() => undefined}
+      />,
+    );
+    expect(markup).toContain("@raven_reader");
+    expect(markup).toContain("uploader@example.com");
+    expect(markup).not.toContain(
+      "size-7 shrink-0 place-items-center rounded-full",
+    );
+  });
+
   it("keeps slug backend-owned in the Series form", () => {
     const markup = renderToStaticMarkup(
       <SeriesForm onSubmit={async () => undefined} />,
@@ -142,7 +172,7 @@ describe("Series management presentation", () => {
     expect(markup).toContain(">72</td>");
     expect(markup).toContain("Última actualización");
     expect(markup).toContain("Responsable");
-    expect(markup).toContain("raven_reader");
+    expect(markup).toContain("@raven_reader");
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("Acciones");
     expect(markup).toContain("Activa");

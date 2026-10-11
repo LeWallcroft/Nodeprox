@@ -38,5 +38,9 @@ describe("SearchableCombobox", () => {
     expect(source).toContain("overflow-y-auto");
     expect(source).toContain('className="fixed z-[70]');
     expect(source).toContain("getBoundingClientRect");
+    expect(source).toContain(
+      "className={`h-control-lg pr-10 ${controlClassName}`.trim()}",
+    );
+    expect(source).toContain("option.description ??");
   });
 });

@@ -18,7 +18,15 @@ describe("App Shell", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={queryClient}>
         <AppShell
-          user={{ id: "user-1", email: "active@example.com", status: "active" }}
+          user={{
+            id: "user-1",
+            email: "active@example.com",
+            status: "active",
+            discordUsername: null,
+            displayName: null,
+            avatarUrl: null,
+            discordLinked: false,
+          }}
           capabilities={["series.read"]}
         >
           <p>Contenido protegido</p>

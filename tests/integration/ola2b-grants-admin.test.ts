@@ -20,6 +20,7 @@ const app = buildApp(
     database: database.db,
     secureCookie: false,
     storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+    discord: { redisUrl: "redis://127.0.0.1:6379" },
   },
 );
 const password = "ola2b-password";
@@ -64,6 +65,8 @@ beforeAll(async () => {
     {
       id: targetId,
       email: targetEmail,
+      displayName: "Grant Target",
+      discordUsername: "manual_target",
       passwordHash,
       status: "active",
       role: "uploader",
@@ -81,6 +84,72 @@ afterAll(async () => {
 });
 
 describe("OLA 2B public grant administration", () => {
+  it("accepts a 500-character Web reference and rejects 501 characters", async () => {
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "r".repeat(500) },
+    });
+    expect(accepted.statusCode).toBe(201);
+    const [stored] = await database.db
+      .select()
+      .from(seriesCreationGrants)
+      .where(eq(seriesCreationGrants.id, accepted.json().id));
+    expect(stored?.reference).toBe("r".repeat(500));
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "r".repeat(501) },
+    });
+    expect(rejected.statusCode).toBe(422);
+    expect(rejected.json().code).toBe("validation-failed");
+  });
+
+  it("shows grants issued by the current user in their own authorization list", async () => {
+    const issued = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "issued-by-current-user" },
+    });
+    expect(issued.statusCode).toBe(201);
+
+    const own = await app.inject({
+      method: "GET",
+      url: "/me/series-creation-grants",
+      headers: { cookie: adminCookie },
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toContainEqual(
+      expect.objectContaining({
+        id: issued.json().id,
+        targetUser: expect.objectContaining({
+          id: targetId,
+          displayName: "Grant Target",
+          discordUsername: "manual_target",
+        }),
+        direction: "issued",
+        applicable: false,
+      }),
+    );
+
+    const received = await app.inject({
+      method: "GET",
+      url: "/me/series-creation-grants",
+      headers: { cookie: targetCookie },
+    });
+    expect(received.json()).toContainEqual(
+      expect.objectContaining({
+        id: issued.json().id,
+        direction: "received",
+        applicable: true,
+      }),
+    );
+  });
+
   it("supports bounded user lookup and rejects unauthorized actors", async () => {
     const denied = await app.inject({
       method: "GET",
@@ -96,9 +165,23 @@ describe("OLA 2B public grant administration", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().items).toContainEqual({
       id: targetId,
-      displayName: targetEmail,
+      displayName: "Grant Target",
       email: targetEmail,
+      discordUsername: "manual_target",
+      avatarUrl: null,
+      discordLinked: false,
     });
+    for (const search of ["Grant Target", "manual_target"]) {
+      const byIdentity = await app.inject({
+        method: "GET",
+        url: `/admin/users/lookup?search=${encodeURIComponent(search)}`,
+        headers: { cookie: adminCookie },
+      });
+      expect(byIdentity.statusCode).toBe(200);
+      expect(byIdentity.json().items).toContainEqual(
+        expect.objectContaining({ id: targetId }),
+      );
+    }
 
     const gestorLookup = await app.inject({
       method: "GET",
@@ -108,8 +191,11 @@ describe("OLA 2B public grant administration", () => {
     expect(gestorLookup.statusCode).toBe(200);
     expect(gestorLookup.json().items).toContainEqual({
       id: targetId,
-      displayName: targetEmail,
+      displayName: "Grant Target",
       email: targetEmail,
+      discordUsername: "manual_target",
+      avatarUrl: null,
+      discordLinked: false,
     });
   });
 

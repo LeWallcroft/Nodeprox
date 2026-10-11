@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useId, useRef, useState } from "react";
 import type { AuthenticatedUserView } from "../../lib/api/types";
 import { useCapabilities, useLogout } from "../../lib/domains/auth/hooks";
+import { UserAvatar } from "../domains/users/user-avatar";
 import { Button } from "../ui/button";
 
 export function UserMenu({ user }: { user: AuthenticatedUserView | null }) {
@@ -39,12 +40,20 @@ export function UserMenu({ user }: { user: AuthenticatedUserView | null }) {
         onClick={() => setOpen((current) => !current)}
         className="flex items-center gap-3 rounded-control border border-transparent p-1.5 text-text hover:bg-surface-elevated focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
       >
-        <span
-          aria-hidden="true"
-          className="grid size-9 place-items-center rounded-full border border-border bg-surface-elevated font-semibold"
-        >
-          {user?.email.slice(0, 1).toUpperCase() ?? "?"}
-        </span>
+        {user ? (
+          <UserAvatar
+            user={user}
+            size="sm"
+            className="size-9 border border-border bg-surface-elevated"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="grid size-9 place-items-center rounded-full border border-border bg-surface-elevated font-semibold"
+          >
+            ?
+          </span>
+        )}
         <span className="hidden max-w-48 text-left sm:grid">
           <span className="truncate font-medium">
             {user?.email ?? "Cuenta"}

@@ -205,6 +205,8 @@ export class SeriesService {
     });
     if (result.outcome === "denied") return { forbidden: true as const };
     if (result.outcome === "not-found") return null;
+    if (result.outcome === "has-chapters")
+      return { hasChapters: true as const };
     if (result.outcome !== "deleted") return { conflict: true as const };
     return { deleted: true as const };
   }

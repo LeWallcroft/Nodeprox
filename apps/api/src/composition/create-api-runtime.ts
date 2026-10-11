@@ -6,8 +6,14 @@ import { DrizzleChapterMediaReplacementRepository } from "../modules/chapter-rep
 import { DrizzleChapterReplacementRepository } from "../modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement.repository.js";
 import { DrizzleChapterReplacementProcessingRepository } from "../modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { DrizzleChapterDeletionOutboxRepository } from "../modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
+import { DiscordGrantNotificationHandler } from "../modules/discord/application/discord-grant-notification.handler.js";
+import { DiscordBotDirectNotificationGateway } from "../modules/discord/infrastructure/discord-bot-direct-notification.gateway.js";
+import { DrizzleDiscordLinkedUserRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-linked-user.repository.js";
 import { DomainEventDispatcher } from "../modules/events/application/domain-event-dispatcher.js";
-import { DefaultDomainEventHandlerRegistry } from "../modules/events/application/domain-event-handler.js";
+import {
+  DefaultDomainEventHandlerRegistry,
+  type DomainEventHandler,
+} from "../modules/events/application/domain-event-handler.js";
 import { DomainEventDispatcherRuntime } from "../modules/events/infrastructure/domain-event-dispatcher.runtime.js";
 import { DrizzleDomainEventOutboxRepository } from "../modules/events/infrastructure/persistence/drizzle-domain-event-outbox.repository.js";
 import { ActivateImageCandidateService } from "../modules/images/application/services/activate-image-candidate.service.js";
@@ -18,8 +24,8 @@ import { NotificationProjector } from "../modules/notifications/application/noti
 import { DrizzleNotificationRepository } from "../modules/notifications/infrastructure/persistence/drizzle-notification.repository.js";
 import { ProcessingOutboxDispatcher } from "../modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { BullMQProcessingQueue } from "../modules/processing/infrastructure/queue/bullmq.processing.queue.js";
-import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
 import { DrizzleAdmissionOutboxRepository } from "../modules/uploads/infrastructure/persistence/drizzle/admission-outbox.repository.js";
+import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
 import type { ApiDependencies } from "./create-api-dependencies.js";
 
 type ProcessingConfig = ReturnType<
@@ -55,28 +61,46 @@ export function createApiRuntime(input: {
     new DrizzleAdmissionOutboxRepository(database),
     logger,
   );
-  const eventDispatcher = new DomainEventDispatcher(
-    new DrizzleDomainEventOutboxRepository(database),
-    new DefaultDomainEventHandlerRegistry([
-      new NotificationProjector(new DrizzleNotificationRepository(database)),
-      new ChapterReplacementReadyHandler(
-        new ChapterMediaActivationService(
-          new DrizzleChapterReplacementRepository(database),
-          new DrizzleChapterMediaReplacementRepository(
-            database,
-            dependencies.publicMediaOriginResolver,
-          ),
+  const eventHandlers: DomainEventHandler[] = [
+    new NotificationProjector(new DrizzleNotificationRepository(database)),
+  ];
+  if (
+    dependencies.discord?.botInternalUrl &&
+    dependencies.discord.internalToken
+  ) {
+    eventHandlers.push(
+      new DiscordGrantNotificationHandler(
+        new DrizzleDiscordLinkedUserRepository(database),
+        new DiscordBotDirectNotificationGateway(
+          dependencies.discord.botInternalUrl,
+          dependencies.discord.internalToken,
         ),
+        dependencies.account.publicUrl,
       ),
-      new ImageReplacementReadyHandler(
-        new DrizzleImageReplacementOperationRepository(database),
-        storageExecution,
-        new ActivateImageCandidateService(
-          new DrizzleMediaReplacementRepository(database),
+    );
+  }
+  eventHandlers.push(
+    new ChapterReplacementReadyHandler(
+      new ChapterMediaActivationService(
+        new DrizzleChapterReplacementRepository(database),
+        new DrizzleChapterMediaReplacementRepository(
+          database,
           dependencies.publicMediaOriginResolver,
         ),
       ),
-    ]),
+    ),
+    new ImageReplacementReadyHandler(
+      new DrizzleImageReplacementOperationRepository(database),
+      storageExecution,
+      new ActivateImageCandidateService(
+        new DrizzleMediaReplacementRepository(database),
+        dependencies.publicMediaOriginResolver,
+      ),
+    ),
+  );
+  const eventDispatcher = new DomainEventDispatcher(
+    new DrizzleDomainEventOutboxRepository(database),
+    new DefaultDomainEventHandlerRegistry(eventHandlers),
     logger,
     {
       batchSize: domainEvents.DOMAIN_EVENT_DISPATCH_BATCH_SIZE,

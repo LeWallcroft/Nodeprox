@@ -57,6 +57,7 @@ function component(customId: string, shape: "select" | "button" | "modal") {
     showModal: vi.fn().mockResolvedValue(undefined),
     reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue(undefined),
+    followUp: vi.fn().mockResolvedValue(undefined),
     deferred: false,
     replied: false,
     deferUpdate: vi.fn(),
@@ -131,6 +132,7 @@ describe("/autorizar-serie workflow", () => {
       "modal",
     );
     await workflow.executeComponent(modal as never);
+    expect(modal.followUp).not.toHaveBeenCalled();
 
     const confirmButton = component(
       customId(modal.update.mock.calls[0]?.[0], 0, 0),
@@ -146,6 +148,11 @@ describe("/autorizar-serie workflow", () => {
         components: [],
       }),
     );
+    expect(confirmButton.followUp).toHaveBeenCalledWith({
+      content:
+        "<@target-discord> tienes una nueva autorización disponible en NodeProx.",
+      allowedMentions: { parse: [], users: ["target-discord"] },
+    });
   });
 
   it("rejects another actor without mutating the public panel", async () => {
@@ -182,6 +189,44 @@ describe("/autorizar-serie workflow", () => {
     expect(cancel.update).toHaveBeenCalledWith(
       expect.objectContaining({ components: [] }),
     );
+    expect(cancel.followUp).not.toHaveBeenCalled();
+  });
+
+  it("does not notify the target when grant issuance fails", async () => {
+    const client = api();
+    client.issueSeriesCreationGrant.mockRejectedValue(new Error("unavailable"));
+    const workflow = new AuthorizeSeriesWorkflow(client);
+    const command = commandInteraction();
+    await workflow.execute(command as never);
+    const selector = component(
+      customId(command.reply.mock.calls[0]?.[0], 0, 0),
+      "select",
+    );
+    await workflow.executeComponent(selector as never);
+    const continueButton = component(
+      customId(selector.update.mock.calls[0]?.[0], 0, 0),
+      "button",
+    );
+    await workflow.executeComponent(continueButton as never);
+    const modal = component(
+      continueButton.showModal.mock.calls[0]?.[0].data.custom_id,
+      "modal",
+    );
+    await workflow.executeComponent(modal as never);
+    const confirmButton = component(
+      customId(modal.update.mock.calls[0]?.[0], 0, 0),
+      "button",
+    );
+
+    await expect(
+      workflow.executeComponent(confirmButton as never),
+    ).rejects.toMatchObject({
+      userMessage:
+        "No se pudo crear la autorización. Inténtalo nuevamente más tarde.",
+    });
+
+    expect(confirmButton.editReply).not.toHaveBeenCalled();
+    expect(confirmButton.followUp).not.toHaveBeenCalled();
   });
 
   it("keeps stale workflow errors private to the component interaction", async () => {

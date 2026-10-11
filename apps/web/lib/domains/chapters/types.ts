@@ -49,7 +49,10 @@ export interface GlobalChapter extends Chapter {
 export interface ChapterHelper {
   userId: string;
   email: string;
-  discordUsername?: string | null;
+  discordUsername: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  discordLinked: boolean;
   permissions: readonly string[];
   grantedAt: string;
 }
@@ -57,5 +60,8 @@ export interface ChapterHelper {
 export interface HelperCandidate {
   id: string;
   email: string;
-  discordUsername?: string | null;
+  discordUsername: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  discordLinked: boolean;
 }

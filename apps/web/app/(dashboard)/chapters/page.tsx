@@ -196,7 +196,10 @@ export default function GlobalChaptersPage() {
       {chapters.isSuccess && chapters.data.length > 0 ? (
         <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] xl:items-stretch">
           <main className="flex min-w-0 flex-col">
-            <Card className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap">
+            <Card
+              density="compact"
+              className="mb-4 flex flex-wrap items-center gap-2 lg:flex-nowrap"
+            >
               <div className="w-full max-w-xs shrink">
                 <SearchInput
                   value={query}
@@ -212,6 +215,7 @@ export default function GlobalChaptersPage() {
                   id="global-chapter-series-filter"
                   label="Serie"
                   labelHidden
+                  compact
                   value={seriesId}
                   options={[
                     { id: "", label: "Todas las series" },
@@ -232,6 +236,7 @@ export default function GlobalChaptersPage() {
                   id="global-chapter-status-filter"
                   label="Estado"
                   labelHidden
+                  compact
                   value={status}
                   options={[
                     { id: "all", label: "Todos los estados" },

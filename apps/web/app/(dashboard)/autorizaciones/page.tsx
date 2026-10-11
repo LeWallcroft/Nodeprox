@@ -1,6 +1,6 @@
 "use client";
 
-import { Info, Plus } from "lucide-react";
+import { Filter, Info, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import { AuthorizationDetailPanel } from "../../../components/domains/authorizations/authorization-detail-panel";
 import { AuthorizationHistoryDialog } from "../../../components/domains/authorizations/authorization-history-dialog";
@@ -38,23 +38,21 @@ import {
 } from "../../../lib/domains/authorizations/view-model";
 import { useCreateSeries } from "../../../lib/domains/series/hooks";
 import type { SeriesInput } from "../../../lib/domains/series/types";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 const statusTabs: Array<{
   label: string;
   value?: SeriesCreationGrantStatus;
 }> = [
-  { label: "Todas" },
+  { label: "Todos los estados" },
   { label: "Disponibles", value: "available" },
   { label: "Consumidas", value: "consumed" },
   { label: "Inválidas", value: "invalidated" },
 ];
 
-const statusOptions = [
-  { id: "", label: "Todos los estados" },
-  { id: "available", label: "Disponible" },
-  { id: "consumed", label: "Consumida" },
-  { id: "invalidated", label: "Invalidada" },
-];
 const ownPageSize = 10;
 
 export default function AuthorizationsPage() {
@@ -110,9 +108,12 @@ export default function AuthorizationsPage() {
     const normalized = searchInput.trim().toLocaleLowerCase();
     if (!normalized) return ownGrants;
     return ownGrants.filter((grant) =>
-      [grant.displayCode, grant.reference ?? ""].some((value) =>
-        value.toLocaleLowerCase().includes(normalized),
-      ),
+      [
+        grant.displayCode,
+        grant.reference ?? "",
+        grant.targetUser ? userPrimaryLabel(grant.targetUser) : "",
+        grant.targetUser ? (userSecondaryLabel(grant.targetUser) ?? "") : "",
+      ].some((value) => value.toLocaleLowerCase().includes(normalized)),
     );
   }, [ownGrants, searchInput]);
   const ownTotalPages = Math.max(
@@ -137,10 +138,8 @@ export default function AuthorizationsPage() {
   );
   const userOptions = (lookup.data?.items ?? []).map((user) => ({
     id: user.id,
-    label:
-      user.displayName && user.email && user.displayName !== user.email
-        ? `${user.displayName} — ${user.email}`
-        : (user.displayName ?? user.email ?? "Usuario"),
+    label: userPrimaryLabel(user),
+    description: userSecondaryLabel(user),
   }));
 
   function resetAdminPagination() {
@@ -221,17 +220,22 @@ export default function AuthorizationsPage() {
           {feedback}
         </p>
       ) : null}
-      <section className="mb-4 grid gap-3 rounded-panel border border-border bg-surface p-3 shadow-card">
+      <section
+        aria-label="Filtros de autorizaciones"
+        className="mb-4 grid gap-2 rounded-panel border border-border bg-surface p-2 shadow-card sm:p-2.5"
+      >
         <div
-          className="flex flex-wrap gap-2"
+          className="inline-flex w-fit max-w-full flex-wrap items-center gap-1 rounded-control bg-surface-elevated p-1"
           role="tablist"
           aria-label="Alcance de autorizaciones"
         >
           <Button
             aria-selected={scope === "mine"}
+            className="min-h-8 border-transparent px-3 shadow-none"
             role="tab"
+            size="sm"
             type="button"
-            variant={scope === "mine" ? "primary" : "secondary"}
+            variant={scope === "mine" ? "primary" : "ghost"}
             onClick={() => changeScope("mine")}
           >
             Mis autorizaciones
@@ -239,9 +243,11 @@ export default function AuthorizationsPage() {
           {canReadAll ? (
             <Button
               aria-selected={scope === "all"}
+              className="min-h-8 border-transparent px-3 shadow-none"
               role="tab"
+              size="sm"
               type="button"
-              variant={scope === "all" ? "primary" : "secondary"}
+              variant={scope === "all" ? "primary" : "ghost"}
               onClick={() => changeScope("all")}
             >
               Todas
@@ -249,22 +255,35 @@ export default function AuthorizationsPage() {
           ) : null}
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          <fieldset className="flex flex-wrap gap-2">
-            <legend className="sr-only">Filtrar por estado</legend>
-            {statusTabs.map((tab) => (
-              <Button
-                aria-pressed={status === tab.value}
-                key={tab.label}
-                type="button"
-                variant={status === tab.value ? "primary" : "secondary"}
-                onClick={() => changeStatus(tab.value)}
-              >
-                {tab.label}
-              </Button>
-            ))}
+          <fieldset className="grid min-w-0 gap-1.5">
+            <legend className="text-sm font-semibold text-text">
+              <span className="inline-flex items-center gap-1.5">
+                <Filter aria-hidden="true" className="size-4 text-primary" />
+                Filtrar por estado
+              </span>
+            </legend>
+            <div className="flex min-w-0 flex-wrap gap-1 rounded-control bg-surface-elevated p-1.5">
+              {statusTabs.map((tab) => {
+                const selected = status === tab.value;
+                return (
+                  <Button
+                    aria-pressed={selected}
+                    className={`min-h-9 border-transparent px-3 shadow-none ${selected ? "!bg-primary-soft !text-primary !border-transparent hover:!bg-primary/30" : "bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text"}`}
+                    key={tab.label}
+                    size="sm"
+                    type="button"
+                    variant={selected ? "secondary" : "ghost"}
+                    onClick={() => changeStatus(tab.value)}
+                  >
+                    {tab.label}
+                  </Button>
+                );
+              })}
+            </div>
           </fieldset>
-          <div className="ml-auto w-full min-w-[14rem] max-w-sm">
+          <div className="min-w-[min(100%,14rem)] flex-1 basis-56 sm:ml-auto sm:max-w-sm">
             <SearchInput
+              className="h-9 max-w-none rounded-control"
               placeholder="Buscar por código, referencia o usuario…"
               value={searchInput}
               onChange={(value) => {
@@ -274,23 +293,11 @@ export default function AuthorizationsPage() {
               }}
             />
           </div>
-          <div className="w-full sm:w-48">
-            <SearchableCombobox
-              id="authorization-status"
-              label="Estado"
-              options={statusOptions}
-              placeholder="Todos los estados"
-              value={status ?? ""}
-              onChange={(value) =>
-                changeStatus(
-                  value ? (value as SeriesCreationGrantStatus) : undefined,
-                )
-              }
-            />
-          </div>
           {scope === "all" ? (
-            <div className="w-full sm:w-60">
+            <div className="min-w-[min(100%,14rem)] flex-1 basis-48 sm:max-w-60">
               <SearchableCombobox
+                compact
+                controlClassName="h-9"
                 emptyMessage="No se encontraron usuarios."
                 error={
                   lookup.isError
@@ -306,6 +313,7 @@ export default function AuthorizationsPage() {
                 ]}
                 placeholder="Todos los usuarios"
                 value={targetUserId}
+                labelHidden
                 onChange={(value) => {
                   setTargetUserId(value);
                   resetAdminPagination();

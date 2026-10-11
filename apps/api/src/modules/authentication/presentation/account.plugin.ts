@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, eq, gt, isNull, ne } from "drizzle-orm";
+import { and, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
@@ -222,6 +222,8 @@ export function registerAccountPlugin(
         status: users.status,
         createdAt: users.createdAt,
         discordUsername: users.discordUsername,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
         discordLinkedAt: users.discordLinkedAt,
       })
       .from(users)
@@ -245,6 +247,8 @@ export function registerAccountPlugin(
         status: users.status,
         createdAt: users.createdAt,
         discordUsername: users.discordUsername,
+        avatarUrl: users.avatarUrl,
+        discordLinked: sql<boolean>`${users.discordId} is not null`,
         discordLinkedAt: users.discordLinkedAt,
       });
     return user;

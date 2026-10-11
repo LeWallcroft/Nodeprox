@@ -64,6 +64,10 @@ export class LinkCommand {
         code,
         discordId: interaction.user.id,
         discordUsername: interaction.user.username,
+        discordAvatarUrl: interaction.user.displayAvatarURL({
+          extension: "webp",
+          size: 128,
+        }),
         guildId: interaction.guildId,
         channelId: interaction.channelId,
         interactionId: interaction.id,

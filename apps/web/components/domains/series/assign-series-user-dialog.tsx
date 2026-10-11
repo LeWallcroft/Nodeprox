@@ -11,6 +11,10 @@ import { ErrorState } from "../../ui/error-state";
 import { FieldShell } from "../../ui/field-shell";
 import { Input } from "../../ui/input";
 import { LoadingState } from "../../ui/loading-state";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 export function AssignSeriesUserDialog({
   open,
@@ -37,7 +41,7 @@ export function AssignSeriesUserDialog({
   const visible = useMemo(
     () =>
       (candidates ?? []).filter((candidate) =>
-        `${candidate.email} ${candidate.role}`
+        `${candidate.email} ${candidate.role} ${candidate.displayName ?? ""} ${candidate.discordUsername ?? ""}`
           .toLowerCase()
           .includes(query.trim().toLowerCase()),
       ),
@@ -88,7 +92,9 @@ export function AssignSeriesUserDialog({
     >
       <p className="mt-4 text-sm">
         Responsable actual:{" "}
-        {series.responsibleUser?.email ?? "Sin responsable asignado"}
+        {series.responsibleUser
+          ? userPrimaryLabel(series.responsibleUser)
+          : "Sin responsable asignado"}
       </p>
       {isLoading ? <LoadingState label="Cargando candidatos" /> : null}
       {error ? (
@@ -122,7 +128,12 @@ export function AssignSeriesUserDialog({
                     onChange={() => setSelectedId(candidate.id)}
                   />
                   <span>
-                    <span className="block">{candidate.email}</span>
+                    <span className="block">{userPrimaryLabel(candidate)}</span>
+                    {userSecondaryLabel(candidate) ? (
+                      <span className="block text-xs text-secondary">
+                        {userSecondaryLabel(candidate)}
+                      </span>
+                    ) : null}
                     <span className="block text-xs capitalize text-muted">
                       {candidate.role}
                     </span>

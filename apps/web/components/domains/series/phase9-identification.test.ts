@@ -14,8 +14,8 @@ describe("Phase 9 user identification presentation", () => {
       "apps/web/components/domains/series/manage-series-helpers-dialog.tsx",
     );
     expect(responsible).toContain("candidate.email");
-    expect(helpers).toContain("candidate.discordUsername");
-    expect(helpers).toContain("candidate.email");
+    expect(helpers).toContain("userPrimaryLabel(candidate)");
+    expect(helpers).toContain("userSecondaryLabel(candidate)");
   });
 
   it("keeps settings units in the canonical API registry, not a Web key heuristic", () => {

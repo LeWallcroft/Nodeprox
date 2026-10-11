@@ -26,6 +26,8 @@ export function SearchableCombobox({
   disabled = false,
   required = false,
   labelHidden = false,
+  compact = false,
+  controlClassName = "",
   placeholder = "Buscar y seleccionar…",
   emptyMessage = "No hay opciones disponibles.",
 }: {
@@ -41,6 +43,8 @@ export function SearchableCombobox({
   disabled?: boolean;
   required?: boolean;
   labelHidden?: boolean;
+  compact?: boolean;
+  controlClassName?: string;
   placeholder?: string;
   emptyMessage?: string;
 }) {
@@ -69,7 +73,9 @@ export function SearchableCombobox({
       listRef.current?.children[active]?.scrollIntoView({ block: "nearest" });
   }, [active, open]);
   const filtered = options.filter((option) =>
-    option.label.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
+    `${option.label} ${option.description ?? ""}`
+      .toLocaleLowerCase()
+      .includes(query.toLocaleLowerCase()),
   );
   const selected = options.find((option) => option.id === value);
   function choose(option: ComboboxOption) {
@@ -84,6 +90,7 @@ export function SearchableCombobox({
       label={label}
       required={required}
       labelHidden={labelHidden}
+      compact={compact}
     >
       {/* biome-ignore lint/a11y/noStaticElementInteractions: Delegates focus-exit handling for the combobox input and its retry control. */}
       <div
@@ -109,7 +116,7 @@ export function SearchableCombobox({
             aria-activedescendant={
               open && filtered[active] ? `${listId}-${active}` : undefined
             }
-            className="pr-10"
+            className={`h-control-lg pr-10 ${controlClassName}`.trim()}
             autoComplete="off"
             disabled={disabled || loading || Boolean(error)}
             placeholder={loading ? "Cargando…" : placeholder}

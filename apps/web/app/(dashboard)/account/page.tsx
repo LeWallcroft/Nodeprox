@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { DiscordLinkSection } from "../../../components/domains/discord/discord-link-section";
+import { UserAvatar } from "../../../components/domains/users/user-avatar";
 import { errorMessage } from "../../../components/domains/feedback";
 import { PageHeader } from "../../../components/layout/page-header";
 import { Button } from "../../../components/ui/button";
@@ -30,6 +31,10 @@ import {
   useUpdatePreferences,
   useUpdateProfile,
 } from "../../../lib/domains/account/hooks";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 type AccountTab =
   | "profile"
@@ -81,8 +86,7 @@ export default function AccountPage() {
   }
 
   const user = profile.data;
-  const visibleName =
-    displayName || user.displayName || user.discordUsername || user.email;
+  const visibleName = displayName || userPrimaryLabel(user);
 
   return (
     <div className="grid gap-4">
@@ -96,9 +100,7 @@ export default function AccountPage() {
       />
 
       <section className="flex min-w-0 items-center gap-4 rounded-panel border border-[var(--border-subtle)] bg-surface p-5 shadow-card">
-        <div className="grid size-16 shrink-0 place-items-center rounded-full bg-primary text-xl font-semibold text-primary-foreground shadow-card">
-          {visibleName.slice(0, 2).toUpperCase()}
-        </div>
+        <UserAvatar user={user} size="lg" />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="m-0 truncate text-xl font-semibold">
@@ -106,7 +108,9 @@ export default function AccountPage() {
             </h2>
             <StatusBadge label={roleLabel(user.role)} tone="neutral" />
           </div>
-          <p className="m-0 truncate text-sm text-secondary">{user.email}</p>
+          <p className="m-0 truncate text-sm text-secondary">
+            {userSecondaryLabel(user) ?? user.email}
+          </p>
           <p className="mt-1 mb-0 text-xs text-secondary">
             <span className="mr-1 text-success">●</span>
             {user.status === "active" ? "Cuenta activa" : user.status}
@@ -190,7 +194,7 @@ export default function AccountPage() {
         {activeTab === "integrations" ? (
           <IntegrationsPanel
             email={user.email}
-            localIdentity={user.discordUsername ?? "Cuenta NodeProx"}
+            localIdentity={userPrimaryLabel(user)}
           />
         ) : null}
       </section>

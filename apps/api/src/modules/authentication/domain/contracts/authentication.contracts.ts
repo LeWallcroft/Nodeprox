@@ -42,7 +42,15 @@ export interface SessionServicePort {
   }): Promise<{ principal: AuthenticatedPrincipal; token: string }>;
   resolve(token: string): Promise<{
     principal: AuthenticatedPrincipal;
-    user: Pick<UserRecord, "id" | "email" | "status">;
+    user: Pick<
+      UserRecord,
+      | "id"
+      | "email"
+      | "status"
+      | "discordUsername"
+      | "displayName"
+      | "avatarUrl"
+    > & { discordLinked: boolean };
     rotatedToken?: string;
   } | null>;
   revoke(token: string): Promise<void>;

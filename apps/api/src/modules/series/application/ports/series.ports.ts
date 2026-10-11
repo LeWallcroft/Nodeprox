@@ -87,6 +87,10 @@ export type SeriesMutationFailure =
   | { outcome: "conflict" }
   | { outcome: "invalid-target" };
 
+export type SeriesDeleteFailure =
+  | SeriesMutationFailure
+  | { outcome: "has-chapters" };
+
 export interface SeriesMutationBoundaryPort {
   updateIfAuthorized(input: {
     actor: AuthorizationContext;
@@ -102,7 +106,7 @@ export interface SeriesMutationBoundaryPort {
   deleteIfAuthorized(input: {
     actor: AuthorizationContext;
     seriesId: string;
-  }): Promise<{ outcome: "deleted" } | SeriesMutationFailure>;
+  }): Promise<{ outcome: "deleted" } | SeriesDeleteFailure>;
   assignIfAuthorized(input: {
     actor: AuthorizationContext;
     seriesId: string;

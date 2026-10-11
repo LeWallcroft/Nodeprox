@@ -1,4 +1,5 @@
 export type HealthStatus = "ok";
+export type { UserReference } from "./user-reference.js";
 export type { AuditMetadata } from "./audit-metadata.js";
 export {
   InvalidAuditMetadataError,
