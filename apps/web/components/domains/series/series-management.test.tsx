@@ -49,7 +49,7 @@ describe("Series management presentation", () => {
 
     expect(panel).toContain("Esta serie tiene imágenes asociadas");
     expect(panel).toContain("Usa «Deshabilitar serie»");
-    expect(panel).toContain("border border-warning/30 bg-warning-soft");
+    expect(panel).toContain("border border-warning/50 bg-warning-soft");
     expect(panel).toContain("TriangleAlert");
     expect(panel).toContain("archivos subidos, historial de almacenamiento");
     expect(panel).toContain(
@@ -95,8 +95,8 @@ describe("Series management presentation", () => {
     );
 
     expect(page).toContain('placeholder="Buscar series..."');
-    expect(page.indexOf('placeholder="Buscar series..."')).toBeLessThan(
-      page.indexOf("aria-pressed={mineOnly}"),
+    expect(page.indexOf("aria-pressed={mineOnly}")).toBeLessThan(
+      page.indexOf('placeholder="Buscar series..."'),
     );
     expect(page).toContain('id="series-status-filter"');
     expect(page).toContain('id="series-responsible-filter"');
@@ -139,6 +139,9 @@ describe("Series management presentation", () => {
     );
 
     expect(markup).not.toContain("Métricas");
+    expect(markup).toContain(
+      "bg-primary px-3.5 font-medium text-primary-foreground",
+    );
     expect(markup).toContain("h-24 overflow-y-auto");
     expect(markup).toContain("shrink-0");
     expect(markup).not.toContain("12,450");

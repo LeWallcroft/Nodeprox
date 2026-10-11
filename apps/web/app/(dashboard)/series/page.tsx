@@ -251,16 +251,6 @@ export default function SeriesPage() {
             density="compact"
             className="flex flex-wrap items-end gap-2 lg:flex-nowrap xl:col-span-2"
           >
-            <div className="w-full max-w-xs shrink">
-              <SearchInput
-                placeholder="Buscar series..."
-                value={query}
-                onChange={(value) => {
-                  setQuery(value);
-                  setPage(1);
-                }}
-              />
-            </div>
             {canFilterMySeries ? (
               <Button
                 aria-pressed={mineOnly}
@@ -278,6 +268,16 @@ export default function SeriesPage() {
                 <span className="text-xs opacity-80">{mySeriesCount}</span>
               </Button>
             ) : null}
+            <div className="w-full max-w-xs shrink">
+              <SearchInput
+                placeholder="Buscar series..."
+                value={query}
+                onChange={(value) => {
+                  setQuery(value);
+                  setPage(1);
+                }}
+              />
+            </div>
             <div className="w-full shrink-0 sm:w-40">
               <SearchableCombobox
                 compact
