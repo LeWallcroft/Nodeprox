@@ -6,6 +6,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
+  TriangleAlert,
   Upload,
   UserRoundPlus,
   X,
@@ -224,13 +225,19 @@ export function ChapterDetailPanel({
           </p>
         ) : null}
         {hasExistingImages ? (
-          <p
-            className="mt-4 rounded-control border border-[var(--border-subtle)] bg-warning-soft p-3 text-sm text-warning"
+          <div
+            className="mt-4 flex items-start gap-3 rounded-control border border-warning-border bg-warning-soft p-3 text-sm text-warning"
             role="status"
           >
-            Este capítulo ya contiene imágenes. Para reemplazarlas, utiliza la
-            acción Cambiar capítulo.
-          </p>
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <p className="m-0">
+              Este capítulo ya contiene imágenes. Para reemplazarlas, utiliza la
+              acción Cambiar capítulo.
+            </p>
+          </div>
         ) : null}
         {actionError ? (
           <p className="mt-4 text-sm text-danger" role="alert">

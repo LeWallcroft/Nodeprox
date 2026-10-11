@@ -188,6 +188,10 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("Eliminar capítulo");
     expect(markup).toContain("Cambiar capítulo");
     expect(markup).toContain("Este capítulo ya contiene imágenes");
+    expect(markup).toContain(
+      "border border-warning-border bg-warning-soft p-3 text-sm text-warning",
+    );
+    expect(markup).toContain("lucide-triangle-alert");
     expect(markup).not.toContain("Subir ZIP");
     expect(markup).toContain("Gestionar capítulo");
     expect(markup).not.toContain("Publicación e imágenes");
