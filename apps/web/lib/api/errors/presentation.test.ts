@@ -27,6 +27,14 @@ describe("resolveErrorPresentation", () => {
       "series-active-operation",
       "Espera a que terminen las cargas o reemplazos asociados e inténtalo nuevamente.",
     ],
+    [
+      "series-lifecycle-transition-invalid",
+      "La serie ya no está activa o el motivo está incompleto.",
+    ],
+    [
+      "resource-conflict",
+      "El estado o el contenido relacionado cambió antes de completar la acción.",
+    ],
   ] as const)("explains series deletion block %s", (code, expectedText) => {
     const presentation = resolveErrorPresentation(
       new ApiError(409, "technical text", code, { code }),

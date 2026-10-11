@@ -1,16 +1,15 @@
 "use client";
 
 import {
+  Archive,
   Images,
   Pencil,
   Trash2,
   UserRoundPlus,
   X,
-  Archive,
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { ApiError } from "../../../lib/api/types";
 import { hasCapability } from "../../../lib/auth/visibility";
 import type {
   Series,
@@ -35,11 +34,12 @@ import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
 import { StatusBadge } from "../../ui/status-badge";
+import { errorMessage } from "../feedback";
 import { UserAvatar } from "../users/user-avatar";
 import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
+import { DeactivateSeriesDialog } from "./deactivate-series-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
 import { SeriesForm } from "./series-form";
-import { DeactivateSeriesDialog } from "./deactivate-series-dialog";
 
 export function SeriesDetailPanel({
   series,
@@ -244,6 +244,15 @@ export function SeriesDetailPanel({
             </dd>
           </div>
         </dl>
+        {canDelete && hasMedia ? (
+          <p
+            role="status"
+            className="mt-4 rounded-control bg-warning/10 p-3 text-sm text-warning"
+          >
+            Esta serie tiene imágenes asociadas, por eso no se puede eliminar.
+            Usa «Deshabilitar serie» para conservar su contenido e historial.
+          </p>
+        ) : null}
       </DetailPanelContent>
       <DetailPanelActions>
         {canViewChapters ? (
@@ -351,7 +360,7 @@ export function SeriesDetailPanel({
       ) : null}
       <ConfirmationDialog
         confirmLabel="Eliminar serie"
-        description="Se eliminarán la serie y sus capítulos vacíos. Si existe contenido multimedia o historial de almacenamiento, la eliminación se bloqueará."
+        description="Se eliminarán la serie y sus capítulos vacíos. La acción se bloqueará si hay imágenes, archivos subidos, historial de almacenamiento o una carga o reemplazo en curso. En ese caso podrás deshabilitar la serie para conservar su contenido."
         error={deleteError}
         open={confirmingDelete}
         pending={deletePending}
@@ -366,11 +375,7 @@ export function SeriesDetailPanel({
             .then(() => setConfirmingDelete(false))
             .catch((cause: unknown) =>
               setDeleteError(
-                cause instanceof ApiError && cause.code === "series-has-media"
-                  ? "La serie contiene contenido multimedia o historial de almacenamiento y no puede eliminarse de forma destructiva. Puedes deshabilitarla para conservar su contenido."
-                  : cause instanceof Error
-                    ? cause.message
-                    : "No se pudo eliminar la serie.",
+                errorMessage(cause, "No se pudo eliminar la serie."),
               ),
             );
         }}

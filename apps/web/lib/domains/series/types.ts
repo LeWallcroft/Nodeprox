@@ -21,6 +21,8 @@ export interface SeriesListProjection extends Series {
   chapterCount: number;
   imageCount: number;
   hasPendingReactivationRequest: boolean;
+  hasApprovedReactivationRequest: boolean;
+  lastApprovedAt: string | null;
 }
 
 export interface SeriesLifecycleDetail {
@@ -44,6 +46,7 @@ export interface SeriesLifecycleDetail {
   requests: Array<{
     id: string;
     requestedBy: string;
+    requestedByLabel: string;
     status: "pending" | "approved" | "rejected" | "cancelled";
     requestNote: string | null;
     requestedAt: string;

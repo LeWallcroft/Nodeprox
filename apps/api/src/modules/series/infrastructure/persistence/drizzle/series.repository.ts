@@ -11,25 +11,25 @@ import {
   sql,
 } from "drizzle-orm";
 import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
-import { hasSeriesActiveOperation } from "../../../../../../../../database/series-active-operation.js";
-import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
   chapterPermissions,
+  chapterReplacementOperations,
   chapters,
+  imageReplacementOperations,
   images,
   imageVersions,
-  imageReplacementOperations,
-  chapterReplacementOperations,
-  uploads,
   series,
   seriesAssignments,
-  seriesReactivationRequests,
   seriesCreationGrants,
+  seriesReactivationRequests,
+  uploads,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import { hasSeriesActiveOperation } from "../../../../../../../../database/series-active-operation.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
 import {
   PERMISSIONS,
@@ -59,11 +59,11 @@ import type {
   ChapterCoreRecord,
   SeriesRecord,
 } from "../../../domain/series.types.js";
-import { canBeSeriesResponsible } from "../../../domain/series-responsibility.policy.js";
 import {
   evaluateSeriesOperationalMutation,
   SeriesInactiveError,
 } from "../../../domain/series-operational.policy.js";
+import { canBeSeriesResponsible } from "../../../domain/series-responsibility.policy.js";
 
 const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   id: row.id,
@@ -382,6 +382,8 @@ export class DrizzleSeriesRepository
           Number,
         ),
         hasPendingReactivationRequest: sql<boolean>`exists (select 1 from ${seriesReactivationRequests} as pending_request where pending_request.series_id = ${series.id} and pending_request.status = 'pending')`,
+        hasApprovedReactivationRequest: sql<boolean>`exists (select 1 from ${seriesReactivationRequests} as approved_request where approved_request.series_id = ${series.id} and approved_request.status = 'approved')`,
+        lastApprovedAt: sql<Date | null>`(select max(approved_request.reviewed_at) from ${seriesReactivationRequests} as approved_request where approved_request.series_id = ${series.id} and approved_request.status = 'approved')`,
       })
       .from(series)
       .leftJoin(chapterCounts, eq(chapterCounts.seriesId, series.id))
@@ -398,6 +400,8 @@ export class DrizzleSeriesRepository
       chapterCount: row.chapterCount,
       imageCount: row.imageCount,
       hasPendingReactivationRequest: row.hasPendingReactivationRequest,
+      hasApprovedReactivationRequest: row.hasApprovedReactivationRequest,
+      lastApprovedAt: row.lastApprovedAt,
     }));
   }
 

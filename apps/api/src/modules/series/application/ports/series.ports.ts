@@ -16,6 +16,8 @@ export type SeriesListProjection = SeriesRecord & {
   chapterCount: number;
   imageCount: number;
   hasPendingReactivationRequest: boolean;
+  hasApprovedReactivationRequest: boolean;
+  lastApprovedAt: Date | null;
 };
 
 export interface SeriesRepositoryPort {

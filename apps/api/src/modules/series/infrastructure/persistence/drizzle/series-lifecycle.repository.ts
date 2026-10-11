@@ -3,16 +3,17 @@ import type {
   NodeProxDatabase,
   NodeProxTransaction,
 } from "../../../../../../../../database/client.js";
-import { hasSeriesActiveOperation } from "../../../../../../../../database/series-active-operation.js";
-import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   auditLogs,
+  domainEventOutbox,
   series,
   seriesAssignments,
   seriesOperationalHistory,
   seriesReactivationRequests,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import { hasSeriesActiveOperation } from "../../../../../../../../database/series-active-operation.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import { PERMISSIONS } from "../../../../authorization/domain/permissions.js";
 import { lockCurrentAuthorization } from "../../../../authorization/infrastructure/persistence/drizzle/transactional-authorization.js";
 import type {
@@ -263,6 +264,43 @@ export class DrizzleSeriesLifecycleRepository
         })
         .returning({ id: seriesReactivationRequests.id });
       if (!created) throw new Error("reactivation-request-insert-failed");
+      const [requester] = await tx
+        .select({
+          email: users.email,
+          displayName: users.displayName,
+          discordUsername: users.discordUsername,
+          discordLinkedAt: users.discordLinkedAt,
+        })
+        .from(users)
+        .where(eq(users.id, input.actor.userId))
+        .limit(1);
+      const [seriesRow] = await tx
+        .select({ title: series.title })
+        .from(series)
+        .where(eq(series.id, input.seriesId))
+        .limit(1);
+      const adminRows = await tx
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.role, "admin"), eq(users.status, "active")));
+      const requesterLabel = requester
+        ? requester.discordLinkedAt && requester.discordUsername
+          ? `@${requester.discordUsername}`
+          : requester.displayName?.trim() || requester.email
+        : "Usuario";
+      const occurredAt = new Date();
+      await tx.insert(domainEventOutbox).values({
+        eventType: "series.reactivation.requested",
+        aggregateType: "series",
+        aggregateId: input.seriesId,
+        actorUserId: input.actor.userId,
+        payload: {
+          targetUserIds: adminRows.map((admin) => admin.id),
+          requesterLabel: requesterLabel.slice(0, 200),
+          seriesTitle: (seriesRow?.title ?? "Serie").slice(0, 200),
+        },
+        occurredAt,
+      });
       await this.audit(
         tx,
         input.actor,
@@ -328,6 +366,39 @@ export class DrizzleSeriesLifecycleRepository
         })
         .where(eq(seriesReactivationRequests.id, request.id));
       if (approve) {
+        const [assignment] = await tx
+          .select({ responsibleUserId: seriesAssignments.responsibleUserId })
+          .from(seriesAssignments)
+          .where(eq(seriesAssignments.seriesId, input.seriesId))
+          .limit(1);
+        if (assignment?.responsibleUserId !== request.requestedBy) {
+          await tx
+            .insert(seriesAssignments)
+            .values({
+              seriesId: input.seriesId,
+              responsibleUserId: request.requestedBy,
+              assignedBy: input.actor.userId,
+            })
+            .onConflictDoUpdate({
+              target: seriesAssignments.seriesId,
+              set: {
+                responsibleUserId: request.requestedBy,
+                assignedBy: input.actor.userId,
+                updatedAt: now,
+              },
+            });
+          await this.audit(
+            tx,
+            input.actor,
+            input.seriesId,
+            "series.assignment.changed_on_reactivation",
+            request.id,
+            {
+              previousResponsibleUserId: assignment?.responsibleUserId ?? null,
+              responsibleUserId: request.requestedBy,
+            },
+          );
+        }
         const [previous] = await tx
           .select({
             reason: series.inactiveReason,
@@ -404,10 +475,28 @@ export class DrizzleSeriesLifecycleRepository
         .where(eq(seriesOperationalHistory.seriesId, seriesId))
         .orderBy(desc(seriesOperationalHistory.occurredAt)),
       this.db
-        .select()
+        .select({
+          request: seriesReactivationRequests,
+          requester: {
+            discordUsername: users.discordUsername,
+            discordLinkedAt: users.discordLinkedAt,
+            displayName: users.displayName,
+            email: users.email,
+          },
+        })
         .from(seriesReactivationRequests)
+        .innerJoin(users, eq(users.id, seriesReactivationRequests.requestedBy))
         .where(eq(seriesReactivationRequests.seriesId, seriesId))
-        .orderBy(desc(seriesReactivationRequests.requestedAt)),
+        .orderBy(desc(seriesReactivationRequests.requestedAt))
+        .then((rows) =>
+          rows.map(({ request, requester }) => ({
+            ...request,
+            requestedByLabel:
+              requester.discordLinkedAt && requester.discordUsername
+                ? `@${requester.discordUsername}`
+                : requester.displayName?.trim() || requester.email,
+          })),
+        ),
     ]);
     return { ...row, history, requests };
   }

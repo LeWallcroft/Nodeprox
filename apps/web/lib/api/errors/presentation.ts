@@ -96,6 +96,20 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
       severity: "warning",
       presentation: "inline",
     },
+    "series-lifecycle-transition-invalid": {
+      title: "No se pudo cambiar el estado de la serie",
+      message:
+        "La serie ya no está activa o el motivo está incompleto. Actualiza el detalle y verifica que el motivo esté indicado; para «Otros», agrega una explicación.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "resource-conflict": {
+      title: "La serie cambió durante la operación",
+      message:
+        "El estado o el contenido relacionado cambió antes de completar la acción. Actualiza el detalle y revisa si hay cargas, reemplazos o capítulos asociados.",
+      severity: "warning",
+      presentation: "inline",
+    },
     forbidden: {
       title: "Acción no permitida",
       message: "No tienes permisos para realizar esta operación.",

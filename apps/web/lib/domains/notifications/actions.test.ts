@@ -4,6 +4,9 @@ import { formatUnreadCount, resolveNotificationAction } from "./actions";
 describe("notification actions", () => {
   it("only resolves allowlisted internal destinations", () => {
     expect(resolveNotificationAction("authorizations")).toBe("/autorizaciones");
+    expect(resolveNotificationAction("inactive-series")).toBe(
+      "/series/inactive",
+    );
     expect(resolveNotificationAction("https://example.com")).toBeNull();
     expect(resolveNotificationAction("/series/unsafe")).toBeNull();
     expect(resolveNotificationAction(null)).toBeNull();

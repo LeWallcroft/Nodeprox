@@ -24,6 +24,8 @@ const series = {
   inactiveReasonDetail: null,
   stateChangedAt: "2026-08-01T00:00:00.000Z",
   hasPendingReactivationRequest: false,
+  hasApprovedReactivationRequest: false,
+  lastApprovedAt: null,
   responsibleUser: {
     id: "uploader-1",
     email: "uploader@example.com",
@@ -45,10 +47,25 @@ describe("Series management presentation", () => {
       "utf8",
     );
 
-    expect(panel).toContain('cause.code === "series-has-media"');
+    expect(panel).toContain("Esta serie tiene imágenes asociadas");
+    expect(panel).toContain("Usa «Deshabilitar serie»");
+    expect(panel).toContain("archivos subidos, historial de almacenamiento");
     expect(panel).toContain(
-      "Puedes deshabilitarla para conservar su contenido.",
+      'errorMessage(cause, "No se pudo eliminar la serie.")',
     );
+  });
+
+  it("explains why deactivation is blocked and requires details for Otros", () => {
+    const dialog = readFileSync(
+      "apps/web/components/domains/series/deactivate-series-dialog.tsx",
+      "utf8",
+    );
+
+    expect(dialog).toContain("Explica brevemente el motivo");
+    expect(dialog).toContain(
+      'errorMessage(cause, "No se pudo deshabilitar la serie.")',
+    );
+    expect(dialog).toContain('role="alert"');
   });
 
   it("keeps the final compact master-detail layout contract", () => {

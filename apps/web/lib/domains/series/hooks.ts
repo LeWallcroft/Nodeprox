@@ -9,28 +9,32 @@ import {
 import { ApiError } from "../../api/types";
 import { queryKeys } from "../query-keys";
 import {
+  approveSeriesReactivation,
   assignSeriesResponsible,
   createSeries,
+  deactivateSeries,
   deleteSeries,
   getSelectableSeriesChannels,
   getSeries,
   getSeriesCapabilities,
+  getSeriesLifecycle,
   listSeries,
   listSeriesResponsibleCandidates,
-  updateSeries,
-  getSeriesLifecycle,
-  deactivateSeries,
   reactivateSeries,
-  requestSeriesReactivation,
-  approveSeriesReactivation,
   rejectSeriesReactivation,
+  requestSeriesReactivation,
+  updateSeries,
 } from "./api";
 import type { SeriesInput } from "./types";
 
-export function useSeriesList(state: "active" | "inactive" = "active") {
+export function useSeriesList(
+  state: "active" | "inactive" = "active",
+  enabled = true,
+) {
   return useQuery({
     queryKey: queryKeys.series.listForState(state),
     queryFn: () => listSeries(state),
+    enabled,
     retry: false,
   });
 }

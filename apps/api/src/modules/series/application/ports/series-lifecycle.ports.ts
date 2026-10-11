@@ -37,6 +37,7 @@ export type SeriesLifecycleDetail = {
   requests: Array<{
     id: string;
     requestedBy: string;
+    requestedByLabel: string;
     status: "pending" | "approved" | "rejected" | "cancelled";
     requestNote: string | null;
     requestedAt: Date;

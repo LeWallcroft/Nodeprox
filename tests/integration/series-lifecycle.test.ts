@@ -10,6 +10,7 @@ import { createDatabase } from "../../database/client.js";
 import {
   auditLogs,
   chapters,
+  domainEventOutbox,
   images,
   series,
   seriesAssignments,
@@ -18,8 +19,8 @@ import {
   seriesReactivationRequests,
   users,
 } from "../../database/schema/index.js";
-import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 import { legacyStorageProfileId } from "../helpers/storage-execution.js";
+import { insertImagesWithInitialVersions } from "./helpers/image-fixture.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -35,6 +36,7 @@ const skeletonId = randomUUID();
 const mediaSeriesId = randomUUID();
 const raceSeriesId = randomUUID();
 const unassignedSeriesId = randomUUID();
+const reassignedSeriesId = randomUUID();
 const chapterId = randomUUID();
 const mediaChapterId = randomUUID();
 const raceChapterId = randomUUID();
@@ -120,6 +122,12 @@ beforeAll(async () => {
       slug: `lifecycle-unassigned-${unassignedSeriesId}`,
       createdBy: gestorId,
     },
+    {
+      id: reassignedSeriesId,
+      title: "Lifecycle Reassigned",
+      slug: `lifecycle-reassigned-${reassignedSeriesId}`,
+      createdBy: gestorId,
+    },
   ]);
   await database.db.insert(seriesAssignments).values([
     { seriesId, responsibleUserId: uploaderId, assignedBy: gestorId },
@@ -131,6 +139,11 @@ beforeAll(async () => {
     },
     {
       seriesId: raceSeriesId,
+      responsibleUserId: gestorId,
+      assignedBy: gestorId,
+    },
+    {
+      seriesId: reassignedSeriesId,
       responsibleUserId: gestorId,
       assignedBy: gestorId,
     },
@@ -200,6 +213,7 @@ afterAll(async () => {
         mediaSeriesId,
         raceSeriesId,
         unassignedSeriesId,
+        reassignedSeriesId,
       ]),
     );
   await database.db
@@ -284,7 +298,86 @@ describe("Series operational lifecycle", () => {
       payload: { note: "Puedo retomar esta serie" },
     });
     expect(request.statusCode).toBe(201);
-    expect(request.json()).toMatchObject({ requestId: expect.any(String) });
+    const requestId = request.json<{ requestId: string }>().requestId;
+    const approval = await app.inject({
+      method: "POST",
+      url: `/series/${unassignedSeriesId}/reactivation-requests/${requestId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: {},
+    });
+    expect(approval.statusCode).toBe(200);
+    const activeListAfterApproval = await app.inject({
+      method: "GET",
+      url: "/series",
+      headers: { cookie: uploaderCookie },
+    });
+    expect(activeListAfterApproval.statusCode).toBe(200);
+    const activeProjection =
+      activeListAfterApproval.json<
+        Array<{
+          id: string;
+          hasApprovedReactivationRequest: boolean;
+          lastApprovedAt: string | null;
+        }>
+      >();
+    const reactivated = activeProjection.find(
+      (item) => item.id === unassignedSeriesId,
+    );
+    expect(reactivated).toMatchObject({
+      hasApprovedReactivationRequest: true,
+    });
+    expect(reactivated?.lastApprovedAt).toEqual(expect.any(String));
+    const [assignment] = await database.db
+      .select()
+      .from(seriesAssignments)
+      .where(eq(seriesAssignments.seriesId, unassignedSeriesId));
+    expect(assignment).toMatchObject({
+      responsibleUserId: uploaderId,
+      assignedBy: adminId,
+    });
+  });
+
+  it("transfers responsibility to the requesting uploader when approval reactivates a previously assigned series", async () => {
+    const deactivate = await app.inject({
+      method: "POST",
+      url: `/series/${reassignedSeriesId}/deactivate`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "hiatus" },
+    });
+    expect(deactivate.statusCode).toBe(200);
+    const request = await app.inject({
+      method: "POST",
+      url: `/series/${reassignedSeriesId}/reactivation-requests`,
+      headers: { cookie: uploaderCookie },
+      payload: { note: "Puedo continuar esta serie" },
+    });
+    expect(request.statusCode).toBe(201);
+    const requestId = request.json<{ requestId: string }>().requestId;
+    const approval = await app.inject({
+      method: "POST",
+      url: `/series/${reassignedSeriesId}/reactivation-requests/${requestId}/approve`,
+      headers: { cookie: adminCookie },
+      payload: {},
+    });
+    expect(approval.statusCode).toBe(200);
+    const [assignment] = await database.db
+      .select()
+      .from(seriesAssignments)
+      .where(eq(seriesAssignments.seriesId, reassignedSeriesId));
+    expect(assignment).toMatchObject({
+      responsibleUserId: uploaderId,
+      assignedBy: adminId,
+    });
+    const activeList = await app.inject({
+      method: "GET",
+      url: "/series",
+      headers: { cookie: uploaderCookie },
+    });
+    expect(
+      activeList
+        .json<Array<{ id: string }>>()
+        .some((item) => item.id === reassignedSeriesId),
+    ).toBe(true);
   });
 
   it("defaults existing Series to active and enforces database consistency", async () => {
@@ -394,6 +487,30 @@ describe("Series operational lifecycle", () => {
     });
     expect(request.statusCode).toBe(201);
     const requestId = request.json<{ requestId: string }>().requestId;
+    const lifecycle = await app.inject({
+      method: "GET",
+      url: `/series/${seriesId}/lifecycle`,
+      headers: { cookie: uploaderCookie },
+    });
+    expect(lifecycle.statusCode).toBe(200);
+    expect(
+      lifecycle.json<{ requests: Array<{ requestedByLabel: string }> }>()
+        .requests[0]?.requestedByLabel,
+    ).toBe(emails.uploader);
+    const requestEvents = await database.db
+      .select()
+      .from(domainEventOutbox)
+      .where(eq(domainEventOutbox.aggregateId, seriesId));
+    expect(requestEvents).toHaveLength(1);
+    expect(requestEvents[0]).toMatchObject({
+      eventType: "series.reactivation.requested",
+      actorUserId: uploaderId,
+      payload: {
+        targetUserIds: [adminId],
+        requesterLabel: emails.uploader,
+        seriesTitle: "Lifecycle Test",
+      },
+    });
     const duplicate = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/reactivation-requests`,

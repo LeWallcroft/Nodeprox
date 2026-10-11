@@ -23,7 +23,9 @@ export function errorMessage(
       error.code === "series-channel-already-bound" ||
       error.code === "series-channel-validation-unavailable" ||
       error.code === "series-has-media" ||
-      error.code === "series-active-operation"
+      error.code === "series-active-operation" ||
+      error.code === "series-lifecycle-transition-invalid" ||
+      error.code === "resource-conflict"
     )
       return `${presentation.message}${reference}`;
     if (error.status === 401) return "Tu sesión no es válida o ha expirado.";

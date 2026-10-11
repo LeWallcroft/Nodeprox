@@ -1,7 +1,7 @@
 "use client";
 
+import { Eye, RotateCcw, Send, X } from "lucide-react";
 import { useState } from "react";
-import { RotateCcw, Send, X } from "lucide-react";
 import {
   useSeriesCapabilities,
   useSeriesLifecycle,
@@ -23,6 +23,7 @@ import {
 import { StatusBadge } from "../../ui/status-badge";
 import { UserAvatar } from "../users/user-avatar";
 import { ReactivationRequestDialog } from "./reactivation-request-dialog";
+import { ReactivationRequestHistoryDialog } from "./reactivation-request-history-dialog";
 import { ReactivationReviewDialog } from "./reactivation-review-dialog";
 
 const reasonLabel = {
@@ -55,6 +56,7 @@ export function InactiveSeriesDetailPanel({
   const capabilities = useSeriesCapabilities(series.id);
   const actions = useSeriesLifecycleActions(series.id);
   const [requestOpen, setRequestOpen] = useState(false);
+  const [requestHistoryOpen, setRequestHistoryOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [actionError, setActionError] = useState("");
   const canManage =
@@ -63,9 +65,12 @@ export function InactiveSeriesDetailPanel({
   const canRequest =
     capabilities.data?.capabilities.includes("series.reactivation.request") ??
     false;
+  const isInactive = series.operationalState === "inactive";
   const pending = lifecycle.data?.requests.find(
     (request) => request.status === "pending",
   );
+  const requests = lifecycle.data?.requests ?? [];
+  const visibleRequests = requests.slice(0, 2);
   return (
     <DetailPanel>
       <DetailPanelHeader>
@@ -90,7 +95,10 @@ export function InactiveSeriesDetailPanel({
           />
           <div className="min-w-0">
             <h3 className="text-lg font-semibold">{series.title}</h3>
-            <StatusBadge label="Deshabilitada" tone="warning" />
+            <StatusBadge
+              label={isInactive ? "Deshabilitada" : "Activa"}
+              tone={isInactive ? "warning" : "success"}
+            />
             <p className="mt-2 break-all text-xs text-muted">{series.slug}</p>
           </div>
         </div>
@@ -154,15 +162,18 @@ export function InactiveSeriesDetailPanel({
             </button>
           </p>
         ) : null}
-        {lifecycle.data?.requests.length ? (
+        {requests.length ? (
           <ul className="mt-2 grid gap-2 text-sm">
-            {lifecycle.data.requests.map((request) => (
+            {visibleRequests.map((request) => (
               <li
                 key={request.id}
                 className="rounded-control bg-surface-elevated p-3"
               >
                 <strong>{requestStatusLabel[request.status]}</strong> ·{" "}
                 {new Date(request.requestedAt).toLocaleString("es-PE")}
+                <p className="mt-1 text-muted">
+                  Solicitó: {request.requestedByLabel}
+                </p>
                 {request.requestNote ? <p>{request.requestNote}</p> : null}
                 {request.resolutionNote ? (
                   <p className="text-muted">
@@ -171,6 +182,19 @@ export function InactiveSeriesDetailPanel({
                 ) : null}
               </li>
             ))}
+            {requests.length > visibleRequests.length ? (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => setRequestHistoryOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-control px-1 py-1 text-sm font-medium text-primary hover:bg-primary/10 hover:text-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                  aria-label={`Ver más: historial completo de ${requests.length} solicitudes`}
+                >
+                  <Eye aria-hidden="true" className="size-4" />
+                  Ver más ({requests.length})
+                </button>
+              </li>
+            ) : null}
           </ul>
         ) : (
           <p className="text-muted">Sin solicitudes.</p>
@@ -213,7 +237,7 @@ export function InactiveSeriesDetailPanel({
         ) : null}
       </DetailPanelContent>
       <DetailPanelActions>
-        {canManage ? (
+        {isInactive && canManage ? (
           <>
             {pending ? (
               <Button type="button" onClick={() => setReviewOpen(true)}>
@@ -241,7 +265,7 @@ export function InactiveSeriesDetailPanel({
             </Button>
           </>
         ) : null}
-        {canRequest ? (
+        {isInactive && canRequest ? (
           pending ? (
             <StatusBadge label="Solicitud pendiente" tone="info" />
           ) : (
@@ -258,6 +282,12 @@ export function InactiveSeriesDetailPanel({
         onConfirm={(note) =>
           actions.request.mutateAsync(note).then(() => undefined)
         }
+      />
+      <ReactivationRequestHistoryDialog
+        open={requestHistoryOpen}
+        onOpenChange={setRequestHistoryOpen}
+        seriesTitle={series.title}
+        requests={requests}
       />
       <ReactivationReviewDialog
         open={reviewOpen}
