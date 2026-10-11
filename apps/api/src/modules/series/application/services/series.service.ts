@@ -124,6 +124,10 @@ export class SeriesService {
       return this.withResponsibleUsers(
         await this.series.listAll({ operationalState }),
       );
+    if (operationalState === "inactive")
+      return this.withResponsibleUsers(
+        await this.series.listAll({ operationalState }),
+      );
     const ids = new Set(
       await this.assignments.listAssignedSeriesIds(context.userId),
     );
@@ -413,6 +417,7 @@ export class SeriesService {
     if (
       decision.role === "admin" ||
       decision.role === "gestor" ||
+      item.operationalState === "inactive" ||
       (await this.assignments.isAssigned(id, context.userId))
     )
       return item;

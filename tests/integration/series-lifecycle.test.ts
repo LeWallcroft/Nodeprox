@@ -34,6 +34,7 @@ const seriesId = randomUUID();
 const skeletonId = randomUUID();
 const mediaSeriesId = randomUUID();
 const raceSeriesId = randomUUID();
+const unassignedSeriesId = randomUUID();
 const chapterId = randomUUID();
 const mediaChapterId = randomUUID();
 const raceChapterId = randomUUID();
@@ -113,6 +114,12 @@ beforeAll(async () => {
       slug: `lifecycle-race-${raceSeriesId}`,
       createdBy: gestorId,
     },
+    {
+      id: unassignedSeriesId,
+      title: "Lifecycle Unassigned",
+      slug: `lifecycle-unassigned-${unassignedSeriesId}`,
+      createdBy: gestorId,
+    },
   ]);
   await database.db.insert(seriesAssignments).values([
     { seriesId, responsibleUserId: uploaderId, assignedBy: gestorId },
@@ -187,7 +194,13 @@ afterAll(async () => {
   await database.db
     .delete(series)
     .where(
-      inArray(series.id, [seriesId, skeletonId, mediaSeriesId, raceSeriesId]),
+      inArray(series.id, [
+        seriesId,
+        skeletonId,
+        mediaSeriesId,
+        raceSeriesId,
+        unassignedSeriesId,
+      ]),
     );
   await database.db
     .delete(seriesCreationGrants)
@@ -203,6 +216,68 @@ afterAll(async () => {
 });
 
 describe("Series operational lifecycle", () => {
+  it("lets an uploader view inactive Series without an assignment", async () => {
+    const deactivate = await app.inject({
+      method: "POST",
+      url: `/series/${unassignedSeriesId}/deactivate`,
+      headers: { cookie: adminCookie },
+      payload: { reason: "hiatus", reasonDetail: "Pausa temporal" },
+    });
+    expect(deactivate.statusCode).toBe(200);
+
+    const activeList = await app.inject({
+      method: "GET",
+      url: "/series",
+      headers: { cookie: uploaderCookie },
+    });
+    expect(
+      activeList
+        .json<Array<{ id: string }>>()
+        .some((item) => item.id === unassignedSeriesId),
+    ).toBe(false);
+
+    const inactiveList = await app.inject({
+      method: "GET",
+      url: "/series?operationalState=inactive",
+      headers: { cookie: uploaderCookie },
+    });
+    expect(inactiveList.statusCode).toBe(200);
+    expect(
+      inactiveList
+        .json<Array<{ id: string; inactiveReasonDetail: string | null }>>()
+        .some(
+          (item) =>
+            item.id === unassignedSeriesId &&
+            item.inactiveReasonDetail === "Pausa temporal",
+        ),
+    ).toBe(true);
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/series/${unassignedSeriesId}`,
+      headers: { cookie: uploaderCookie },
+    });
+    expect(detail.statusCode).toBe(200);
+
+    const lifecycle = await app.inject({
+      method: "GET",
+      url: `/series/${unassignedSeriesId}/lifecycle`,
+      headers: { cookie: uploaderCookie },
+    });
+    expect(lifecycle.statusCode).toBe(200);
+    expect(lifecycle.json().history).toHaveLength(1);
+
+    const capabilities = await app.inject({
+      method: "GET",
+      url: `/series/${unassignedSeriesId}/capabilities`,
+      headers: { cookie: uploaderCookie },
+    });
+    expect(capabilities.statusCode).toBe(200);
+    expect(capabilities.json().capabilities).toContain(
+      "series.reactivation.request",
+    );
+  });
+
   it("defaults existing Series to active and enforces database consistency", async () => {
     const [row] = await database.db
       .select()
