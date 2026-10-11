@@ -207,7 +207,10 @@ export default function SeriesChaptersPage() {
       {listQuery.isSuccess && listQuery.data.length ? (
         <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)] xl:items-stretch">
           <main className="flex min-w-0 flex-col">
-            <Card className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap">
+            <Card
+              density="compact"
+              className="mb-4 flex flex-wrap items-center gap-2 lg:flex-nowrap"
+            >
               <div className="w-full max-w-xs shrink">
                 <SearchInput
                   value={query}

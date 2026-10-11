@@ -50,6 +50,20 @@ function renderWithQueryClient(
 }
 
 describe("Chapter management presentation", () => {
+  it("uses the compact shared Card for the Chapter filter toolbar", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/series/[seriesId]/chapters/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toMatch(
+      /<Card\s+density="compact"\s+className="mb-4 flex flex-wrap items-center gap-2 lg:flex-nowrap"\s*>/,
+    );
+    expect(page).not.toContain(
+      'className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap"',
+    );
+  });
+
   it("keeps the global Chapters master-detail contract and contextual actions", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/chapters/page.tsx",

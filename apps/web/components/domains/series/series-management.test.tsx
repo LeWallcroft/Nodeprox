@@ -161,6 +161,30 @@ describe("Series management presentation", () => {
     expect(page).toContain("<SeriesDetailPanel");
   });
 
+  it("puts primary chapter management before Series editing", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesDetailPanel
+        series={series}
+        capabilities={["series.read", "series.edit", "chapters.create"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+        candidates={[]}
+        candidatesLoading={false}
+        candidatesError={null}
+        assignmentPending={false}
+        updatePending={false}
+        deletePending={false}
+        onAssignResponsible={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("order-first inline-flex");
+    expect(markup.indexOf("Gestionar capítulos")).toBeLessThan(
+      markup.indexOf("Editar serie"),
+    );
+  });
+
   it("shows the responsible account name without a space-consuming initials badge", () => {
     const markup = renderToStaticMarkup(
       <SeriesList
