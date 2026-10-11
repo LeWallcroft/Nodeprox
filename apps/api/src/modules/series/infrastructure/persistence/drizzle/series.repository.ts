@@ -16,13 +16,20 @@ import {
   auditLogs,
   chapterDeletionOutbox,
   chapterPermissions,
+  chapterReplacementOperations,
   chapters,
+  imageReplacementOperations,
   images,
+  imageVersions,
   series,
   seriesAssignments,
   seriesCreationGrants,
+  seriesReactivationRequests,
+  uploads,
   users,
 } from "../../../../../../../../database/schema/index.js";
+import { hasSeriesActiveOperation } from "../../../../../../../../database/series-active-operation.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import type { AuthorizationContext } from "../../../../authorization/domain/authorization.types.js";
 import {
   PERMISSIONS,
@@ -52,6 +59,10 @@ import type {
   ChapterCoreRecord,
   SeriesRecord,
 } from "../../../domain/series.types.js";
+import {
+  evaluateSeriesOperationalMutation,
+  SeriesInactiveError,
+} from "../../../domain/series-operational.policy.js";
 import { canBeSeriesResponsible } from "../../../domain/series-responsibility.policy.js";
 
 const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
@@ -62,6 +73,11 @@ const toSeries = (row: typeof series.$inferSelect): SeriesRecord => ({
   coverUrl: row.coverUrl,
   discordChannelId: row.discordChannelId,
   discordChannelNameSnapshot: row.discordChannelNameSnapshot,
+  operationalState: row.operationalState,
+  inactiveReason: row.inactiveReason,
+  inactiveReasonDetail: row.inactiveReasonDetail,
+  stateChangedAt: row.stateChangedAt,
+  stateChangedBy: row.stateChangedBy,
   responsibleUser: null,
   createdBy: row.createdBy,
   createdAt: row.createdAt,
@@ -288,11 +304,20 @@ export class DrizzleSeriesRepository
     return rows.map(toSeries);
   }
 
-  async listAll() {
-    return this.listSeriesProjection();
+  async listAll(
+    input: { operationalState: "active" | "inactive" } = {
+      operationalState: "active",
+    },
+  ) {
+    return this.listSeriesProjection(undefined, input.operationalState);
   }
 
-  async listWithHelperAccess(userId: string) {
+  async listWithHelperAccess(
+    userId: string,
+    input: { operationalState: "active" | "inactive" } = {
+      operationalState: "active",
+    },
+  ) {
     const rows = await this.db
       .selectDistinct({ id: series.id })
       .from(series)
@@ -306,9 +331,13 @@ export class DrizzleSeriesRepository
           eq(chapterPermissions.helperUserId, userId),
           isNull(chapterPermissions.revokedAt),
           ne(chapters.status, "deleting"),
+          eq(series.operationalState, input.operationalState),
         ),
       );
-    return this.listSeriesProjection(rows.map((row) => row.id));
+    return this.listSeriesProjection(
+      rows.map((row) => row.id),
+      input.operationalState,
+    );
   }
 
   /**
@@ -319,6 +348,7 @@ export class DrizzleSeriesRepository
    */
   private async listSeriesProjection(
     seriesIds?: readonly string[],
+    operationalState: "active" | "inactive" = "active",
   ): Promise<SeriesListProjection[]> {
     if (seriesIds && !seriesIds.length) return [];
 
@@ -351,16 +381,27 @@ export class DrizzleSeriesRepository
         imageCount: sql<number>`coalesce(${imageCounts.imageCount}, 0)`.mapWith(
           Number,
         ),
+        hasPendingReactivationRequest: sql<boolean>`exists (select 1 from ${seriesReactivationRequests} as pending_request where pending_request.series_id = ${series.id} and pending_request.status = 'pending')`,
+        hasApprovedReactivationRequest: sql<boolean>`exists (select 1 from ${seriesReactivationRequests} as approved_request where approved_request.series_id = ${series.id} and approved_request.status = 'approved')`,
+        lastApprovedAt: sql<Date | null>`(select max(approved_request.reviewed_at) from ${seriesReactivationRequests} as approved_request where approved_request.series_id = ${series.id} and approved_request.status = 'approved')`,
       })
       .from(series)
       .leftJoin(chapterCounts, eq(chapterCounts.seriesId, series.id))
       .leftJoin(imageCounts, eq(imageCounts.seriesId, series.id))
-      .where(seriesIds ? inArray(series.id, [...seriesIds]) : undefined);
+      .where(
+        and(
+          eq(series.operationalState, operationalState),
+          seriesIds ? inArray(series.id, [...seriesIds]) : undefined,
+        ),
+      );
 
     return rows.map((row) => ({
       ...toSeries(row.series),
       chapterCount: row.chapterCount,
       imageCount: row.imageCount,
+      hasPendingReactivationRequest: row.hasPendingReactivationRequest,
+      hasApprovedReactivationRequest: row.hasApprovedReactivationRequest,
+      lastApprovedAt: row.lastApprovedAt,
     }));
   }
 
@@ -411,17 +452,22 @@ export class DrizzleSeriesRepository
     responsibleUserId: string;
     assignedBy: string;
   }) {
-    await this.db
-      .insert(seriesAssignments)
-      .values(input)
-      .onConflictDoUpdate({
-        target: seriesAssignments.seriesId,
-        set: {
-          responsibleUserId: input.responsibleUserId,
-          assignedBy: input.assignedBy,
-          updatedAt: new Date(),
-        },
-      });
+    await this.db.transaction(async (tx) => {
+      const locked = await lockSeriesOperationalRow(tx, input.seriesId);
+      if (locked?.operationalState !== "active")
+        throw new SeriesInactiveError();
+      await tx
+        .insert(seriesAssignments)
+        .values(input)
+        .onConflictDoUpdate({
+          target: seriesAssignments.seriesId,
+          set: {
+            responsibleUserId: input.responsibleUserId,
+            assignedBy: input.assignedBy,
+            updatedAt: new Date(),
+          },
+        });
+    });
   }
 
   async listResponsibleUsers(seriesIds: readonly string[]) {
@@ -513,12 +559,66 @@ export class DrizzleSeriesRepository
         operation: "delete",
       });
       if (context.outcome !== "authorized") return context;
-      const [chapter] = await tx
+      if (await hasSeriesActiveOperation(tx, input.seriesId))
+        return { outcome: "active-operation" as const };
+      const [footprint] = await tx
         .select({ id: chapters.id })
         .from(chapters)
+        .leftJoin(images, eq(images.chapterId, chapters.id))
+        .leftJoin(uploads, eq(uploads.chapterId, chapters.id))
+        .leftJoin(
+          chapterReplacementOperations,
+          eq(chapterReplacementOperations.chapterId, chapters.id),
+        )
+        .leftJoin(
+          imageReplacementOperations,
+          eq(imageReplacementOperations.chapterId, chapters.id),
+        )
+        .where(
+          and(
+            eq(chapters.seriesId, input.seriesId),
+            or(
+              sql`${images.id} is not null`,
+              sql`${uploads.id} is not null`,
+              sql`${chapterReplacementOperations.id} is not null`,
+              sql`${imageReplacementOperations.id} is not null`,
+            ),
+          ),
+        )
+        .limit(1);
+      if (footprint) return { outcome: "has-media" as const };
+      const [versionFootprint] = await tx
+        .select({ id: imageVersions.id })
+        .from(imageVersions)
+        .innerJoin(images, eq(images.id, imageVersions.imageId))
+        .innerJoin(chapters, eq(chapters.id, images.chapterId))
         .where(eq(chapters.seriesId, input.seriesId))
         .limit(1);
-      if (chapter) return { outcome: "has-chapters" as const };
+      if (versionFootprint) return { outcome: "has-media" as const };
+      const [oldSeries] = await tx
+        .select({ operationalState: series.operationalState })
+        .from(series)
+        .where(eq(series.id, input.seriesId));
+      const [responsible] = await tx
+        .select({ id: seriesAssignments.responsibleUserId })
+        .from(seriesAssignments)
+        .where(eq(seriesAssignments.seriesId, input.seriesId));
+      const [countRow] = await tx
+        .select({ count: count(chapters.id).mapWith(Number) })
+        .from(chapters)
+        .where(eq(chapters.seriesId, input.seriesId));
+      await tx.insert(auditLogs).values({
+        actorId: input.actor.userId,
+        action: "series.deleted",
+        resourceType: "series",
+        resourceId: input.seriesId,
+        metadata: {
+          deletedEmptyChapterCount: countRow?.count ?? 0,
+          previousOperationalState: oldSeries?.operationalState ?? "active",
+          responsibleUserId: responsible?.id ?? null,
+        },
+      });
+      await tx.delete(chapters).where(eq(chapters.seriesId, input.seriesId));
       const [deleted] = await tx
         .delete(series)
         .where(eq(series.id, input.seriesId))
@@ -754,7 +854,7 @@ export class DrizzleSeriesRepository
           { id: string; role: "admin" | "gestor" | "uploader"; status: string }
         >;
       }
-    | { outcome: "denied" | "not-found" }
+    | { outcome: "denied" | "not-found" | "inactive" }
   > {
     const actor = await lockCurrentAuthorization({
       tx: input.tx,
@@ -766,12 +866,20 @@ export class DrizzleSeriesRepository
     });
     if (!actor.allowed) return { outcome: "denied" };
     const [lockedSeries] = await input.tx
-      .select({ createdBy: series.createdBy })
+      .select({
+        createdBy: series.createdBy,
+        operationalState: series.operationalState,
+      })
       .from(series)
       .where(eq(series.id, input.seriesId))
       .limit(1)
       .for("update");
     if (!lockedSeries) return { outcome: "not-found" };
+    if (
+      input.operation !== "delete" &&
+      !evaluateSeriesOperationalMutation(lockedSeries.operationalState).allowed
+    )
+      return { outcome: "inactive" };
     const [assignment] = await input.tx
       .select({ responsibleUserId: seriesAssignments.responsibleUserId })
       .from(seriesAssignments)
@@ -796,34 +904,6 @@ export class DrizzleSeriesRepository
       .limit(1);
     return row ? toSeries(row) : null;
   }
-
-  async update(
-    id: string,
-    input: {
-      title?: string | undefined;
-      description?: string | null | undefined;
-      coverUrl?: string | null | undefined;
-    },
-  ) {
-    const [row] = await this.db
-      .update(series)
-      .set({ ...input, updatedAt: new Date() })
-      .where(eq(series.id, id))
-      .returning();
-    return row ? toSeries(row) : null;
-  }
-
-  async delete(id: string) {
-    await this.db.delete(series).where(eq(series.id, id));
-  }
-
-  async countChapters(id: string) {
-    const [row] = await this.db
-      .select({ count: count() })
-      .from(chapters)
-      .where(eq(chapters.seriesId, id));
-    return Number(row?.count ?? 0);
-  }
 }
 
 export class DrizzleChapterCoreRepository
@@ -838,6 +918,12 @@ export class DrizzleChapterCoreRepository
     createdBy: string;
   }) {
     return this.db.transaction(async (tx) => {
+      const operational = await lockSeriesOperationalRow(tx, input.seriesId);
+      if (!operational) throw new Error("series-not-found");
+      if (
+        !evaluateSeriesOperationalMutation(operational.operationalState).allowed
+      )
+        throw new SeriesInactiveError();
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${input.seriesId}, 0))`,
       );
@@ -1167,7 +1253,7 @@ export class DrizzleChapterCoreRepository
         isSeriesOwner: boolean;
         isAssigned: boolean;
       }
-    | { outcome: "denied" | "not-found" | "conflict" }
+    | { outcome: "denied" | "not-found" | "conflict" | "inactive" }
   > {
     const actor = await lockCurrentAuthorization({
       tx: input.tx,
@@ -1176,16 +1262,23 @@ export class DrizzleChapterCoreRepository
     });
     if (!actor.allowed) return { outcome: "denied" };
 
+    const [lockedSeries] = await input.tx
+      .select({
+        createdBy: series.createdBy,
+        operationalState: series.operationalState,
+      })
+      .from(series)
+      .where(eq(series.id, input.expectedSeriesId))
+      .limit(1)
+      .for("update");
+    if (!lockedSeries) return { outcome: "not-found" };
+    if (
+      !evaluateSeriesOperationalMutation(lockedSeries.operationalState).allowed
+    )
+      return { outcome: "inactive" };
     let isSeriesOwner = false;
     let isAssigned = false;
     if (actor.role !== "admin") {
-      const [lockedSeries] = await input.tx
-        .select({ createdBy: series.createdBy })
-        .from(series)
-        .where(eq(series.id, input.expectedSeriesId))
-        .limit(1)
-        .for("update");
-      if (!lockedSeries) return { outcome: "not-found" };
       isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
       const [assignment] = await input.tx
         .select({ responsibleUserId: seriesAssignments.responsibleUserId })

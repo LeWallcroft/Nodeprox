@@ -1,9 +1,12 @@
 import { and, asc, eq } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   chapterReplacementItems,
   chapterReplacementOperations,
+  chapters,
 } from "../../../../../../../../database/schema/index.js";
+import { SeriesInactiveError } from "../../../../series/domain/series-operational.policy.js";
 import type { ChapterReplacementManifestRepository } from "../../../application/ports/chapter-replacement-manifest.repository.js";
 import type { ChapterReplacementOperationRepository } from "../../../application/ports/chapter-replacement-operation.repository.js";
 import type { ChapterReplacementItem } from "../../../domain/chapter-replacement-item.js";
@@ -20,10 +23,19 @@ export class DrizzleChapterReplacementRepository
   async create(
     input: Parameters<ChapterReplacementOperationRepository["create"]>[0],
   ): Promise<ChapterReplacementOperation> {
-    const [row] = await this.db
-      .insert(chapterReplacementOperations)
-      .values(input)
-      .returning();
+    const [row] = await this.db.transaction(async (tx) => {
+      const [chapter] = await tx
+        .select({ seriesId: chapters.seriesId })
+        .from(chapters)
+        .where(eq(chapters.id, input.chapterId))
+        .limit(1);
+      if (!chapter) return [];
+      const lockedSeries = await lockSeriesOperationalRow(tx, chapter.seriesId);
+      if (!lockedSeries) return [];
+      if (lockedSeries.operationalState !== "active")
+        throw new SeriesInactiveError();
+      return tx.insert(chapterReplacementOperations).values(input).returning();
+    });
     if (!row) throw new Error("chapter-replacement-operation-create-failed");
     return row;
   }

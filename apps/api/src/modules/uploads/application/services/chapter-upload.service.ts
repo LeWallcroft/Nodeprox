@@ -10,6 +10,7 @@ import type {
 } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import type { ChapterPermissionService } from "../../../chapters/application/services/chapter-permission.service.js";
+import { SeriesInactiveError } from "../../../series/domain/series-operational.policy.js";
 import { validateUploadMetadata } from "../../domain/upload.policy.js";
 import type {
   ChapterUploadResult,
@@ -65,6 +66,7 @@ export class ChapterUploadService {
       createdBy: input.context.userId,
     });
     if (!pending) throw new UploadConflictError();
+    if ("outcome" in pending) throw new SeriesInactiveError();
 
     try {
       const transfer =

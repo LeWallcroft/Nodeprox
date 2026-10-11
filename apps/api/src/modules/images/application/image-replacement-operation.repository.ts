@@ -33,6 +33,8 @@ export type ImageReplacementCompletionClaim = {
 };
 
 export type ImageReplacementOperationRepository = {
+  /** Advisory preflight; create() remains the authoritative locked check. */
+  isChapterSeriesInactive(chapterId: string): Promise<boolean>;
   create(
     input: Omit<
       ImageReplacementOperation,
@@ -42,7 +44,7 @@ export type ImageReplacementOperationRepository = {
       | "resultImageVersionId"
       | "lastErrorCode"
     >,
-  ): Promise<ImageReplacementOperation | null>;
+  ): Promise<ImageReplacementOperation | null | { outcome: "inactive" }>;
   findById(id: string): Promise<ImageReplacementOperation | null>;
   markUploaded(
     id: string,

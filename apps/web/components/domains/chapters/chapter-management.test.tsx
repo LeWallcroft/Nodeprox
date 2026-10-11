@@ -54,7 +54,7 @@ describe("Chapter management presentation", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/chapters/page.tsx",
       "utf8",
-    );
+    ).replaceAll("\r\n", "\n");
 
     expect(page).toContain("xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]");
     expect(page).toContain("Buscar capítulos...");

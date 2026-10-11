@@ -6,6 +6,7 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { AppError } from "../../../errors/app-error.js";
+import { SeriesInactiveError } from "../../series/domain/series-operational.policy.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
 import {
   InvalidUploadError,
@@ -290,6 +291,13 @@ function safeProjection(projection: ChapterReplacementProjection) {
 }
 
 function mapError(error: unknown): AppError {
+  if (error instanceof SeriesInactiveError)
+    return problem(
+      "series-inactive",
+      "The Series is inactive.",
+      409,
+      "Series inactive",
+    );
   if (
     error instanceof ChapterReplacementPrepareDeniedError ||
     error instanceof ChapterReplacementUploadDeniedError ||

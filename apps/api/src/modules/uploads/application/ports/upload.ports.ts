@@ -12,7 +12,7 @@ export interface UploadRepositoryPort {
     contentType: string;
     sizeBytes: number;
     createdBy: string;
-  }): Promise<UploadRecord | null>;
+  }): Promise<UploadRecord | null | { outcome: "inactive" }>;
   claimForCompletion(
     id: string,
     chapterId: string,

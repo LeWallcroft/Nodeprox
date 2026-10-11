@@ -1510,16 +1510,12 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(201);
-    const blockedDeletion = await app.inject({
+    const emptySkeletonDeletion = await app.inject({
       method: "DELETE",
       url: `/series/${withChapterId}`,
       headers: { cookie: adminCookie },
     });
-    expect(blockedDeletion.statusCode).toBe(409);
-    expect(blockedDeletion.json()).toMatchObject({
-      code: "series-has-chapters",
-      detail: "Delete all Chapters in this Series before deleting the Series.",
-    });
+    expect(emptySkeletonDeletion.statusCode).toBe(204);
   });
 
   it("keeps concurrent responsibility changes in one valid row", async () => {

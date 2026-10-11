@@ -53,6 +53,7 @@ export class ChapterPermissionService {
     | { count: number }
     | { conflict: "cooldown" | "already-granted" }
     | { denied: true }
+    | { inactive: true }
     | { notFound: true }
   > {
     const actor = await this.resolveManager(
@@ -105,6 +106,7 @@ export class ChapterPermissionService {
     if (result.outcome === "granted") return { count: result.count };
     if (result.outcome === "not-found") return { notFound: true };
     if (result.outcome === "denied") return { denied: true };
+    if (result.outcome === "inactive") return { inactive: true };
     await this.recordDenied(
       input.context.userId,
       "chapter.permission.grant.denied",
@@ -119,7 +121,12 @@ export class ChapterPermissionService {
     context: AuthorizationContext;
     chapterId: string;
     helperUserId: string;
-  }): Promise<{ count: number } | { denied: true } | { notFound: true }> {
+  }): Promise<
+    | { count: number }
+    | { denied: true }
+    | { inactive: true }
+    | { notFound: true }
+  > {
     const actor = await this.resolveManager(
       input.context,
       input.chapterId,
@@ -148,6 +155,7 @@ export class ChapterPermissionService {
     });
     if (result.outcome === "not-found") return { notFound: true };
     if (result.outcome === "denied") return { denied: true };
+    if (result.outcome === "inactive") return { inactive: true };
     return { count: result.count };
   }
 
@@ -280,6 +288,15 @@ export class ChapterPermissionService {
   }
 
   async projectCapabilities(context: AuthorizationContext, chapterId: string) {
+    const parent = await this.chapters.findById(chapterId);
+    if (
+      parent &&
+      this.chapters.isSeriesActive &&
+      !(await this.chapters.isSeriesActive(parent.seriesId))
+    ) {
+      const read = await this.canReadContext(context, chapterId);
+      return { capabilities: read.allowed ? [PERMISSIONS.CHAPTERS_READ] : [] };
+    }
     const capabilities: string[] = [];
     for (const permission of [
       PERMISSIONS.CHAPTERS_READ,

@@ -31,6 +31,7 @@ import {
   useSeries,
   useSeriesCapabilities,
   useSeriesList,
+  useSeriesLifecycleActions,
   useSeriesResponsibleCandidates,
   useUpdateSeries,
 } from "../../../lib/domains/series/hooks";
@@ -64,6 +65,7 @@ export default function SeriesPage() {
   const selectedQuery = useSeries(selectedSeriesId ?? "");
   const selectedCapabilities = useSeriesCapabilities(selectedSeriesId ?? "");
   const update = useUpdateSeries(selectedSeriesId ?? "");
+  const lifecycleActions = useSeriesLifecycleActions(selectedSeriesId ?? "");
   const canManageAssignment = hasCapability(
     selectedCapabilities.data?.capabilities,
     "series.assignment.manage",
@@ -320,6 +322,17 @@ export default function SeriesPage() {
                 await update.mutateAsync(input);
               }}
               onDelete={handleDelete}
+              hasMedia={
+                !!(listQuery.data ?? []).find(
+                  (item) => item.id === selectedSeriesId,
+                )?.imageCount
+              }
+              onDeactivate={(input) =>
+                lifecycleActions.deactivate
+                  .mutateAsync(input)
+                  .then(() => undefined)
+              }
+              deactivatePending={lifecycleActions.deactivate.isPending}
               candidates={responsibleCandidates.data}
               candidatesLoading={responsibleCandidates.isPending}
               candidatesError={

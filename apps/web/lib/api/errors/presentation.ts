@@ -82,6 +82,34 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
       severity: "error",
       presentation: "inline",
     },
+    "series-has-media": {
+      title: "La serie conserva contenido o historial de almacenamiento",
+      message:
+        "No se puede eliminar la serie porque tiene imágenes, archivos subidos o historial de almacenamiento. Deshabilítala para conservar su historial.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-active-operation": {
+      title: "La serie tiene una operación en curso",
+      message:
+        "Espera a que terminen las cargas o reemplazos asociados e inténtalo nuevamente.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "series-lifecycle-transition-invalid": {
+      title: "No se pudo cambiar el estado de la serie",
+      message:
+        "La serie ya no está activa o el motivo está incompleto. Actualiza el detalle y verifica que el motivo esté indicado; para «Otros», agrega una explicación.",
+      severity: "warning",
+      presentation: "inline",
+    },
+    "resource-conflict": {
+      title: "La serie cambió durante la operación",
+      message:
+        "El estado o el contenido relacionado cambió antes de completar la acción. Actualiza el detalle y revisa si hay cargas, reemplazos o capítulos asociados.",
+      severity: "warning",
+      presentation: "inline",
+    },
     forbidden: {
       title: "Acción no permitida",
       message: "No tienes permisos para realizar esta operación.",

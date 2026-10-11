@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { DomainEventEnvelope } from "../../apps/api/src/modules/events/application/domain-event-handler.js";
 import type {
-  NotificationRecord,
   NotificationPage,
+  NotificationRecord,
   NotificationRepository,
 } from "../../apps/api/src/modules/notifications/application/notification.repository.js";
 import { NotificationProjector } from "../../apps/api/src/modules/notifications/application/notification-projector.js";
@@ -80,6 +80,40 @@ describe("NotificationProjector", () => {
       actionKey: "authorizations",
     });
     expect(repository.rows[0]?.message).not.toContain("not-projected");
+  });
+
+  it("notifies each admin about a reactivation request and links to the inactive board", async () => {
+    const repository = new MemoryNotifications();
+    const adminA = randomUUID();
+    const adminB = randomUUID();
+    const source = event({
+      eventType: "series.reactivation.requested",
+      aggregateType: "series",
+      payload: {
+        targetUserIds: [adminA, adminB, adminA],
+        requesterLabel: "@uploader",
+        seriesTitle: "Serie de prueba",
+      },
+    });
+
+    await new NotificationProjector(repository).handle(source);
+
+    expect(repository.rows).toHaveLength(2);
+    expect(repository.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          userId: adminA,
+          sourceEventId: source.id,
+          type: "series.reactivation.requested",
+          title: "Solicitud para habilitar una serie",
+          message: "@uploader solicitó habilitar la serie «Serie de prueba».",
+          entityType: "series",
+          entityId: source.aggregateId,
+          actionKey: "inactive-series",
+        }),
+        expect.objectContaining({ userId: adminB }),
+      ]),
+    );
   });
 
   it("treats duplicate delivery as successful and idempotent", async () => {

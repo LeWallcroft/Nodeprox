@@ -1,6 +1,7 @@
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
 import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
+import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   auditLogs,
   chapterImportItems,
@@ -8,7 +9,6 @@ import {
   chapters,
   processingOutbox,
   uploadValidationOutbox,
-  series,
   seriesAssignments,
   uploads,
 } from "../../../../../../../../database/schema/index.js";
@@ -62,9 +62,22 @@ export class DrizzleUploadRepository
     contentType: string;
     sizeBytes: number;
     createdBy: string;
-  }): Promise<UploadRecord | null> {
+  }): Promise<UploadRecord | null | { outcome: "inactive" }> {
     try {
       return await this.db.transaction(async (tx) => {
+        const [chapter] = await tx
+          .select({ seriesId: chapters.seriesId })
+          .from(chapters)
+          .where(eq(chapters.id, input.chapterId))
+          .limit(1);
+        if (!chapter) throw uploadStateConflict;
+        const lockedSeries = await lockSeriesOperationalRow(
+          tx,
+          chapter.seriesId,
+        );
+        if (!lockedSeries) throw uploadStateConflict;
+        if (lockedSeries.operationalState !== "active")
+          return { outcome: "inactive" as const };
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${input.chapterId}, 0))`,
         );
@@ -345,14 +358,12 @@ export class DrizzleUploadRepository
 
     let isSeriesOwner = false;
     let isAssigned = false;
+    const lockedSeries = await lockSeriesOperationalRow(
+      input.tx,
+      input.expectedSeriesId,
+    );
+    if (!lockedSeries) return { outcome: "conflict" };
     if (actor.role !== "admin") {
-      const [lockedSeries] = await input.tx
-        .select({ createdBy: series.createdBy })
-        .from(series)
-        .where(eq(series.id, input.expectedSeriesId))
-        .limit(1)
-        .for("update");
-      if (!lockedSeries) return { outcome: "conflict" };
       isSeriesOwner = lockedSeries.createdBy === input.actor.userId;
       const [assignment] = await input.tx
         .select({ responsibleUserId: seriesAssignments.responsibleUserId })

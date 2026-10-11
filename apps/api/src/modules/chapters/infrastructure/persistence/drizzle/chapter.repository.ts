@@ -69,6 +69,15 @@ export class DrizzleChapterRepository
     return row ? toChapter(row) : null;
   }
 
+  async isSeriesActive(seriesId: string): Promise<boolean> {
+    const [row] = await this.db
+      .select({ operationalState: series.operationalState })
+      .from(series)
+      .where(eq(series.id, seriesId))
+      .limit(1);
+    return row?.operationalState === "active";
+  }
+
   async isAssigned(seriesId: string, userId: string): Promise<boolean> {
     const row =
       (
@@ -130,6 +139,7 @@ export class DrizzleChapterRepository
     | { outcome: "granted"; count: number }
     | { outcome: "conflict"; reason: "cooldown" | "already-granted" }
     | { outcome: "denied" }
+    | { outcome: "inactive" }
     | { outcome: "not-found" }
   > {
     const snapshot = await this.findById(input.chapterId);
@@ -148,12 +158,14 @@ export class DrizzleChapterRepository
         return { outcome: "denied" as const };
 
       const [lockedSeries] = await tx
-        .select({ id: series.id })
+        .select({ id: series.id, operationalState: series.operationalState })
         .from(series)
         .where(eq(series.id, snapshot.seriesId))
         .limit(1)
         .for("update");
       if (!lockedSeries) return { outcome: "not-found" as const };
+      if (lockedSeries.operationalState !== "active")
+        return { outcome: "inactive" as const };
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx
@@ -249,12 +261,14 @@ export class DrizzleChapterRepository
       if (!actor.allowed) return { outcome: "denied" as const };
 
       const [lockedSeries] = await tx
-        .select({ id: series.id })
+        .select({ id: series.id, operationalState: series.operationalState })
         .from(series)
         .where(eq(series.id, snapshot.seriesId))
         .limit(1)
         .for("update");
       if (!lockedSeries) return { outcome: "not-found" as const };
+      if (lockedSeries.operationalState !== "active")
+        return { outcome: "inactive" as const };
       let isAssigned = false;
       if (actor.role !== "admin") {
         const [assignment] = await tx

@@ -48,6 +48,13 @@ const forbidden = problem({
   title: "Forbidden",
   type: "https://nodeprox.dev/problems/authorization-denied",
 });
+const inactive = problem({
+  code: "series-inactive",
+  detail: "The Series is inactive.",
+  statusCode: 409,
+  title: "Series inactive",
+  type: "https://nodeprox.dev/problems/series-inactive",
+});
 const notFound = problem({
   code: "chapter-not-found",
   detail: "The requested chapter was not found.",
@@ -140,6 +147,7 @@ export function registerChapterPermissionPlugin(
         });
         if ("notFound" in result) throw notFound;
         if ("denied" in result) throw forbidden;
+        if ("inactive" in result) throw inactive;
         if ("conflict" in result) throw conflict;
         return reply.code(204).send();
       } catch (error) {
@@ -158,6 +166,7 @@ export function registerChapterPermissionPlugin(
       const result = await service.list(requestContext(), chapterId);
       if ("notFound" in result) throw notFound;
       if ("denied" in result) throw forbidden;
+      if ("inactive" in result) throw inactive;
       return result.helpers;
     },
   );
@@ -186,6 +195,7 @@ export function registerChapterPermissionPlugin(
       });
       if ("notFound" in result) throw notFound;
       if ("denied" in result) throw forbidden;
+      if ("inactive" in result) throw inactive;
       return reply.code(204).send();
     },
   );

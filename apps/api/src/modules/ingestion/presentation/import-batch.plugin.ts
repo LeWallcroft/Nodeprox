@@ -8,6 +8,7 @@ import type { SessionCookieAdapter } from "../../authentication/infrastructure/h
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { SeriesService } from "../../series/application/services/series.service.js";
+import { SeriesInactiveError } from "../../series/domain/series-operational.policy.js";
 import {
   type ChapterUploadService,
   UploadConflictError,
@@ -202,6 +203,8 @@ function parse<T extends z.ZodType>(schema: T, value: unknown): z.infer<T> {
 }
 
 function mapError(error: unknown): unknown {
+  if (error instanceof SeriesInactiveError)
+    return problem("series-inactive", "The Series is inactive.", 409);
   if (error instanceof ImportBatchDeniedError)
     return problem(
       "authorization-denied",

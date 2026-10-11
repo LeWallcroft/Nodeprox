@@ -86,6 +86,15 @@ export const PROXY_ROUTE_RULES: readonly ProxyRouteRule[] = [
   { pattern: /^admin\/series-creation-grants\/[^/]+\/history$/, methods: GET },
   { pattern: "series", methods: ["GET", "POST"] },
   { pattern: /^series\/[^/]+$/, methods: ["GET", "PATCH", "DELETE"] },
+  { pattern: /^series\/[^/]+\/lifecycle$/, methods: GET },
+  {
+    pattern: /^series\/[^/]+\/(deactivate|reactivate|reactivation-requests)$/,
+    methods: POST,
+  },
+  {
+    pattern: /^series\/[^/]+\/reactivation-requests\/[^/]+\/(approve|reject)$/,
+    methods: POST,
+  },
   {
     pattern: /^series\/[^/]+\/(capabilities|responsible-candidates)$/,
     methods: GET,

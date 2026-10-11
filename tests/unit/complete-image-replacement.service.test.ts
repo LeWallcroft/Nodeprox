@@ -52,6 +52,7 @@ function subject(input?: {
   const initial = input?.operation === undefined ? operation : input.operation;
   const uploaded = initial ? { ...initial, status: "uploaded" as const } : null;
   const operations: ImageReplacementOperationRepository = {
+    isChapterSeriesInactive: async () => false,
     create: vi.fn(),
     findById: vi.fn(async () => initial),
     markUploaded: vi.fn(async () => uploaded),

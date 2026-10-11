@@ -10,6 +10,13 @@ const grantIssuedPayload = z
     targetUserId: z.uuid(),
   })
   .passthrough();
+const reactivationRequestedPayload = z
+  .object({
+    targetUserIds: z.array(z.uuid()),
+    requesterLabel: z.string().min(1).max(200),
+    seriesTitle: z.string().min(1).max(200),
+  })
+  .passthrough();
 const uploadPayload = z
   .object({
     targetUserId: z.uuid(),
@@ -25,6 +32,7 @@ export class NotificationProjector implements DomainEventHandler {
   readonly handlerName = "notification-projector";
   readonly eventTypes = [
     "series.creation_grant.issued",
+    "series.reactivation.requested",
     "upload.completed",
     "upload.failed",
   ] as const;
@@ -32,6 +40,24 @@ export class NotificationProjector implements DomainEventHandler {
   constructor(private readonly notifications: NotificationRepository) {}
 
   async handle(event: DomainEventEnvelope): Promise<void> {
+    if (event.eventType === "series.reactivation.requested") {
+      const payload = reactivationRequestedPayload.parse(event.payload);
+      await Promise.all(
+        [...new Set(payload.targetUserIds)].map((userId) =>
+          this.notifications.createIfAbsent({
+            userId,
+            sourceEventId: event.id,
+            type: event.eventType,
+            title: "Solicitud para habilitar una serie",
+            message: `${payload.requesterLabel} solicitó habilitar la serie «${payload.seriesTitle}».`,
+            entityType: "series",
+            entityId: event.aggregateId,
+            actionKey: "inactive-series",
+          }),
+        ),
+      );
+      return;
+    }
     if (
       event.eventType === "upload.completed" ||
       event.eventType === "upload.failed"

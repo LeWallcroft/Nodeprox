@@ -9,24 +9,97 @@ import {
 import { ApiError } from "../../api/types";
 import { queryKeys } from "../query-keys";
 import {
+  approveSeriesReactivation,
   assignSeriesResponsible,
   createSeries,
+  deactivateSeries,
   deleteSeries,
   getSelectableSeriesChannels,
   getSeries,
   getSeriesCapabilities,
+  getSeriesLifecycle,
   listSeries,
   listSeriesResponsibleCandidates,
+  reactivateSeries,
+  rejectSeriesReactivation,
+  requestSeriesReactivation,
   updateSeries,
 } from "./api";
 import type { SeriesInput } from "./types";
 
-export function useSeriesList() {
+export function useSeriesList(
+  state: "active" | "inactive" = "active",
+  enabled = true,
+) {
   return useQuery({
-    queryKey: queryKeys.series.list,
-    queryFn: listSeries,
+    queryKey: queryKeys.series.listForState(state),
+    queryFn: () => listSeries(state),
+    enabled,
     retry: false,
   });
+}
+
+export function useSeriesLifecycle(seriesId: string) {
+  return useQuery({
+    queryKey: queryKeys.series.lifecycle(seriesId),
+    queryFn: () => getSeriesLifecycle(seriesId),
+    enabled: Boolean(seriesId),
+    retry: false,
+  });
+}
+
+export function useSeriesLifecycleActions(seriesId: string) {
+  const queryClient = useQueryClient();
+  const refresh = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.series.list }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.series.detail(seriesId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.series.lifecycle(seriesId),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.series.capabilities(seriesId),
+      }),
+    ]);
+  };
+  return {
+    deactivate: useMutation({
+      mutationFn: (input: {
+        reason: NonNullable<import("./types").Series["inactiveReason"]>;
+        reasonDetail?: string;
+      }) => deactivateSeries(seriesId, input),
+      onSuccess: refresh,
+    }),
+    reactivate: useMutation({
+      mutationFn: (resolutionNote?: string) =>
+        reactivateSeries(seriesId, resolutionNote),
+      onSuccess: refresh,
+    }),
+    request: useMutation({
+      mutationFn: (note?: string) => requestSeriesReactivation(seriesId, note),
+      onSuccess: refresh,
+    }),
+    approve: useMutation({
+      mutationFn: (input: { requestId: string; resolutionNote?: string }) =>
+        approveSeriesReactivation(
+          seriesId,
+          input.requestId,
+          input.resolutionNote,
+        ),
+      onSuccess: refresh,
+    }),
+    reject: useMutation({
+      mutationFn: (input: { requestId: string; resolutionNote?: string }) =>
+        rejectSeriesReactivation(
+          seriesId,
+          input.requestId,
+          input.resolutionNote,
+        ),
+      onSuccess: refresh,
+    }),
+  };
 }
 
 export function useSelectableSeriesChannels(enabled: boolean) {

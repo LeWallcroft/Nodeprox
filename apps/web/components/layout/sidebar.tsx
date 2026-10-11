@@ -17,7 +17,10 @@ function NavigationLink({
   collapsed: boolean;
 }) {
   const pathname = usePathname();
-  const active = isNavigationItemActive(pathname, item.href);
+  const active =
+    item.href === "/series" && pathname.startsWith("/series/inactive")
+      ? false
+      : isNavigationItemActive(pathname, item.href);
   const Icon = item.icon;
   return item.href ? (
     <Link

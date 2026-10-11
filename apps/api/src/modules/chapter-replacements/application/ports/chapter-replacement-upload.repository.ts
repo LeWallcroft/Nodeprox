@@ -18,7 +18,7 @@ export interface ChapterReplacementUploadRepository {
     originalFilename: string;
     contentType: string;
     sizeBytes: number;
-  }): Promise<ChapterReplacementOperation | null>;
+  }): Promise<ChapterReplacementOperation | null | { outcome: "inactive" }>;
   markPreparationFailed(replacementId: string, code: string): Promise<void>;
   findByIdForChapter(
     replacementId: string,

@@ -22,6 +22,12 @@ describe("same-origin proxy allowlist", () => {
       ["admin/series-creation-grants/id/invalidate", ["POST"]],
       ["series", ["GET", "POST"]],
       ["series/id", ["GET", "PATCH", "DELETE"]],
+      ["series/id/lifecycle", ["GET"]],
+      ["series/id/deactivate", ["POST"]],
+      ["series/id/reactivate", ["POST"]],
+      ["series/id/reactivation-requests", ["POST"]],
+      ["series/id/reactivation-requests/request/approve", ["POST"]],
+      ["series/id/reactivation-requests/request/reject", ["POST"]],
       ["series/id/responsible", ["PUT"]],
       ["series/id/import-batches/batch/items/item/retry", ["POST"]],
       ["chapters", ["GET"]],
@@ -38,6 +44,8 @@ describe("same-origin proxy allowlist", () => {
       expect(isAllowedProxyRoute(path, "OPTIONS")).toBe(false);
     }
     expect(isAllowedProxyRoute("series/id", "POST")).toBe(false);
+    expect(isAllowedProxyRoute("series/id/deactivate", "GET")).toBe(false);
+    expect(isAllowedProxyRoute("series/id/lifecycle", "POST")).toBe(false);
     expect(isAllowedProxyRoute("me/upload-policy", "POST")).toBe(false);
     expect(isAllowedProxyRoute("me/upload-policy", "DELETE")).toBe(false);
   });

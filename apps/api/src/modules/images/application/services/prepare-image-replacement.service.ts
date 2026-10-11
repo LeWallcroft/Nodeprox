@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ActiveStorageProfilePort } from "@nodeprox/storage/profile-execution";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
+import { SeriesInactiveError } from "../../../series/domain/series-operational.policy.js";
 import { createImageCandidateStorageKey } from "../../domain/image-candidate-storage-key.js";
 import type { MediaReplacementRepositoryPort } from "../media-replacement.ports.js";
 import type { ImageReplacementOperationRepository } from "../image-replacement-operation.repository.js";
@@ -48,6 +49,8 @@ export class PrepareImageReplacementService {
       permission: "images.replace",
     });
     if (!decision.allowed) throw new ImageReplacementPrepareDeniedError();
+    if (await this.operations.isChapterSeriesInactive(input.chapterId))
+      throw new SeriesInactiveError();
     const contentType = input.contentType
       .split(";", 1)[0]
       ?.trim()
@@ -86,6 +89,7 @@ export class PrepareImageReplacementService {
       status: "pending_upload",
     });
     if (!operation) throw new ImageReplacementPrepareConflictError();
+    if ("outcome" in operation) throw new SeriesInactiveError();
     return {
       replacementId: operation.id,
       imageId: operation.imageId,

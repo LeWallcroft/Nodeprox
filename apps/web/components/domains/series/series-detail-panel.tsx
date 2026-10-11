@@ -1,9 +1,15 @@
 "use client";
 
-import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
+import {
+  Archive,
+  Images,
+  Pencil,
+  Trash2,
+  UserRoundPlus,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { ApiError } from "../../../lib/api/types";
 import { hasCapability } from "../../../lib/auth/visibility";
 import type {
   Series,
@@ -28,8 +34,10 @@ import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
 import { StatusBadge } from "../../ui/status-badge";
+import { errorMessage } from "../feedback";
 import { UserAvatar } from "../users/user-avatar";
 import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
+import { DeactivateSeriesDialog } from "./deactivate-series-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
 import { SeriesForm } from "./series-form";
 
@@ -39,6 +47,9 @@ export function SeriesDetailPanel({
   onClose,
   onUpdate,
   onDelete,
+  hasMedia = false,
+  onDeactivate,
+  deactivatePending = false,
   candidates,
   candidatesLoading,
   candidatesError,
@@ -57,6 +68,12 @@ export function SeriesDetailPanel({
     input: Pick<SeriesInput, "title" | "description" | "coverUrl">,
   ) => Promise<void>;
   onDelete: () => Promise<void>;
+  hasMedia?: boolean;
+  onDeactivate?: (input: {
+    reason: NonNullable<Series["inactiveReason"]>;
+    reasonDetail?: string;
+  }) => Promise<void>;
+  deactivatePending?: boolean;
   candidates: readonly SeriesResponsibleCandidate[] | undefined;
   candidatesLoading: boolean;
   candidatesError: Error | null;
@@ -73,6 +90,7 @@ export function SeriesDetailPanel({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [managingHelpers, setManagingHelpers] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deactivating, setDeactivating] = useState(false);
   if (!series)
     return (
       <DetailPanel>
@@ -108,6 +126,10 @@ export function SeriesDetailPanel({
 
   const canEdit = hasCapability(capabilities, "series.edit");
   const canDelete = hasCapability(capabilities, "series.delete");
+  const canManageLifecycle = hasCapability(
+    capabilities,
+    "series.lifecycle.manage",
+  );
   const canCreateChapter = hasCapability(capabilities, "chapters.create");
   const canViewChapters = hasCapability(capabilities, "series.read");
   const canManageAssignment = hasCapability(
@@ -222,6 +244,15 @@ export function SeriesDetailPanel({
             </dd>
           </div>
         </dl>
+        {canDelete && hasMedia ? (
+          <p
+            role="status"
+            className="mt-4 rounded-control bg-warning/10 p-3 text-sm text-warning"
+          >
+            Esta serie tiene imágenes asociadas, por eso no se puede eliminar.
+            Usa «Deshabilitar serie» para conservar su contenido e historial.
+          </p>
+        ) : null}
       </DetailPanelContent>
       <DetailPanelActions>
         {canViewChapters ? (
@@ -265,7 +296,17 @@ export function SeriesDetailPanel({
             colaboradores
           </Button>
         ) : null}
-        {canDelete ? (
+        {canManageLifecycle && onDeactivate ? (
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() => setDeactivating(true)}
+          >
+            <Archive aria-hidden="true" className="size-4" />
+            Deshabilitar serie
+          </Button>
+        ) : null}
+        {canDelete && !hasMedia ? (
           <Button
             variant="destructive"
             type="button"
@@ -319,7 +360,7 @@ export function SeriesDetailPanel({
       ) : null}
       <ConfirmationDialog
         confirmLabel="Eliminar serie"
-        description="Solo se pueden eliminar series sin capítulos. Elimina primero los capítulos asociados y después vuelve a intentarlo."
+        description="Se eliminarán la serie y sus capítulos vacíos. La acción se bloqueará si hay imágenes, archivos subidos, historial de almacenamiento o una carga o reemplazo en curso. En ese caso podrás deshabilitar la serie para conservar su contenido."
         error={deleteError}
         open={confirmingDelete}
         pending={deletePending}
@@ -334,16 +375,23 @@ export function SeriesDetailPanel({
             .then(() => setConfirmingDelete(false))
             .catch((cause: unknown) =>
               setDeleteError(
-                cause instanceof ApiError &&
-                  cause.code === "series-has-chapters"
-                  ? "No se puede eliminar la serie porque aún tiene capítulos. Elimina primero los capítulos asociados y luego vuelve a intentarlo."
-                  : cause instanceof Error
-                    ? cause.message
-                    : "No se pudo eliminar la serie.",
+                errorMessage(cause, "No se pudo eliminar la serie."),
               ),
             );
         }}
       />
+      {onDeactivate ? (
+        <DeactivateSeriesDialog
+          open={deactivating}
+          onOpenChange={setDeactivating}
+          pending={deactivatePending}
+          onConfirm={(input) =>
+            onDeactivate(input).then(() => {
+              onClose();
+            })
+          }
+        />
+      ) : null}
     </DetailPanel>
   );
 }
