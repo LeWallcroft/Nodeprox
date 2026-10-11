@@ -28,7 +28,7 @@ export function SearchableCombobox({
   labelHidden = false,
   compact = false,
   controlClassName = "",
-  placeholder = "Buscar y seleccionar…",
+  placeholder = "Buscar…",
   emptyMessage = "No hay opciones disponibles.",
 }: {
   id: string;
@@ -116,7 +116,7 @@ export function SearchableCombobox({
             aria-activedescendant={
               open && filtered[active] ? `${listId}-${active}` : undefined
             }
-            className={`h-control-lg pr-10 ${controlClassName}`.trim()}
+            className={`h-control-lg pr-12 ${controlClassName}`.trim()}
             autoComplete="off"
             disabled={disabled || loading || Boolean(error)}
             placeholder={loading ? "Cargando…" : placeholder}

@@ -19,6 +19,8 @@ describe("SearchableCombobox", () => {
     expect(markup).toContain('aria-autocomplete="list"');
     expect(markup).toContain('aria-expanded="false"');
     expect(markup).toContain("NPX-SER-001 — Referencia");
+    expect(markup).toContain('placeholder="Buscar…"');
+    expect(markup).toContain("h-control-lg pr-12");
   });
 
   it("keeps keyboard navigation and selected-state behavior in the shared implementation", () => {
@@ -39,7 +41,7 @@ describe("SearchableCombobox", () => {
     expect(source).toContain('className="fixed z-[70]');
     expect(source).toContain("getBoundingClientRect");
     expect(source).toContain(
-      "className={`h-control-lg pr-10 ${controlClassName}`.trim()}",
+      "className={`h-control-lg pr-12 ${controlClassName}`.trim()}",
     );
     expect(source).toContain("option.description ??");
   });
