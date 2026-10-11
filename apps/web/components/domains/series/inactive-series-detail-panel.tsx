@@ -32,6 +32,18 @@ const reasonLabel = {
   other: "Otros",
 } as const;
 
+const operationalStateLabel = {
+  active: "Activa",
+  inactive: "Inactiva",
+} as const;
+
+const requestStatusLabel = {
+  pending: "Pendiente",
+  approved: "Aprobada",
+  rejected: "Rechazada",
+  cancelled: "Cancelada",
+} as const;
+
 export function InactiveSeriesDetailPanel({
   series,
   onClose,
@@ -149,7 +161,7 @@ export function InactiveSeriesDetailPanel({
                 key={request.id}
                 className="rounded-control bg-surface-elevated p-3"
               >
-                <strong>{request.status}</strong> ·{" "}
+                <strong>{requestStatusLabel[request.status]}</strong> ·{" "}
                 {new Date(request.requestedAt).toLocaleString("es-PE")}
                 {request.requestNote ? <p>{request.requestNote}</p> : null}
                 {request.resolutionNote ? (
@@ -172,8 +184,16 @@ export function InactiveSeriesDetailPanel({
                 className="rounded-control bg-surface-elevated p-3"
               >
                 <strong>
-                  {entry.previousState} → {entry.nextState}
+                  {operationalStateLabel[entry.previousState]}
+                  {" → "}
+                  {operationalStateLabel[entry.nextState]}
                 </strong>
+                {entry.inactiveReason ? (
+                  <p>Motivo: {reasonLabel[entry.inactiveReason]}</p>
+                ) : null}
+                {entry.inactiveReasonDetail ? (
+                  <p>Detalle: {entry.inactiveReasonDetail}</p>
+                ) : null}
                 <p>{new Date(entry.occurredAt).toLocaleString("es-PE")}</p>
                 {entry.responsibleLabelSnapshot ? (
                   <p className="text-muted">

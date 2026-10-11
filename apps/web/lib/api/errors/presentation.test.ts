@@ -19,6 +19,22 @@ describe("resolveErrorPresentation", () => {
   });
 
   it.each([
+    [
+      "series-has-media",
+      "No se puede eliminar la serie porque tiene imágenes, archivos subidos o historial de almacenamiento.",
+    ],
+    [
+      "series-active-operation",
+      "Espera a que terminen las cargas o reemplazos asociados e inténtalo nuevamente.",
+    ],
+  ] as const)("explains series deletion block %s", (code, expectedText) => {
+    const presentation = resolveErrorPresentation(
+      new ApiError(409, "technical text", code, { code }),
+    );
+    expect(presentation.message).toContain(expectedText);
+  });
+
+  it.each([
     ["series-slug-conflict", 409],
     ["series-slug-invalid", 422],
   ])("uses a friendly Series slug message for %s", (code, status) => {

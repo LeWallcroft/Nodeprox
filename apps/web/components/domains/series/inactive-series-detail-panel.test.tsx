@@ -6,17 +6,30 @@ import { InactiveSeriesDetailPanel } from "./inactive-series-detail-panel";
 const fixture = vi.hoisted(() => ({
   capabilities: [] as string[],
   pending: false,
+  history: [] as Array<{
+    id: string;
+    previousState: "active" | "inactive";
+    nextState: "active" | "inactive";
+    inactiveReason: "dropped" | "hiatus" | "completed" | "other" | null;
+    inactiveReasonDetail: string | null;
+    actorUserId: string;
+    responsibleUserIdAtEvent: string | null;
+    responsibleLabelSnapshot: string | null;
+    sourceRequestId: string | null;
+    occurredAt: string;
+  }>,
+  requestStatus: "pending" as "pending" | "approved" | "rejected" | "cancelled",
 }));
 
 vi.mock("../../../lib/domains/series/hooks", () => ({
   useSeriesLifecycle: () => ({
     data: {
-      history: [],
+      history: fixture.history,
       requests: fixture.pending
         ? [
             {
               id: "request-1",
-              status: "pending",
+              status: fixture.requestStatus,
               requestedAt: "2026-10-01T00:00:00.000Z",
               requestNote: null,
               resolutionNote: null,
@@ -66,7 +79,68 @@ function renderPanel() {
   );
 }
 
+function historyEntry(
+  id: string,
+  previousState: "active" | "inactive",
+  nextState: "active" | "inactive",
+  inactiveReason: "dropped" | "hiatus" | "completed" | "other" | null,
+  inactiveReasonDetail: string | null = null,
+) {
+  return {
+    id,
+    previousState,
+    nextState,
+    inactiveReason,
+    inactiveReasonDetail,
+    actorUserId: "actor-1",
+    responsibleUserIdAtEvent: null,
+    responsibleLabelSnapshot: "@responsable histórico",
+    sourceRequestId: null,
+    occurredAt: "2026-10-01T00:00:00.000Z",
+  };
+}
+
 describe("Inactive Series detail actions", () => {
+  it("renders localized historical transitions and the reason snapshot", () => {
+    fixture.capabilities = [];
+    fixture.pending = false;
+    fixture.history = [
+      historyEntry(
+        "inactive-event",
+        "active",
+        "inactive",
+        "hiatus",
+        "Pausa editorial temporal",
+      ),
+      historyEntry("active-event", "inactive", "active", "dropped"),
+    ];
+
+    const markup = renderPanel();
+    expect(markup).toContain("Activa → Inactiva");
+    expect(markup).toContain("Inactiva → Activa");
+    expect(markup).toContain("Motivo: Hiatus");
+    expect(markup).toContain("Detalle: Pausa editorial temporal");
+    expect(markup).toContain("Motivo: Dropeada");
+    expect(markup).toContain("Responsable: @responsable histórico");
+    expect(markup).not.toContain("active → inactive");
+    expect(markup).not.toContain("inactive → active");
+  });
+
+  it.each([
+    ["pending", "Pendiente"],
+    ["approved", "Aprobada"],
+    ["rejected", "Rechazada"],
+    ["cancelled", "Cancelada"],
+  ] as const)("localizes request status %s", (status, label) => {
+    fixture.capabilities = [];
+    fixture.pending = true;
+    fixture.requestStatus = status;
+    fixture.history = [];
+    const markup = renderPanel();
+    expect(markup).toContain(`<strong>${label}</strong>`);
+    expect(markup).not.toContain(`<strong>${status}</strong>`);
+  });
+
   it("shows an available request to Gestor and Uploader without content controls", () => {
     fixture.capabilities = ["series.read", "series.reactivation.request"];
     fixture.pending = false;
@@ -80,6 +154,7 @@ describe("Inactive Series detail actions", () => {
   it("suppresses a duplicate request while one is pending", () => {
     fixture.capabilities = ["series.read", "series.reactivation.request"];
     fixture.pending = true;
+    fixture.requestStatus = "pending";
     const markup = renderPanel();
     expect(markup).toContain("Solicitud pendiente");
     expect(markup).not.toContain(">Solicitar habilitación</button>");
@@ -88,6 +163,7 @@ describe("Inactive Series detail actions", () => {
   it("shows direct reactivation and review only to administrators", () => {
     fixture.capabilities = ["series.read", "series.lifecycle.manage"];
     fixture.pending = true;
+    fixture.requestStatus = "pending";
     const markup = renderPanel();
     expect(markup).toContain("Habilitar serie");
     expect(markup).toContain("Revisar solicitud");
