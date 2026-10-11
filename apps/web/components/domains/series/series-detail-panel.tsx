@@ -5,6 +5,7 @@ import {
   Images,
   Pencil,
   Trash2,
+  TriangleAlert,
   UserRoundPlus,
   X,
 } from "lucide-react";
@@ -245,19 +246,28 @@ export function SeriesDetailPanel({
           </div>
         </dl>
         {canDelete && hasMedia ? (
-          <p
+          <div
             role="status"
-            className="mt-4 rounded-control bg-warning/10 p-3 text-sm text-warning"
+            className="mt-4 flex items-start gap-3 rounded-control border border-warning-border bg-warning-soft p-3 text-sm text-warning"
           >
-            Esta serie tiene imágenes asociadas, por eso no se puede eliminar.
-            Usa «Deshabilitar serie» para conservar su contenido e historial.
-          </p>
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <p>
+              <strong className="font-semibold">
+                Esta serie tiene imágenes asociadas, por eso no se puede
+                eliminar.
+              </strong>{" "}
+              Usa «Deshabilitar serie» para conservar su contenido e historial.
+            </p>
+          </div>
         ) : null}
       </DetailPanelContent>
       <DetailPanelActions>
         {canViewChapters ? (
           <Link
-            className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            className="order-first inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card transition-colors hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             href={`/series/${series.id}/chapters`}
           >
             <Images aria-hidden="true" className="size-4" />
@@ -298,7 +308,7 @@ export function SeriesDetailPanel({
         ) : null}
         {canManageLifecycle && onDeactivate ? (
           <Button
-            variant="secondary"
+            variant="destructive"
             type="button"
             onClick={() => setDeactivating(true)}
           >

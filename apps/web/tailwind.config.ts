@@ -27,6 +27,7 @@ const config: Config = {
         "success-soft": "var(--color-success-soft)",
         warning: "var(--color-warning)",
         "warning-soft": "var(--color-warning-soft)",
+        "warning-border": "var(--color-warning-border)",
         danger: "var(--color-danger)",
         "destructive-surface": "var(--color-destructive-surface)",
         "destructive-border": "var(--color-destructive-border)",

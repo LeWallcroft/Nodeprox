@@ -50,6 +50,24 @@ function renderWithQueryClient(
 }
 
 describe("Chapter management presentation", () => {
+  it("uses the compact shared Card for the Chapter filter toolbar", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/series/[seriesId]/chapters/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toMatch(
+      /<Card\s+density="compact"\s+className="mb-4 flex flex-wrap items-center gap-2 lg:flex-nowrap"\s*>/,
+    );
+    expect(page).not.toContain(
+      'className="mb-4 flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap"',
+    );
+    expect(page).toContain('id="chapter-status-filter"');
+    expect(page).toContain('id="chapter-responsible-filter"');
+    expect(page).toContain("<SearchableCombobox");
+    expect(page).not.toMatch(/<select\s+aria-label="Estado"/);
+  });
+
   it("keeps the global Chapters master-detail contract and contextual actions", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/chapters/page.tsx",
@@ -188,8 +206,16 @@ describe("Chapter management presentation", () => {
     expect(markup).toContain("Eliminar capítulo");
     expect(markup).toContain("Cambiar capítulo");
     expect(markup).toContain("Este capítulo ya contiene imágenes");
+    expect(markup).toContain(
+      "border border-warning-border bg-warning-soft p-3 text-sm text-warning",
+    );
+    expect(markup).toContain("lucide-triangle-alert");
     expect(markup).not.toContain("Subir ZIP");
     expect(markup).toContain("Gestionar capítulo");
+    expect(markup.indexOf("Gestionar capítulo")).toBeLessThan(
+      markup.indexOf("Editar capítulo"),
+    );
+    expect(markup).toContain("order-first inline-flex");
     expect(markup).not.toContain("Publicación e imágenes");
     expect(markup).toContain("bg-destructive-surface");
   });
@@ -236,8 +262,43 @@ describe("Chapter management presentation", () => {
       />,
     );
     expect(markup).toContain(">0</span>");
+    expect(markup).toContain("Este capítulo aún no tiene imágenes.");
     expect(markup).toContain("Subir ZIP");
     expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("does not present an empty notice while the Chapter is processing", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "processing" }}
+        imageCount={0}
+        capabilities={[]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Las imágenes se están procesando.");
+    expect(markup).not.toContain("Este capítulo aún no tiene imágenes.");
+    expect(markup).toContain('role="status"');
+  });
+
+  it("uses history-safe copy for a failed Chapter with zero current images", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "failed" }}
+        imageCount={0}
+        capabilities={[]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("No hay imágenes asociadas actualmente.");
+    expect(markup).not.toContain("nunca");
+    expect(markup).not.toContain("Subir ZIP");
   });
 
   it("gets uploader policy without the admin settings dependency", () => {

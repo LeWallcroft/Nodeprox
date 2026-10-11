@@ -6,6 +6,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
+  TriangleAlert,
   Upload,
   UserRoundPlus,
   X,
@@ -31,6 +32,7 @@ import { EmptyState } from "../../ui/empty-state";
 import { StatusBadge } from "../../ui/status-badge";
 import { UploadForm } from "../uploads/upload-form";
 import { ChapterForm } from "./chapter-form";
+import { resolveChapterImagePresentation } from "./chapter-image-presentation";
 import { WholeChapterReplacementDialog } from "./whole-chapter-replacement-dialog";
 
 function toneForStatus(status: Chapter["status"]) {
@@ -112,9 +114,13 @@ export function ChapterDetailPanel({
   const deleting = chapter.status === "deleting";
   const series = globalChapter?.series;
   const responsible = globalChapter?.responsibleUser;
-  const resolvedImageCount = imageCount ?? globalChapter?.imageCount ?? 0;
+  const resolvedImageCount = imageCount ?? globalChapter?.imageCount;
   const hasExistingImages =
-    resolvedImageCount > 0 || chapter.status === "ready";
+    (resolvedImageCount ?? 0) > 0 || chapter.status === "ready";
+  const imagePresentation = resolveChapterImagePresentation(
+    chapter.status,
+    resolvedImageCount,
+  );
   async function remove() {
     setActionError(null);
     try {
@@ -174,7 +180,7 @@ export function ChapterDetailPanel({
             />
           </DetailField>
           <DetailField label="Imágenes">
-            <span className="font-medium">{resolvedImageCount}</span>
+            <span className="font-medium">{resolvedImageCount ?? "—"}</span>
           </DetailField>
           <DetailField label="Última actualización">
             <span className="text-muted">
@@ -192,6 +198,23 @@ export function ChapterDetailPanel({
             </span>
           </DetailField>
         </dl>
+        {imagePresentation.kind === "empty" ? (
+          <p
+            className="mb-0 mt-4 rounded-control border border-[var(--border-subtle)] bg-surface-elevated p-3 text-sm text-text-secondary"
+            role="status"
+          >
+            {imagePresentation.label}
+          </p>
+        ) : null}
+        {imagePresentation.kind === "processing" ? (
+          <p
+            className="mb-0 mt-4 rounded-control border border-info/30 bg-info/10 p-3 text-sm text-info"
+            aria-live="polite"
+            role="status"
+          >
+            {imagePresentation.label}
+          </p>
+        ) : null}
         {deleting ? (
           <p
             className="mt-5 rounded-control bg-warning-soft p-3 text-sm text-warning"
@@ -202,13 +225,19 @@ export function ChapterDetailPanel({
           </p>
         ) : null}
         {hasExistingImages ? (
-          <p
-            className="mt-4 rounded-control border border-[var(--border-subtle)] bg-warning-soft p-3 text-sm text-warning"
+          <div
+            className="mt-4 flex items-start gap-3 rounded-control border border-warning-border bg-warning-soft p-3 text-sm text-warning"
             role="status"
           >
-            Este capítulo ya contiene imágenes. Para reemplazarlas, utiliza la
-            acción Cambiar capítulo.
-          </p>
+            <TriangleAlert
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <p className="m-0">
+              Este capítulo ya contiene imágenes. Para reemplazarlas, utiliza la
+              acción Cambiar capítulo.
+            </p>
+          </div>
         ) : null}
         {actionError ? (
           <p className="mt-4 text-sm text-danger" role="alert">
@@ -217,6 +246,12 @@ export function ChapterDetailPanel({
         ) : null}
       </DetailPanelContent>
       <DetailPanelActions>
+        <Link
+          className="order-first inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+          href={`/series/${chapter.seriesId}/chapters/${chapter.id}/images`}
+        >
+          <Images aria-hidden="true" className="size-4" /> Gestionar capítulo
+        </Link>
         {canEdit && !deleting ? (
           <Button
             variant="secondary"
@@ -226,12 +261,6 @@ export function ChapterDetailPanel({
             <Pencil aria-hidden="true" className="size-4" /> Editar capítulo
           </Button>
         ) : null}
-        <Link
-          className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card hover:bg-primary-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-          href={`/series/${chapter.seriesId}/chapters/${chapter.id}/images`}
-        >
-          <Images aria-hidden="true" className="size-4" /> Gestionar capítulo
-        </Link>
         {canUpload && !hasExistingImages && !deleting ? (
           <Button
             variant="secondary"

@@ -43,4 +43,20 @@ describe("Chapter image management focus contract", () => {
     expect(page).toContain("stopTableRowSelection");
     expect(page).toContain("cursor-pointer");
   });
+
+  it("distinguishes Chapter loading, active processing, empty, and image-query error states", () => {
+    const page = readFileSync(
+      "apps/web/app/(dashboard)/series/[seriesId]/chapters/[chapterId]/images/page.tsx",
+      "utf8",
+    );
+
+    expect(page).toContain(
+      'chapter.isPending ? <LoadingState label="Cargando capítulo"',
+    );
+    expect(page).toContain('chapter.data.status === "ready" &&');
+    expect(page).toContain('imagePresentation.kind === "processing"');
+    expect(page).toContain("No hay imágenes públicas disponibles actualmente.");
+    expect(page).toContain("publication.refetch()");
+    expect(page).toContain("chapter.refetch()");
+  });
 });

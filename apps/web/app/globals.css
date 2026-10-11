@@ -21,6 +21,11 @@
   --color-success-soft: #21382c;
   --color-warning: #c9a562;
   --color-warning-soft: #46391f;
+  --color-warning-border: color-mix(
+    in srgb,
+    var(--color-warning) 40%,
+    var(--color-warning-soft)
+  );
   --color-danger: #ca7776;
   --color-danger-soft: #492b2b;
   --color-destructive-surface: #22171e;

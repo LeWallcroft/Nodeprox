@@ -30,8 +30,8 @@ import {
   useSelectableSeriesChannels,
   useSeries,
   useSeriesCapabilities,
-  useSeriesList,
   useSeriesLifecycleActions,
+  useSeriesList,
   useSeriesResponsibleCandidates,
   useUpdateSeries,
 } from "../../../lib/domains/series/hooks";
@@ -254,6 +254,7 @@ export default function SeriesPage() {
             {canFilterMySeries ? (
               <Button
                 aria-pressed={mineOnly}
+                className="h-control-lg min-h-0 px-3"
                 disabled={!profile.data?.id}
                 type="button"
                 variant={mineOnly ? "primary" : "secondary"}

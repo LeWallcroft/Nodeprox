@@ -49,6 +49,8 @@ describe("Series management presentation", () => {
 
     expect(panel).toContain("Esta serie tiene imágenes asociadas");
     expect(panel).toContain("Usa «Deshabilitar serie»");
+    expect(panel).toContain("border border-warning-border bg-warning-soft");
+    expect(panel).toContain("TriangleAlert");
     expect(panel).toContain("archivos subidos, historial de almacenamiento");
     expect(panel).toContain(
       'errorMessage(cause, "No se pudo eliminar la serie.")',
@@ -68,6 +70,24 @@ describe("Series management presentation", () => {
     expect(dialog).toContain('role="alert"');
   });
 
+  it("styles Series deactivation as a consequential action", () => {
+    const panel = readFileSync(
+      "apps/web/components/domains/series/series-detail-panel.tsx",
+      "utf8",
+    );
+    const dialog = readFileSync(
+      "apps/web/components/domains/series/deactivate-series-dialog.tsx",
+      "utf8",
+    );
+
+    expect(panel).toMatch(
+      /canManageLifecycle && onDeactivate \? \([\s\S]*?<Button\s+variant="destructive"/,
+    );
+    expect(dialog).toMatch(
+      /<Button\s+variant="destructive"[\s\S]*?>\s*Deshabilitar serie/,
+    );
+  });
+
   it("keeps the final compact master-detail layout contract", () => {
     const page = readFileSync(
       "apps/web/app/(dashboard)/series/page.tsx",
@@ -75,12 +95,16 @@ describe("Series management presentation", () => {
     );
 
     expect(page).toContain('placeholder="Buscar series..."');
+    expect(page.indexOf("aria-pressed={mineOnly}")).toBeLessThan(
+      page.indexOf('placeholder="Buscar series..."'),
+    );
     expect(page).toContain('id="series-status-filter"');
     expect(page).toContain('id="series-responsible-filter"');
     expect(page).not.toContain("Género");
     expect(page).not.toContain("Más filtros");
     expect(page).toContain("lg:flex-nowrap");
     expect(page).toContain("max-w-xs shrink");
+    expect(page).toContain('className="h-control-lg min-h-0 px-3"');
     expect(page).toContain('density="compact"');
     expect(page).toContain("responsibleUser?.id === responsibleId");
     expect(page).toContain("Estado: Activa");
@@ -115,6 +139,9 @@ describe("Series management presentation", () => {
     );
 
     expect(markup).not.toContain("Métricas");
+    expect(markup).toContain(
+      "bg-primary px-3.5 font-medium text-primary-foreground",
+    );
     expect(markup).toContain("h-24 overflow-y-auto");
     expect(markup).toContain("shrink-0");
     expect(markup).not.toContain("12,450");
@@ -132,6 +159,30 @@ describe("Series management presentation", () => {
     expect(page).toContain("listQuery.data.find((series) => series.id)?.id");
     expect(page).toContain("setSelectedSeriesId(initialSeriesId)");
     expect(page).toContain("<SeriesDetailPanel");
+  });
+
+  it("puts primary chapter management before Series editing", () => {
+    const markup = renderToStaticMarkup(
+      <SeriesDetailPanel
+        series={series}
+        capabilities={["series.read", "series.edit", "chapters.create"]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+        candidates={[]}
+        candidatesLoading={false}
+        candidatesError={null}
+        assignmentPending={false}
+        updatePending={false}
+        deletePending={false}
+        onAssignResponsible={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("order-first inline-flex");
+    expect(markup.indexOf("Gestionar capítulos")).toBeLessThan(
+      markup.indexOf("Editar serie"),
+    );
   });
 
   it("shows the responsible account name without a space-consuming initials badge", () => {
@@ -198,6 +249,7 @@ describe("Series management presentation", () => {
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("Acciones");
     expect(markup).toContain("Activa");
+    expect(markup).toContain("tabular-nums");
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('role="button"');
     expect(markup).toContain("cursor-pointer");
