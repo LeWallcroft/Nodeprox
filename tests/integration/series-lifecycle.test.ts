@@ -276,6 +276,15 @@ describe("Series operational lifecycle", () => {
     expect(capabilities.json().capabilities).toContain(
       "series.reactivation.request",
     );
+
+    const request = await app.inject({
+      method: "POST",
+      url: `/series/${unassignedSeriesId}/reactivation-requests`,
+      headers: { cookie: uploaderCookie },
+      payload: { note: "Puedo retomar esta serie" },
+    });
+    expect(request.statusCode).toBe(201);
+    expect(request.json()).toMatchObject({ requestId: expect.any(String) });
   });
 
   it("defaults existing Series to active and enforces database consistency", async () => {

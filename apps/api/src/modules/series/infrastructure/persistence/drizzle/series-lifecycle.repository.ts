@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type {
   NodeProxDatabase,
   NodeProxTransaction,
@@ -7,8 +7,6 @@ import { hasSeriesActiveOperation } from "../../../../../../../../database/serie
 import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   auditLogs,
-  chapterPermissions,
-  chapters,
   series,
   seriesAssignments,
   seriesOperationalHistory,
@@ -244,31 +242,6 @@ export class DrizzleSeriesLifecycleRepository
       if (!locked) return { outcome: "not-found" as const };
       if (!evaluateSeriesReactivationRequest(locked.operationalState).allowed)
         return { outcome: "invalid-transition" as const };
-      if (actor.role === "uploader") {
-        const [assignment] = await tx
-          .select({ id: seriesAssignments.id })
-          .from(seriesAssignments)
-          .where(
-            and(
-              eq(seriesAssignments.seriesId, input.seriesId),
-              eq(seriesAssignments.responsibleUserId, input.actor.userId),
-            ),
-          )
-          .limit(1);
-        const [helper] = await tx
-          .select({ id: chapterPermissions.id })
-          .from(chapterPermissions)
-          .innerJoin(chapters, eq(chapters.id, chapterPermissions.chapterId))
-          .where(
-            and(
-              eq(chapters.seriesId, input.seriesId),
-              eq(chapterPermissions.helperUserId, input.actor.userId),
-              isNull(chapterPermissions.revokedAt),
-            ),
-          )
-          .limit(1);
-        if (!assignment && !helper) return { outcome: "denied" as const };
-      }
       const [pending] = await tx
         .select({ id: seriesReactivationRequests.id })
         .from(seriesReactivationRequests)
