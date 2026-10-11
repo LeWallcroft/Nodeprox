@@ -75,6 +75,9 @@ describe("Series management presentation", () => {
     );
 
     expect(page).toContain('placeholder="Buscar series..."');
+    expect(page.indexOf('placeholder="Buscar series..."')).toBeLessThan(
+      page.indexOf("aria-pressed={mineOnly}"),
+    );
     expect(page).toContain('id="series-status-filter"');
     expect(page).toContain('id="series-responsible-filter"');
     expect(page).not.toContain("Género");
@@ -198,6 +201,7 @@ describe("Series management presentation", () => {
     expect(markup).toContain("uploader@example.com");
     expect(markup).not.toContain("Acciones");
     expect(markup).toContain("Activa");
+    expect(markup).toContain("tabular-nums");
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('role="button"');
     expect(markup).toContain("cursor-pointer");

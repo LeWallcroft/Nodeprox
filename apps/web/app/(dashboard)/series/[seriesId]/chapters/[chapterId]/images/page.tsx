@@ -10,9 +10,11 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { resolveChapterImagePresentation } from "../../../../../../../components/domains/chapters/chapter-image-presentation";
 import { SelectedImageReplacementAction } from "../../../../../../../components/domains/chapters/selected-image-replacement-action";
 import { WholeChapterReplacementDialog } from "../../../../../../../components/domains/chapters/whole-chapter-replacement-dialog";
 import { PageHeader } from "../../../../../../../components/layout/page-header";
+import { Button } from "../../../../../../../components/ui/button";
 import { CopyButton } from "../../../../../../../components/ui/copy-button";
 import {
   getSelectableTableRowProps,
@@ -22,6 +24,7 @@ import { EmptyState } from "../../../../../../../components/ui/empty-state";
 import { ErrorState } from "../../../../../../../components/ui/error-state";
 import { LoadingState } from "../../../../../../../components/ui/loading-state";
 import { Pagination } from "../../../../../../../components/ui/pagination";
+import { StatusBadge } from "../../../../../../../components/ui/status-badge";
 import { hasCapability } from "../../../../../../../lib/auth/visibility";
 import {
   useChapter,
@@ -67,6 +70,12 @@ export default function ChapterImagesPage() {
     capabilities.data?.capabilities,
     "chapters.replace",
   );
+  const imagePresentation = chapter.data
+    ? resolveChapterImagePresentation(
+        chapter.data.status,
+        publication.isSuccess ? images.length : undefined,
+      )
+    : { kind: "unknown" as const };
 
   useEffect(() => {
     if (!publication.isSuccess) return;
@@ -129,22 +138,81 @@ export default function ChapterImagesPage() {
           </div>
         }
       />
-      {publication.isPending ? (
+      {chapter.isPending ? <LoadingState label="Cargando capítulo" /> : null}
+      {chapter.isError ? (
+        <ErrorState
+          title="No se pudo cargar el capítulo"
+          description="No se pudo comprobar el estado de sus imágenes."
+          action={
+            <Button type="button" onClick={() => void chapter.refetch()}>
+              Reintentar
+            </Button>
+          }
+        />
+      ) : null}
+      {chapter.isSuccess && imagePresentation.kind === "processing" ? (
+        <p
+          className="mb-section rounded-control border border-info/30 bg-info/10 p-4 text-sm text-info"
+          aria-live="polite"
+          role="status"
+        >
+          {imagePresentation.label}
+        </p>
+      ) : null}
+      {chapter.isSuccess &&
+      chapter.data.status !== "ready" &&
+      chapter.data.status !== "deleting" &&
+      imagePresentation.kind === "unknown" ? (
+        <section
+          className="mb-section flex flex-wrap items-center gap-2 rounded-control border border-border bg-surface-elevated p-4 text-sm text-text-secondary"
+          role="status"
+        >
+          <span>
+            Las imágenes públicas no están disponibles para el estado actual.
+          </span>
+          <StatusBadge label={chapter.data.status} />
+        </section>
+      ) : null}
+      {chapter.isSuccess && chapter.data.status === "deleting" ? (
+        <p
+          className="mb-section rounded-control border border-warning/30 bg-warning-soft p-4 text-sm text-warning"
+          role="status"
+        >
+          El capítulo está en proceso de eliminación; sus imágenes no están
+          disponibles.
+        </p>
+      ) : null}
+      {chapter.isSuccess &&
+      chapter.data.status === "ready" &&
+      publication.isPending ? (
         <LoadingState label="Cargando imágenes" />
       ) : null}
-      {publication.isError ? (
+      {chapter.isSuccess &&
+      chapter.data.status === "ready" &&
+      publication.isError ? (
         <ErrorState
           title="No se pudieron cargar las imágenes"
           description="La proyección pública no está disponible para este capítulo."
+          action={
+            <Button type="button" onClick={() => void publication.refetch()}>
+              Reintentar
+            </Button>
+          }
         />
       ) : null}
-      {publication.isSuccess && !images.length ? (
+      {chapter.isSuccess &&
+      chapter.data.status === "ready" &&
+      publication.isSuccess &&
+      !images.length ? (
         <EmptyState
           title="Sin imágenes publicadas"
-          description="Este capítulo aún no tiene imágenes publicadas."
+          description="No hay imágenes públicas disponibles actualmente."
         />
       ) : null}
-      {images.length ? (
+      {chapter.isSuccess &&
+      chapter.data.status === "ready" &&
+      publication.isSuccess &&
+      images.length ? (
         <section className="grid min-h-0 gap-card xl:h-[calc(100vh-12rem)] xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-stretch">
           <div className="flex min-h-0 flex-col overflow-x-auto rounded-panel border border-border bg-surface">
             <table className="w-full min-w-[640px] text-sm">

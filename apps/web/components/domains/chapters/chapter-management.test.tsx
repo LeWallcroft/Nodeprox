@@ -236,8 +236,43 @@ describe("Chapter management presentation", () => {
       />,
     );
     expect(markup).toContain(">0</span>");
+    expect(markup).toContain("Este capítulo aún no tiene imágenes.");
     expect(markup).toContain("Subir ZIP");
     expect(markup).not.toContain("Cambiar capítulo");
+  });
+
+  it("does not present an empty notice while the Chapter is processing", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "processing" }}
+        imageCount={0}
+        capabilities={[]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Las imágenes se están procesando.");
+    expect(markup).not.toContain("Este capítulo aún no tiene imágenes.");
+    expect(markup).toContain('role="status"');
+  });
+
+  it("uses history-safe copy for a failed Chapter with zero current images", () => {
+    const markup = renderWithQueryClient(
+      <ChapterDetailPanel
+        chapter={{ ...chapter, status: "failed" }}
+        imageCount={0}
+        capabilities={[]}
+        onClose={() => undefined}
+        onUpdate={async () => undefined}
+        onDelete={async () => undefined}
+      />,
+    );
+
+    expect(markup).toContain("No hay imágenes asociadas actualmente.");
+    expect(markup).not.toContain("nunca");
+    expect(markup).not.toContain("Subir ZIP");
   });
 
   it("gets uploader policy without the admin settings dependency", () => {

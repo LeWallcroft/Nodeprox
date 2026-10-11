@@ -257,7 +257,7 @@ export function SeriesDetailPanel({
       <DetailPanelActions>
         {canViewChapters ? (
           <Link
-            className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-transparent bg-primary px-3.5 font-medium text-primary-foreground shadow-card focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+            className="inline-flex min-h-control items-center justify-center gap-2 rounded-control border border-border bg-surface px-3.5 font-medium text-text transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
             href={`/series/${series.id}/chapters`}
           >
             <Images aria-hidden="true" className="size-4" />

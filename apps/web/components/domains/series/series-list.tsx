@@ -36,8 +36,8 @@ export function SeriesList({
           <th className="p-3">Portada</th>
           <th className="p-3">Serie</th>
           <th className="p-3">Estado</th>
-          <th className="p-3">Capítulos</th>
-          <th className="p-3">Imágenes</th>
+          <th className="p-3 text-right">Capítulos</th>
+          <th className="p-3 text-right">Imágenes</th>
           <th className="p-3">Última actualización</th>
           <th className="p-3">Responsable</th>
         </tr>
@@ -100,10 +100,10 @@ export function SeriesList({
                 <td className="p-3 align-middle">
                   <StatusBadge label="Activa" tone="success" />
                 </td>
-                <td className="p-3 align-middle text-muted">
+                <td className="p-3 text-right align-middle tabular-nums text-muted">
                   {series.chapterCount}
                 </td>
-                <td className="p-3 align-middle text-muted">
+                <td className="p-3 text-right align-middle tabular-nums text-muted">
                   {series.imageCount}
                 </td>
                 <td className="p-3 align-middle whitespace-nowrap text-muted">
