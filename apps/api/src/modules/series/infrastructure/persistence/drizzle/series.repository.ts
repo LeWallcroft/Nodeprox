@@ -518,7 +518,7 @@ export class DrizzleSeriesRepository
         .from(chapters)
         .where(eq(chapters.seriesId, input.seriesId))
         .limit(1);
-      if (chapter) return { outcome: "conflict" as const };
+      if (chapter) return { outcome: "has-chapters" as const };
       const [deleted] = await tx
         .delete(series)
         .where(eq(series.id, input.seriesId))

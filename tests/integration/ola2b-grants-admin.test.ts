@@ -20,6 +20,7 @@ const app = buildApp(
     database: database.db,
     secureCookie: false,
     storage: { provider: "filesystem", uploadMaxSizeBytes: 1024 },
+    discord: { redisUrl: "redis://127.0.0.1:6379" },
   },
 );
 const password = "ola2b-password";
@@ -105,6 +106,48 @@ describe("OLA 2B public grant administration", () => {
     });
     expect(rejected.statusCode).toBe(422);
     expect(rejected.json().code).toBe("validation-failed");
+  });
+
+  it("shows grants issued by the current user in their own authorization list", async () => {
+    const issued = await app.inject({
+      method: "POST",
+      url: "/admin/series-creation-grants",
+      headers: { cookie: adminCookie },
+      payload: { targetUserId: targetId, reference: "issued-by-current-user" },
+    });
+    expect(issued.statusCode).toBe(201);
+
+    const own = await app.inject({
+      method: "GET",
+      url: "/me/series-creation-grants",
+      headers: { cookie: adminCookie },
+    });
+    expect(own.statusCode).toBe(200);
+    expect(own.json()).toContainEqual(
+      expect.objectContaining({
+        id: issued.json().id,
+        targetUser: expect.objectContaining({
+          id: targetId,
+          displayName: "Grant Target",
+          discordUsername: "manual_target",
+        }),
+        direction: "issued",
+        applicable: false,
+      }),
+    );
+
+    const received = await app.inject({
+      method: "GET",
+      url: "/me/series-creation-grants",
+      headers: { cookie: targetCookie },
+    });
+    expect(received.json()).toContainEqual(
+      expect.objectContaining({
+        id: issued.json().id,
+        direction: "received",
+        applicable: true,
+      }),
+    );
   });
 
   it("supports bounded user lookup and rejects unauthorized actors", async () => {

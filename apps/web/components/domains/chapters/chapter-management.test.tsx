@@ -8,6 +8,7 @@ import { UploadQueueProvider } from "../../providers/upload-queue-provider";
 import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
+import { SearchableCombobox } from "../../ui/searchable-combobox";
 import { UploadForm } from "../uploads/upload-form";
 import {
   BulkChapterUploadDialog,
@@ -15,9 +16,9 @@ import {
   resolutionLabel,
 } from "./bulk-chapter-upload-dialog";
 import { ChapterDetailPanel } from "./chapter-detail-panel";
-import { GlobalChapterCreateDialog } from "./global-chapter-create-dialog";
 import { ChapterForm } from "./chapter-form";
 import { ChapterList } from "./chapter-list";
+import { GlobalChapterCreateDialog } from "./global-chapter-create-dialog";
 
 const chapter = {
   id: "chapter-25",
@@ -59,6 +60,13 @@ describe("Chapter management presentation", () => {
     expect(page).toContain("Buscar capítulos...");
     expect(page).toContain('id="global-chapter-series-filter"');
     expect(page).toContain('id="global-chapter-status-filter"');
+    expect(page).toContain('density="compact"');
+    expect(page).toContain(
+      'label="Serie"\n                  labelHidden\n                  compact',
+    );
+    expect(page).toContain(
+      'label="Estado"\n                  labelHidden\n                  compact',
+    );
     expect(page).toContain("didInitializeSelection");
     expect(page).toContain("setSelectedChapterId(initialChapterId)");
     expect(page).toContain("Nuevo capítulo");
@@ -71,6 +79,26 @@ describe("Chapter management presentation", () => {
     expect(page).not.toContain("proyección actual");
     expect(page).not.toContain('role === "admin"');
     expect(page).not.toContain('role === "gestor"');
+  });
+
+  it("keeps compact hidden-label Chapter filters control-height without blank error space", () => {
+    const markup = renderToStaticMarkup(
+      <SearchableCombobox
+        id="compact-filter"
+        label="Estado"
+        labelHidden
+        compact
+        value="all"
+        options={[{ id: "all", label: "Todos" }]}
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("grid gap-0 text-sm");
+    expect(markup).not.toContain('class="block h-4"');
+    expect(markup).toContain(
+      '<label class="sr-only" for="compact-filter">Estado</label>',
+    );
   });
 
   it("uses the existing collaborator grant boundary for the selected Chapter", () => {

@@ -1,3 +1,5 @@
+import type { UserReference } from "@nodeprox/types";
+
 export type SeriesCreationGrantStatus =
   | "available"
   | "reserved"
@@ -11,6 +13,8 @@ export interface SeriesCreationGrantListItem {
   status: SeriesCreationGrantStatus;
   issuedAt: string;
   applicable?: boolean;
+  targetUser?: UserReference;
+  direction?: "issued" | "received";
 }
 
 export interface AdminSeriesCreationGrantListItem
@@ -54,5 +58,3 @@ export interface GrantHistoryItem {
   actor: UserReference | null;
   series: { id: string; title: string; slug: string } | null;
 }
-
-import type { UserReference } from "@nodeprox/types";

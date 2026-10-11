@@ -377,9 +377,7 @@ function AuditRow({
       <td className="truncate p-3 text-xs text-secondary">
         {formatDate(event.createdAt)}
       </td>
-      <td className="truncate p-3 text-sm text-text">
-        {event.actor.email ?? "Sistema"}
-      </td>
+      <td className="truncate p-3 text-sm text-text">{actorName(event)}</td>
       <td className="p-3">
         <AuditActionBadge action={event.action} />
       </td>

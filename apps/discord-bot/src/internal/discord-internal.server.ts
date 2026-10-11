@@ -1,6 +1,13 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer, type Server } from "node:http";
-import { EmbedBuilder, type Client, type GuildBasedChannel } from "discord.js";
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  type Client,
+  EmbedBuilder,
+  type GuildBasedChannel,
+} from "discord.js";
 import type { Logger } from "pino";
 import {
   canViewSeriesChannel,
@@ -17,6 +24,7 @@ type ValidateSeriesChannelRequest = { channelId: string };
 type SeriesGrantNotificationRequest = {
   sourceEventId: string;
   reference: string | null;
+  webUrl: string;
 };
 
 export type DiscordGuildRoleVerification = {
@@ -78,7 +86,16 @@ function validGrantNotification(
       input.sourceEventId,
     ) &&
     (input.reference === null ||
-      (typeof input.reference === "string" && input.reference.length <= 500))
+      (typeof input.reference === "string" && input.reference.length <= 500)) &&
+    typeof input.webUrl === "string" &&
+    (() => {
+      try {
+        const url = new URL(input.webUrl);
+        return url.protocol === "https:" || url.protocol === "http:";
+      } catch {
+        return false;
+      }
+    })()
   );
 }
 
@@ -215,27 +232,69 @@ export function createDiscordInternalServer(input: {
         return;
       }
       try {
-        const user = await input.client.users.fetch(grantDiscordId);
-        const description = [
-          "Tienes una nueva autorización para crear una Serie en NodeProx.",
-          ...(body.reference ? [`Referencia: ${body.reference}`] : []),
-        ].join("\n");
-        const message = await user.send({
+        const channel = await input.client.channels.fetch(
+          input.controlChannelId,
+        );
+        if (
+          !channel ||
+          !("send" in channel) ||
+          typeof channel.send !== "function"
+        ) {
+          input.logger.warn(
+            { channelId: input.controlChannelId },
+            "discord_bot.grant_channel.unavailable",
+          );
+          send(response, 503, { code: "discord-grant-channel-unavailable" });
+          return;
+        }
+        const message = await channel.send({
+          content: `<@${grantDiscordId}>`,
           embeds: [
             new EmbedBuilder()
-              .setTitle("🎟️ Nueva autorización disponible")
-              .setDescription(description),
+              .setColor(0x7764bc)
+              .setTitle("🎉 ¡Ya puedes crear una Serie!")
+              .setURL(body.webUrl)
+              .setDescription(
+                "Tu autorización ya está disponible en NodeProx. Puedes empezar cuando quieras.",
+              )
+              .addFields(
+                {
+                  name: "✨ Permiso disponible",
+                  value: "**Crear una Serie**",
+                  inline: true,
+                },
+                {
+                  name: "🟢 Estado",
+                  value: "Disponible",
+                  inline: true,
+                },
+                ...(body.reference
+                  ? [
+                      {
+                        name: "🏷️ Referencia",
+                        value: body.reference,
+                        inline: false,
+                      },
+                    ]
+                  : []),
+              )
+              .setFooter({ text: "NodeProx · Autorizaciones" }),
           ],
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setLabel("🔗 Abrir NodeProx")
+                .setStyle(ButtonStyle.Link)
+                .setURL(body.webUrl),
+            ),
+          ],
+          allowedMentions: { parse: [], users: [grantDiscordId] },
           nonce: notificationNonce(body.sourceEventId),
           enforceNonce: true,
         });
         send(response, 200, { status: "sent", messageId: message.id });
       } catch (error) {
         const code = discordErrorCode(error);
-        if (code === 50007) {
-          send(response, 200, { status: "skipped", reason: "dm-unavailable" });
-          return;
-        }
         if (code === 10013) {
           send(response, 200, {
             status: "skipped",
@@ -243,8 +302,11 @@ export function createDiscordInternalServer(input: {
           });
           return;
         }
-        input.logger.warn({ err: error }, "discord_bot.grant_dm.send.failed");
-        send(response, 503, { code: "discord-grant-dm-unavailable" });
+        input.logger.warn(
+          { err: error, channelId: input.controlChannelId },
+          "discord_bot.grant_channel.send.failed",
+        );
+        send(response, 503, { code: "discord-grant-channel-unavailable" });
       }
       return;
     }

@@ -4,17 +4,17 @@ import type {
   SessionRepositoryPort,
   UserRepositoryPort,
 } from "../../domain/contracts/authentication.contracts.js";
+import type {
+  AuthenticatedPrincipal,
+  SessionWithUser,
+} from "../../domain/entities/authentication.types.js";
+import { normalizeEmail } from "../../domain/value-objects/email.js";
 import {
   createSessionId,
   createSessionToken,
   hashSessionToken,
 } from "../../infrastructure/crypto/session-token-generator.js";
-import type {
-  AuthenticatedPrincipal,
-  SessionWithUser,
-} from "../../domain/entities/authentication.types.js";
 import type { LoginInput } from "../dto/login.dto.js";
-import { normalizeEmail } from "../../domain/value-objects/email.js";
 
 const INVALID_CREDENTIALS = {
   code: "invalid-credentials",
@@ -88,7 +88,15 @@ export class SessionService {
 
   async resolve(token: string): Promise<{
     principal: AuthenticatedPrincipal;
-    user: Pick<SessionWithUser["user"], "id" | "email" | "status">;
+    user: Pick<
+      SessionWithUser["user"],
+      | "id"
+      | "email"
+      | "status"
+      | "discordUsername"
+      | "displayName"
+      | "avatarUrl"
+    > & { discordLinked: boolean };
     rotatedToken?: string;
   } | null> {
     const result: SessionWithUser | null =
@@ -148,6 +156,10 @@ export class SessionService {
         id: result.user.id,
         email: result.user.email,
         status: result.user.status,
+        discordUsername: result.user.discordUsername ?? null,
+        displayName: result.user.displayName ?? null,
+        avatarUrl: result.user.avatarUrl ?? null,
+        discordLinked: Boolean(result.user.discordId),
       },
       ...(rotatedToken ? { rotatedToken } : {}),
     };

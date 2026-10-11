@@ -1,12 +1,13 @@
 export type DiscordDirectNotificationResult =
   | { status: "sent"; messageId: string }
-  | { status: "skipped"; reason: "dm-unavailable" | "user-unavailable" };
+  | { status: "skipped"; reason: "channel-unavailable" | "user-unavailable" };
 
 export interface DiscordDirectNotificationGateway {
   sendSeriesGrantIssued(input: {
     discordId: string;
     sourceEventId: string;
     reference: string | null;
+    webUrl: string;
   }): Promise<DiscordDirectNotificationResult>;
 }
 

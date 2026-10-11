@@ -17,6 +17,7 @@ import { ErrorState } from "../../../components/ui/error-state";
 import { LoadingState } from "../../../components/ui/loading-state";
 import { Pagination } from "../../../components/ui/pagination";
 import { SearchInput } from "../../../components/ui/search-input";
+import { SearchableCombobox } from "../../../components/ui/searchable-combobox";
 import { hasCapability } from "../../../lib/auth/visibility";
 import { useProfile } from "../../../lib/domains/account/hooks";
 import { useCapabilities } from "../../../lib/domains/auth/hooks";
@@ -39,6 +40,10 @@ import {
   filterSeriesByResponsible,
   toSeriesListItem,
 } from "../../../lib/domains/series/view-model";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 
 const pageSize = 10;
 
@@ -51,7 +56,7 @@ export default function SeriesPage() {
   const [selectedSeriesId, setSelectedSeriesId] = useState<string | null>(null);
   const didInitializeSelection = useRef(false);
   const [query, setQuery] = useState("");
-  const [responsible, setResponsible] = useState("");
+  const [responsibleId, setResponsibleId] = useState("");
   const [mineOnly, setMineOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
@@ -91,26 +96,32 @@ export default function SeriesPage() {
       ? filterSeriesByResponsible(listQuery.data ?? [], profile.data?.id)
       : (listQuery.data ?? []);
     const filtered = filterSeries(baseSeries, query).filter(
-      (series) => !responsible || series.responsibleUser?.email === responsible,
+      (series) =>
+        !responsibleId || series.responsibleUser?.id === responsibleId,
     );
     return filtered.map(toSeriesListItem);
-  }, [listQuery.data, mineOnly, profile.data?.id, query, responsible]);
+  }, [listQuery.data, mineOnly, profile.data?.id, query, responsibleId]);
   const mySeriesCount = useMemo(
     () =>
       filterSeriesByResponsible(listQuery.data ?? [], profile.data?.id).length,
     [listQuery.data, profile.data?.id],
   );
-  const responsibleOptions = useMemo(
-    () =>
-      [
-        ...new Set(
-          (listQuery.data ?? []).flatMap((item) =>
-            item.responsibleUser?.email ? [item.responsibleUser.email] : [],
-          ),
-        ),
-      ].sort(),
-    [listQuery.data],
-  );
+  const responsibleOptions = useMemo(() => {
+    const users = new Map(
+      (listQuery.data ?? [])
+        .flatMap((item) => (item.responsibleUser ? [item.responsibleUser] : []))
+        .map((user) => [user.id, user] as const),
+    );
+    return [...users.values()]
+      .sort((left, right) =>
+        userPrimaryLabel(left).localeCompare(userPrimaryLabel(right)),
+      )
+      .map((user) => ({
+        id: user.id,
+        label: userPrimaryLabel(user),
+        description: userSecondaryLabel(user),
+      }));
+  }, [listQuery.data]);
 
   useEffect(() => {
     if (didInitializeSelection.current || !listQuery.data?.length) return;
@@ -234,7 +245,10 @@ export default function SeriesPage() {
       ) : null}
       {listQuery.isSuccess && listQuery.data.length > 0 ? (
         <section className="grid min-h-0 gap-card xl:grid-cols-[minmax(0,1fr)_minmax(380px,420px)] xl:items-stretch">
-          <Card className="flex flex-wrap items-center gap-2 p-3 lg:flex-nowrap xl:col-span-2">
+          <Card
+            density="compact"
+            className="flex flex-wrap items-end gap-2 lg:flex-nowrap xl:col-span-2"
+          >
             {canFilterMySeries ? (
               <Button
                 aria-pressed={mineOnly}
@@ -261,30 +275,34 @@ export default function SeriesPage() {
                 }}
               />
             </div>
-            <select
-              aria-label="Estado"
-              className="h-control-lg w-36 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-              value="active"
-              onChange={() => undefined}
-            >
-              <option value="active">Estado: Activa</option>
-            </select>
-            <select
-              aria-label="Responsable"
-              className="h-control-lg w-48 shrink-0 rounded-lg border border-border bg-surface px-3 text-sm text-text"
-              value={responsible}
-              onChange={(event) => {
-                setResponsible(event.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">Responsable: Todos</option>
-              {responsibleOptions.map((email) => (
-                <option key={email} value={email}>
-                  {email}
-                </option>
-              ))}
-            </select>
+            <div className="w-full shrink-0 sm:w-40">
+              <SearchableCombobox
+                compact
+                id="series-status-filter"
+                label="Estado"
+                labelHidden
+                options={[{ id: "active", label: "Estado: Activa" }]}
+                value="active"
+                onChange={() => undefined}
+              />
+            </div>
+            <div className="w-full shrink-0 sm:w-56">
+              <SearchableCombobox
+                compact
+                id="series-responsible-filter"
+                label="Responsable"
+                labelHidden
+                options={[
+                  { id: "", label: "Responsable: Todos" },
+                  ...responsibleOptions,
+                ]}
+                value={responsibleId}
+                onChange={(value) => {
+                  setResponsibleId(value);
+                  setPage(1);
+                }}
+              />
+            </div>
           </Card>
           <SeriesList
             items={pageItems}

@@ -86,13 +86,11 @@ describe("guild role verifier internal endpoint", () => {
     }
   });
 
-  it("sends an idempotent direct grant DM using the event nonce", async () => {
+  it("sends an idempotent embedded grant notification to the control channel", async () => {
     const send = vi.fn().mockResolvedValue({ id: "message-1" });
-    const user = { send };
     const client = {
-      users: { fetch: vi.fn().mockResolvedValue(user) },
       guilds: { cache: new Map() },
-      channels: { fetch: vi.fn() },
+      channels: { fetch: vi.fn().mockResolvedValue({ send }) },
       user: null,
     } as never;
     const server = createDiscordInternalServer({
@@ -113,7 +111,11 @@ describe("guild role verifier internal endpoint", () => {
             authorization: "Bearer internal-token",
             "content-type": "application/json",
           },
-          body: JSON.stringify({ sourceEventId, reference: "case-1" }),
+          body: JSON.stringify({
+            sourceEventId,
+            reference: "case-1",
+            webUrl: "https://nodeprox.example",
+          }),
         },
       );
       await expect(response.json()).resolves.toEqual({
@@ -122,9 +124,36 @@ describe("guild role verifier internal endpoint", () => {
       });
       expect(send).toHaveBeenCalledWith(
         expect.objectContaining({
+          content: "<@12345678901234567>",
+          allowedMentions: { parse: [], users: ["12345678901234567"] },
           nonce: notificationNonce(sourceEventId),
           enforceNonce: true,
+          components: expect.any(Array),
         }),
+      );
+      const payload = send.mock.calls[0]?.[0];
+      expect(payload.embeds[0].data.title).toBe(
+        "🎉 ¡Ya puedes crear una Serie!",
+      );
+      expect(payload.embeds[0].data.description).toContain(
+        "Tu autorización ya está disponible en NodeProx.",
+      );
+      expect(payload.embeds[0].data.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "✨ Permiso disponible",
+            value: "**Crear una Serie**",
+          }),
+          expect.objectContaining({ name: "🟢 Estado", value: "Disponible" }),
+          expect.objectContaining({ name: "🏷️ Referencia", value: "case-1" }),
+        ]),
+      );
+      expect(payload.embeds[0].data.url).toBe("https://nodeprox.example");
+      expect(payload.components[0].components[0].data.url).toBe(
+        "https://nodeprox.example",
+      );
+      expect(payload.components[0].components[0].data.label).toBe(
+        "🔗 Abrir NodeProx",
       );
     } finally {
       await server.stop();
@@ -134,9 +163,8 @@ describe("guild role verifier internal endpoint", () => {
   it("accepts the canonical 500-character grant reference within embed limits", async () => {
     const send = vi.fn().mockResolvedValue({ id: "message-500" });
     const client = {
-      users: { fetch: vi.fn().mockResolvedValue({ send }) },
       guilds: { cache: new Map() },
-      channels: { fetch: vi.fn() },
+      channels: { fetch: vi.fn().mockResolvedValue({ send }) },
       user: null,
     } as never;
     const server = createDiscordInternalServer({
@@ -159,13 +187,21 @@ describe("guild role verifier internal endpoint", () => {
           body: JSON.stringify({
             sourceEventId: "00000000-0000-4000-8000-000000000001",
             reference: "r".repeat(500),
+            webUrl: "https://nodeprox.example",
           }),
         },
       );
       expect(response.status).toBe(200);
       expect(send).toHaveBeenCalledOnce();
       const embed = send.mock.calls[0]?.[0].embeds[0];
-      expect(embed.data.description).toContain("r".repeat(500));
+      expect(embed.data.fields).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: "🏷️ Referencia",
+            value: "r".repeat(500),
+          }),
+        ]),
+      );
       expect(embed.data.description.length).toBeLessThanOrEqual(4096);
 
       const tooLong = await fetch(
@@ -179,6 +215,7 @@ describe("guild role verifier internal endpoint", () => {
           body: JSON.stringify({
             sourceEventId: "00000000-0000-4000-8000-000000000002",
             reference: "r".repeat(501),
+            webUrl: "https://nodeprox.example",
           }),
         },
       );

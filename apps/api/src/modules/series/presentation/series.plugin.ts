@@ -122,6 +122,12 @@ const conflict = error(
   409,
   "Conflict",
 );
+const seriesHasChapters = error(
+  "series-has-chapters",
+  "Delete all Chapters in this Series before deleting the Series.",
+  409,
+  "Series still has Chapters",
+);
 const invalidChapterTransition = error(
   "invalid-chapter-transition",
   "The requested Chapter lifecycle transition is not allowed.",
@@ -344,6 +350,7 @@ export function registerSeriesPlugin(
       const result = await seriesService.remove(context(), seriesId);
       if (!result) throw notFound;
       if ("forbidden" in result) throw forbidden;
+      if ("hasChapters" in result) throw seriesHasChapters;
       if ("conflict" in result) throw conflict;
       return reply.code(204).send();
     },

@@ -1,20 +1,16 @@
 import type { SeriesListItem } from "../../../lib/domains/series/view-model";
 import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
+import {
   DataTable,
   DataTableEmptyRow,
   getSelectableTableRowProps,
   stopTableRowSelection,
 } from "../../ui/data-table";
 import { StatusBadge } from "../../ui/status-badge";
-import {
-  userPrimaryLabel,
-  userSecondaryLabel,
-} from "../../../lib/domains/users/presentation";
 import { SeriesCoverPreview } from "./series-cover-preview";
-
-function responsibleInitials(name: string | undefined) {
-  return name ? name.slice(0, 1).toLocaleUpperCase() : "—";
-}
 
 export function SeriesList({
   items,
@@ -115,14 +111,8 @@ export function SeriesList({
                 </td>
                 <td className="p-3 align-middle">
                   {responsibleName ? (
-                    <span className="flex min-w-36 items-center gap-2 text-sm text-muted">
-                      <span
-                        aria-hidden="true"
-                        className="grid size-7 shrink-0 place-items-center rounded-full bg-surface-elevated text-xs font-semibold text-text"
-                      >
-                        {responsibleInitials(responsibleName)}
-                      </span>
-                      <span className="grid min-w-0 max-w-40">
+                    <span className="block min-w-0 max-w-48 text-sm text-muted">
+                      <span className="grid min-w-0">
                         <span className="truncate font-medium text-text">
                           {responsibleName}
                         </span>

@@ -6,6 +6,9 @@ import { DrizzleChapterMediaReplacementRepository } from "../modules/chapter-rep
 import { DrizzleChapterReplacementRepository } from "../modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement.repository.js";
 import { DrizzleChapterReplacementProcessingRepository } from "../modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import { DrizzleChapterDeletionOutboxRepository } from "../modules/chapters/infrastructure/persistence/drizzle/chapter-deletion-outbox.repository.js";
+import { DiscordGrantNotificationHandler } from "../modules/discord/application/discord-grant-notification.handler.js";
+import { DiscordBotDirectNotificationGateway } from "../modules/discord/infrastructure/discord-bot-direct-notification.gateway.js";
+import { DrizzleDiscordLinkedUserRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-linked-user.repository.js";
 import { DomainEventDispatcher } from "../modules/events/application/domain-event-dispatcher.js";
 import {
   DefaultDomainEventHandlerRegistry,
@@ -19,13 +22,10 @@ import { DrizzleImageReplacementOperationRepository } from "../modules/images/in
 import { DrizzleMediaReplacementRepository } from "../modules/images/infrastructure/persistence/drizzle/media-replacement.repository.js";
 import { NotificationProjector } from "../modules/notifications/application/notification-projector.js";
 import { DrizzleNotificationRepository } from "../modules/notifications/infrastructure/persistence/drizzle-notification.repository.js";
-import { DiscordGrantNotificationHandler } from "../modules/discord/application/discord-grant-notification.handler.js";
-import { DiscordBotDirectNotificationGateway } from "../modules/discord/infrastructure/discord-bot-direct-notification.gateway.js";
-import { DrizzleDiscordLinkedUserRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-linked-user.repository.js";
 import { ProcessingOutboxDispatcher } from "../modules/processing/infrastructure/outbox/processing-outbox.dispatcher.js";
 import { BullMQProcessingQueue } from "../modules/processing/infrastructure/queue/bullmq.processing.queue.js";
-import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
 import { DrizzleAdmissionOutboxRepository } from "../modules/uploads/infrastructure/persistence/drizzle/admission-outbox.repository.js";
+import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
 import type { ApiDependencies } from "./create-api-dependencies.js";
 
 type ProcessingConfig = ReturnType<
@@ -75,6 +75,7 @@ export function createApiRuntime(input: {
           dependencies.discord.botInternalUrl,
           dependencies.discord.internalToken,
         ),
+        dependencies.account.publicUrl,
       ),
     );
   }

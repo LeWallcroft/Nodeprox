@@ -26,12 +26,17 @@ describe("DiscordGrantNotificationHandler", () => {
         .fn()
         .mockResolvedValue({ status: "sent", messageId: "m1" }),
     };
-    const handler = new DiscordGrantNotificationHandler(users, notifications);
+    const handler = new DiscordGrantNotificationHandler(
+      users,
+      notifications,
+      "https://nodeprox.example",
+    );
     await handler.handle(event("web"));
     expect(notifications.sendSeriesGrantIssued).toHaveBeenCalledWith({
       discordId: "12345678901234567",
       sourceEventId: event("web").id,
       reference: "case-1",
+      webUrl: "https://nodeprox.example",
     });
     await handler.handle(event("discord"));
     expect(users.findDiscordId).toHaveBeenCalledTimes(1);
@@ -49,7 +54,11 @@ describe("DiscordGrantNotificationHandler", () => {
         .fn()
         .mockRejectedValue(new Error("bot unavailable")),
     };
-    const handler = new DiscordGrantNotificationHandler(users, notifications);
+    const handler = new DiscordGrantNotificationHandler(
+      users,
+      notifications,
+      "https://nodeprox.example",
+    );
     await handler.handle(event("web"));
     expect(notifications.sendSeriesGrantIssued).not.toHaveBeenCalled();
     await expect(handler.handle(event("web"))).rejects.toThrow(

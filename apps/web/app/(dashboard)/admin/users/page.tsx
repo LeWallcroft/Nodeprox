@@ -13,12 +13,12 @@ import {
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { errorMessage } from "../../../../components/domains/feedback";
+import { UserAvatar } from "../../../../components/domains/users/user-avatar";
 import { PageHeader } from "../../../../components/layout/page-header";
 import { AppDialog } from "../../../../components/ui/app-dialog";
 import { Button } from "../../../../components/ui/button";
 import { ConfirmationDialog } from "../../../../components/ui/confirmation-dialog";
 import { ContentImage } from "../../../../components/ui/content-image";
-import { UserAvatar } from "../../../../components/domains/users/user-avatar";
 import { useCopyToClipboard } from "../../../../components/ui/copy-button";
 import {
   DataTable,
@@ -41,16 +41,22 @@ import { useDebouncedAuthorizationValue } from "../../../../lib/domains/authoriz
 import { useSeriesList } from "../../../../lib/domains/series/hooks";
 import type { SeriesListProjection } from "../../../../lib/domains/series/types";
 import {
+  advanceCursorPageHistory,
+  currentPageCursor,
+  initialCursorPageHistory,
+  retreatCursorPageHistory,
+} from "../../../../lib/domains/users/cursor-pagination";
+import {
   useManagedUsersPage,
   useReplaceManagedUserSeries,
   useReviewManagedUser,
 } from "../../../../lib/domains/users/hooks";
+import { userPrimaryLabel } from "../../../../lib/domains/users/presentation";
 import type {
   ManagedUserProjection,
   ManagedUserRole,
   ManagedUserStatus,
 } from "../../../../lib/domains/users/types";
-import { userPrimaryLabel } from "../../../../lib/domains/users/presentation";
 
 const pageSize = 10;
 const roles = [
@@ -71,8 +77,8 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState<ManagedUserRole | "">("");
   const [statusFilter, setStatusFilter] = useState<ManagedUserStatus | "">("");
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [history, setHistory] = useState<string[]>([]);
+  const [cursorHistory, setCursorHistory] = useState(initialCursorPageHistory);
+  const cursor = currentPageCursor(cursorHistory);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<ManagedUserProjection | null>(null);
   const [nextRole, setNextRole] = useState<ManagedUserRole>("uploader");
@@ -97,7 +103,7 @@ export default function AdminUsersPage() {
   const series = useSeriesList();
   const rows = users.data?.items ?? [];
   const selected = rows.find((user) => user.id === selectedId) ?? null;
-  const page = history.length + 1;
+  const page = cursorHistory.length;
   const totalPages = Math.max(
     1,
     Math.ceil((users.data?.total ?? 0) / pageSize),
@@ -108,8 +114,7 @@ export default function AdminUsersPage() {
       setSelectedId(null);
   }, [rows, selectedId]);
   const reset = () => {
-    setCursor(null);
-    setHistory([]);
+    setCursorHistory(initialCursorPageHistory);
     setSelectedId(null);
   };
   async function saveRole() {
@@ -240,16 +245,15 @@ export default function AdminUsersPage() {
                 totalPages={totalPages}
                 totalItems={users.data?.total ?? 0}
                 isLoading={users.isFetching}
-                onPrevious={() =>
-                  setHistory((items) => {
-                    setCursor(items.at(-1) ?? null);
-                    return items.slice(0, -1);
-                  })
-                }
+                onPrevious={() => setCursorHistory(retreatCursorPageHistory)}
                 onNext={() => {
                   if (!users.data?.nextCursor) return;
-                  setHistory((items) => [...items, cursor ?? ""]);
-                  setCursor(users.data.nextCursor);
+                  setCursorHistory((items) =>
+                    advanceCursorPageHistory(
+                      items,
+                      users.data?.nextCursor ?? null,
+                    ),
+                  );
                 }}
               />
             </div>

@@ -1,3 +1,5 @@
+import type { UserReference } from "@nodeprox/types";
+
 export interface ApiRequestOptions extends RequestInit {
   headers?: HeadersInit;
 }
@@ -23,9 +25,7 @@ export interface ProblemDetails {
   errors?: readonly unknown[];
 }
 
-export interface AuthenticatedUserView {
-  id: string;
-  email: string;
+export interface AuthenticatedUserView extends UserReference {
   status?: string;
 }
 

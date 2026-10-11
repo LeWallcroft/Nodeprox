@@ -3,17 +3,17 @@
 import { Images, Pencil, Trash2, UserRoundPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { UserAvatar } from "../users/user-avatar";
+import { ApiError } from "../../../lib/api/types";
 import { hasCapability } from "../../../lib/auth/visibility";
-import {
-  userPrimaryLabel,
-  userSecondaryLabel,
-} from "../../../lib/domains/users/presentation";
 import type {
   Series,
   SeriesInput,
   SeriesResponsibleCandidate,
 } from "../../../lib/domains/series/types";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../lib/domains/users/presentation";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 import { ConfirmationDialog } from "../../ui/confirmation-dialog";
@@ -28,6 +28,7 @@ import { EmptyState } from "../../ui/empty-state";
 import { ErrorState } from "../../ui/error-state";
 import { LoadingState } from "../../ui/loading-state";
 import { StatusBadge } from "../../ui/status-badge";
+import { UserAvatar } from "../users/user-avatar";
 import { AssignSeriesUserDialog } from "./assign-series-user-dialog";
 import { ManageSeriesHelpersDialog } from "./manage-series-helpers-dialog";
 import { SeriesForm } from "./series-form";
@@ -318,7 +319,7 @@ export function SeriesDetailPanel({
       ) : null}
       <ConfirmationDialog
         confirmLabel="Eliminar serie"
-        description="Esta acción elimina la serie si no tiene Chapters asociados y no se puede deshacer."
+        description="Solo se pueden eliminar series sin capítulos. Elimina primero los capítulos asociados y después vuelve a intentarlo."
         error={deleteError}
         open={confirmingDelete}
         pending={deletePending}
@@ -333,9 +334,12 @@ export function SeriesDetailPanel({
             .then(() => setConfirmingDelete(false))
             .catch((cause: unknown) =>
               setDeleteError(
-                cause instanceof Error
-                  ? cause.message
-                  : "No se pudo eliminar la serie.",
+                cause instanceof ApiError &&
+                  cause.code === "series-has-chapters"
+                  ? "No se puede eliminar la serie porque aún tiene capítulos. Elimina primero los capítulos asociados y luego vuelve a intentarlo."
+                  : cause instanceof Error
+                    ? cause.message
+                    : "No se pudo eliminar la serie.",
               ),
             );
         }}

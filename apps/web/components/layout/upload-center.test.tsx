@@ -261,7 +261,7 @@ describe("Upload Center view model and state", () => {
       trackedAt: Date.parse("2026-01-01T09:00:00Z"),
       projection: {
         batchId: "batch-1",
-        status: "running",
+        status: "running" as const,
         items: [
           {
             itemId: "import-1",

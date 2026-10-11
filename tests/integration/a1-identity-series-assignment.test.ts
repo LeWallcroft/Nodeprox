@@ -1,4 +1,8 @@
 import { randomUUID } from "node:crypto";
+import {
+  UploadTransferObjectNotFoundError,
+  type UploadTransferPort,
+} from "@nodeprox/storage/port";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
@@ -14,10 +18,6 @@ import {
   sessions,
   users,
 } from "../../database/schema/index.js";
-import {
-  UploadTransferObjectNotFoundError,
-  type UploadTransferPort,
-} from "@nodeprox/storage/port";
 import {
   FakeDiscordSeriesChannelGateway,
   withM2DSeriesFixtures,
@@ -1510,15 +1510,16 @@ describe("A1 identity, assignment and chapter numbering", () => {
         })
       ).statusCode,
     ).toBe(201);
-    expect(
-      (
-        await app.inject({
-          method: "DELETE",
-          url: `/series/${withChapterId}`,
-          headers: { cookie: adminCookie },
-        })
-      ).statusCode,
-    ).toBe(409);
+    const blockedDeletion = await app.inject({
+      method: "DELETE",
+      url: `/series/${withChapterId}`,
+      headers: { cookie: adminCookie },
+    });
+    expect(blockedDeletion.statusCode).toBe(409);
+    expect(blockedDeletion.json()).toMatchObject({
+      code: "series-has-chapters",
+      detail: "Delete all Chapters in this Series before deleting the Series.",
+    });
   });
 
   it("keeps concurrent responsibility changes in one valid row", async () => {

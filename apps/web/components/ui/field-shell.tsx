@@ -7,6 +7,7 @@ export function FieldShell({
   error,
   required,
   labelHidden = false,
+  compact = false,
   disabled = false,
   readOnly = false,
   children,
@@ -17,13 +18,15 @@ export function FieldShell({
   error?: string | undefined;
   required?: boolean;
   labelHidden?: boolean;
+  compact?: boolean;
   disabled?: boolean | undefined;
   readOnly?: boolean;
   children: ReactNode;
 }) {
+  const compactLayout = compact && !description && !error;
   return (
     <div
-      className={`grid gap-2 text-sm ${disabled ? "opacity-60" : ""} ${readOnly ? "rounded-control bg-surface-hover/40 p-2" : ""}`}
+      className={`grid ${compactLayout ? "gap-0" : "gap-2"} text-sm ${disabled ? "opacity-60" : ""} ${readOnly ? "rounded-control bg-surface-hover/40 p-2" : ""}`}
     >
       <label
         className={labelHidden ? "sr-only" : "font-medium text-text-secondary"}
@@ -51,7 +54,7 @@ export function FieldShell({
         >
           {error}
         </p>
-      ) : (
+      ) : compactLayout ? null : (
         <span aria-hidden="true" className="block h-4" />
       )}
     </div>

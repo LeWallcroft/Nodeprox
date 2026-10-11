@@ -1,7 +1,7 @@
 import {
-  DiscordDirectNotificationUnavailableError,
   type DiscordDirectNotificationGateway,
   type DiscordDirectNotificationResult,
+  DiscordDirectNotificationUnavailableError,
 } from "../application/discord-direct-notification.gateway.js";
 
 export class DiscordBotDirectNotificationGateway
@@ -17,6 +17,7 @@ export class DiscordBotDirectNotificationGateway
     discordId: string;
     sourceEventId: string;
     reference: string | null;
+    webUrl: string;
   }): Promise<DiscordDirectNotificationResult> {
     let response: Response;
     try {
@@ -34,6 +35,7 @@ export class DiscordBotDirectNotificationGateway
           body: JSON.stringify({
             sourceEventId: input.sourceEventId,
             reference: input.reference,
+            webUrl: input.webUrl,
           }),
           signal: AbortSignal.timeout(5_000),
         },
@@ -49,7 +51,7 @@ export class DiscordBotDirectNotificationGateway
       return { status: "sent", messageId: result.messageId };
     if (
       result.status === "skipped" &&
-      (result.reason === "dm-unavailable" ||
+      (result.reason === "channel-unavailable" ||
         result.reason === "user-unavailable")
     )
       return { status: "skipped", reason: result.reason };

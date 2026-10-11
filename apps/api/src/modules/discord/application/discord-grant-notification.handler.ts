@@ -19,6 +19,7 @@ export class DiscordGrantNotificationHandler implements DomainEventHandler {
   constructor(
     private readonly users: DiscordLinkedUserPort,
     private readonly notifications: DiscordDirectNotificationGateway,
+    private readonly webUrl: string,
   ) {}
 
   async handle(event: DomainEventEnvelope) {
@@ -30,6 +31,7 @@ export class DiscordGrantNotificationHandler implements DomainEventHandler {
       discordId,
       sourceEventId: event.id,
       reference: payload.reference ?? null,
+      webUrl: this.webUrl,
     });
   }
 }

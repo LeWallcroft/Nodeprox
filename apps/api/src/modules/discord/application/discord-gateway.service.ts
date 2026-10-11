@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
   auditLogs,
@@ -19,12 +19,12 @@ import {
   projectDiscordAuthorizedRole,
 } from "./discord-authorization-policy.js";
 import type { DiscordGuildRoleVerifier } from "./discord-guild-role-verifier.js";
-import { isTrustedDiscordAvatarUrl } from "./discord-user-profile.gateway.js";
 import type {
   DiscordSeriesChannelGateway,
   SelectableSeriesChannel,
   SeriesChannelValidationResult,
 } from "./discord-series-channel-gateway.js";
+import { isTrustedDiscordAvatarUrl } from "./discord-user-profile.gateway.js";
 
 export type GrantStatus = "available" | "reserved" | "consumed" | "invalidated";
 
@@ -576,19 +576,57 @@ export class DiscordGatewayService {
     requiresGrant = false,
   ) {
     const rows = await this.db
-      .select()
+      .select({
+        id: seriesCreationGrants.id,
+        displayCode: seriesCreationGrants.displayCode,
+        reference: seriesCreationGrants.reference,
+        status: seriesCreationGrants.status,
+        issuedAt: seriesCreationGrants.issuedAt,
+        issuedByUserId: seriesCreationGrants.issuedByUserId,
+        targetUserId: users.id,
+        targetEmail: users.email,
+        targetDisplayName: users.displayName,
+        targetDiscordUsername: users.discordUsername,
+        targetAvatarUrl: users.avatarUrl,
+        targetDiscordLinked: sql<boolean>`${users.discordId} is not null`,
+      })
       .from(seriesCreationGrants)
+      .innerJoin(users, eq(users.id, seriesCreationGrants.targetUserId))
       .where(
-        status
-          ? and(
-              eq(seriesCreationGrants.targetUserId, userId),
-              eq(seriesCreationGrants.status, status),
-            )
-          : eq(seriesCreationGrants.targetUserId, userId),
+        and(
+          or(
+            eq(seriesCreationGrants.targetUserId, userId),
+            eq(seriesCreationGrants.issuedByUserId, userId),
+          ),
+          ...(status ? [eq(seriesCreationGrants.status, status)] : []),
+        ),
+      )
+      .orderBy(
+        desc(seriesCreationGrants.issuedAt),
+        desc(seriesCreationGrants.id),
       );
     return rows.map((grant) => ({
-      ...this.projectGrant(grant),
-      applicable: grant.status === "available" && requiresGrant,
+      id: grant.id,
+      displayCode: grant.displayCode,
+      reference: grant.reference,
+      status: grant.status,
+      issuedAt: grant.issuedAt.toISOString(),
+      targetUser: {
+        id: grant.targetUserId,
+        email: grant.targetEmail,
+        displayName: grant.targetDisplayName,
+        discordUsername: grant.targetDiscordUsername,
+        avatarUrl: grant.targetAvatarUrl,
+        discordLinked: grant.targetDiscordLinked,
+      },
+      direction:
+        grant.issuedByUserId === userId
+          ? ("issued" as const)
+          : ("received" as const),
+      applicable:
+        grant.targetUserId === userId &&
+        grant.status === "available" &&
+        requiresGrant,
     }));
   }
 

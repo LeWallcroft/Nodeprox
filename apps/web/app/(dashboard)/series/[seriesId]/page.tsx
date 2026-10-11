@@ -25,6 +25,10 @@ import {
   useUpdateSeries,
 } from "../../../../lib/domains/series/hooks";
 import type { SeriesInput } from "../../../../lib/domains/series/types";
+import {
+  userPrimaryLabel,
+  userSecondaryLabel,
+} from "../../../../lib/domains/users/presentation";
 
 export default function SeriesDetailPage() {
   const params = useParams<{ seriesId: string }>();
@@ -176,7 +180,15 @@ export default function SeriesDetailPage() {
             Responsable
           </span>
           <p className="mb-0 mt-2 text-muted">
-            {series.responsibleUser?.email ?? "Sin responsable asignado."}
+            {series.responsibleUser
+              ? userPrimaryLabel(series.responsibleUser)
+              : "Sin responsable asignado."}
+            {series.responsibleUser &&
+            userSecondaryLabel(series.responsibleUser) ? (
+              <span className="mt-1 block text-sm text-muted">
+                {userSecondaryLabel(series.responsibleUser)}
+              </span>
+            ) : null}
           </p>
         </div>
         <div className="rounded-xl border border-border bg-surface p-5">
