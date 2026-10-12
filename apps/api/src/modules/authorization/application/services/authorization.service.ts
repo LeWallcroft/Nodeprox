@@ -201,6 +201,8 @@ export class AuthorizationService {
     action: string;
     resourceType: string;
     resourceId?: string;
+    result?: "success" | "rejected" | "failed";
+    requestId?: string;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     await this.audit.append(input);

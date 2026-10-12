@@ -1,4 +1,5 @@
 import type { NodeProxConfig } from "@nodeprox/config";
+import type { NodeProxDiscordProfileSyncConfig } from "@nodeprox/config";
 import type { FastifyBaseLogger } from "fastify";
 import { ChapterMediaActivationService } from "../modules/chapter-replacements/application/chapter-media-activation.service.js";
 import { ChapterReplacementReadyHandler } from "../modules/chapter-replacements/application/chapter-replacement-ready.handler.js";
@@ -26,6 +27,7 @@ import { ProcessingOutboxDispatcher } from "../modules/processing/infrastructure
 import { BullMQProcessingQueue } from "../modules/processing/infrastructure/queue/bullmq.processing.queue.js";
 import { DrizzleAdmissionOutboxRepository } from "../modules/uploads/infrastructure/persistence/drizzle/admission-outbox.repository.js";
 import { DrizzleUploadRepository } from "../modules/uploads/infrastructure/persistence/drizzle/upload.repository.js";
+import { DiscordProfileSyncRuntime } from "../modules/discord/infrastructure/discord-profile-sync.runtime.js";
 import type { ApiDependencies } from "./create-api-dependencies.js";
 
 type ProcessingConfig = ReturnType<
@@ -40,6 +42,7 @@ export function createApiRuntime(input: {
   config: NodeProxConfig;
   processing: ProcessingConfig;
   domainEvents: DomainEventsConfig;
+  discordProfileSync: NodeProxDiscordProfileSyncConfig;
   logger: FastifyBaseLogger;
 }) {
   const { dependencies, config, processing, domainEvents, logger } = input;
@@ -115,6 +118,15 @@ export function createApiRuntime(input: {
     logger,
     domainEvents.DOMAIN_EVENT_DISPATCH_POLL_INTERVAL_MS,
   );
+  const discordProfileSyncRuntime = dependencies.discordProfileSync
+    ? new DiscordProfileSyncRuntime(
+        dependencies.discordProfileSync.coordinator,
+        input.discordProfileSync,
+        logger,
+      )
+    : undefined;
+  dependencies.discordProfileSync?.runner.setLogger(logger);
+  dependencies.discordProfileSync?.coordinator.setLogger(logger);
   let started = false;
   let stopping: Promise<void> | undefined;
   return {
@@ -123,12 +135,14 @@ export function createApiRuntime(input: {
       started = true;
       processingDispatcher.start();
       eventRuntime.start();
+      discordProfileSyncRuntime?.start();
     },
     stop() {
       if (stopping) return stopping;
       stopping = (async () => {
         processingDispatcher.stop();
         await eventRuntime.stop(domainEvents.DOMAIN_EVENT_DISPATCH_LEASE_MS);
+        await discordProfileSyncRuntime?.stop();
       })();
       return stopping;
     },

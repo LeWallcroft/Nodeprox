@@ -52,6 +52,14 @@ export const PROXY_ROUTE_RULES: readonly ProxyRouteRule[] = [
     methods: GET,
   },
   { pattern: "admin/settings", methods: ["GET", "PATCH"] },
+  {
+    pattern: "admin/maintenance/discord-profiles",
+    methods: GET,
+  },
+  {
+    pattern: "admin/maintenance/discord-profiles/sync",
+    methods: POST,
+  },
   { pattern: "admin/storage/profiles", methods: ["GET", "POST"] },
   { pattern: /^admin\/storage\/profiles\/[^/]+$/, methods: ["GET", "PATCH"] },
   { pattern: /^admin\/storage\/profiles\/[^/]+\/readiness$/, methods: GET },

@@ -26,6 +26,9 @@ export const users = pgTable(
     discordUsername: varchar("discord_username", { length: 64 }),
     discordId: varchar("discord_id", { length: 32 }),
     discordLinkedAt: timestamp("discord_linked_at", { withTimezone: true }),
+    discordProfileSyncedAt: timestamp("discord_profile_synced_at", {
+      withTimezone: true,
+    }),
     displayName: varchar("display_name", { length: 120 }),
     avatarUrl: text("avatar_url"),
     preferences: jsonb("preferences").$type<Record<string, unknown>>(),

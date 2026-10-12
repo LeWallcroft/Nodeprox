@@ -150,6 +150,25 @@ const domainEventDispatchConfigSchema = z.object({
     .positive()
     .default(300000),
 });
+const discordProfileSyncConfigSchema = z.object({
+  DISCORD_PROFILE_SYNC_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(900000)
+    .default(3600000),
+  DISCORD_PROFILE_SYNC_BATCH_SIZE: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(200),
+  DISCORD_PROFILE_SYNC_CONCURRENCY: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(16)
+    .default(5),
+});
 
 export type NodeProxConfig = z.infer<typeof configSchema>;
 export type NodeProxDatabaseConfig = z.infer<typeof databaseConfigSchema>;
@@ -181,6 +200,9 @@ export type NodeProxMediaEffectsConfig = z.infer<
 export type NodeProxDomainEventDispatchConfig = z.infer<
   typeof domainEventDispatchConfigSchema
 >;
+export type NodeProxDiscordProfileSyncConfig = z.infer<
+  typeof discordProfileSyncConfigSchema
+>;
 
 export {
   adminBootstrapConfigSchema,
@@ -188,6 +210,7 @@ export {
   configSchema,
   databaseConfigSchema,
   domainEventDispatchConfigSchema,
+  discordProfileSyncConfigSchema,
   mediaEffectsConfigSchema,
   processingConfigSchema,
   uploadAdmissionConfigSchema,
@@ -226,6 +249,12 @@ export function loadDomainEventDispatchConfig(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): NodeProxDomainEventDispatchConfig {
   return domainEventDispatchConfigSchema.parse(env);
+}
+
+export function loadDiscordProfileSyncConfig(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): NodeProxDiscordProfileSyncConfig {
+  return discordProfileSyncConfigSchema.parse(env);
 }
 
 export function loadDatabaseConfig(

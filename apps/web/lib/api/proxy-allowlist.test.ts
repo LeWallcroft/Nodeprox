@@ -19,6 +19,8 @@ describe("same-origin proxy allowlist", () => {
       ["admin/users", ["GET"]],
       ["admin/users/id", ["PATCH"]],
       ["admin/settings", ["GET", "PATCH"]],
+      ["admin/maintenance/discord-profiles", ["GET"]],
+      ["admin/maintenance/discord-profiles/sync", ["POST"]],
       ["admin/series-creation-grants/id/invalidate", ["POST"]],
       ["series", ["GET", "POST"]],
       ["series/id", ["GET", "PATCH", "DELETE"]],

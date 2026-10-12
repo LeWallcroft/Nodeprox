@@ -18,6 +18,8 @@ import { registerChapterReplacementPlugin } from "./modules/chapter-replacements
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
 import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
+import { DiscordProfileMaintenanceService } from "./modules/discord/application/discord-profile-maintenance.service.js";
+import { registerDiscordProfileMaintenancePlugin } from "./modules/discord/presentation/discord-profile-maintenance.plugin.js";
 import { registerSeriesGrantAdminPlugin } from "./modules/discord/presentation/series-grant-admin.plugin.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -99,6 +101,17 @@ export function buildApp(
           service: discord.admin,
           authentication,
         });
+    }
+    if (services.discordProfileSync) {
+      registerDiscordProfileMaintenancePlugin(app, {
+        service: new DiscordProfileMaintenanceService(
+          authorization,
+          services.discordProfileSync.repository,
+          services.discordProfileSync.coordinator,
+          services.discordProfileSync.config.DISCORD_PROFILE_SYNC_INTERVAL_MS,
+        ),
+        authentication,
+      });
     }
     registerIdentityPlugin(app, database, authentication, authorization);
     if (!services.notificationRepository)
