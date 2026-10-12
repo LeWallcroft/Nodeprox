@@ -666,8 +666,9 @@ describe("Series operational lifecycle", () => {
       .select({ id: auditLogs.id, action: auditLogs.action })
       .from(auditLogs)
       .where(eq(auditLogs.resourceId, mediaSeriesId));
-    expect(deletionAudits.filter((entry) => entry.action === "series.deleted"))
-      .toHaveLength(0);
+    expect(
+      deletionAudits.filter((entry) => entry.action === "series.deleted"),
+    ).toHaveLength(0);
     expect(deletionAudits).toHaveLength(previousDeleteAudits.length);
     expect(
       await database.db

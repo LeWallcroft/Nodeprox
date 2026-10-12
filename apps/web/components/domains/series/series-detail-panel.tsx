@@ -375,9 +375,9 @@ export function SeriesDetailPanel({
         description="Se eliminarán la serie y sus capítulos vacíos. La acción se bloqueará si hay imágenes, archivos subidos, historial de almacenamiento o una carga o reemplazo en curso. En ese caso podrás deshabilitar la serie para conservar su contenido."
         error={deleteError}
         confirmActionVisible={!deleteBlockedByMedia}
-        alternativeAction={
-          deleteBlockedByMedia && onDeactivate
-            ? {
+        {...(deleteBlockedByMedia && onDeactivate
+          ? {
+              alternativeAction: {
                 label: "Deshabilitar serie",
                 onClick: () => {
                   setConfirmingDelete(false);
@@ -385,9 +385,9 @@ export function SeriesDetailPanel({
                   setDeleteBlockedByMedia(false);
                   setDeactivating(true);
                 },
-              }
-            : undefined
-        }
+              },
+            }
+          : {})}
         open={confirmingDelete}
         pending={deletePending}
         title="¿Eliminar serie?"
@@ -406,7 +406,9 @@ export function SeriesDetailPanel({
               setDeleteBlockedByMedia(
                 cause instanceof ApiError && cause.code === "series-has-media",
               );
-              setDeleteError(errorMessage(cause, "No se pudo eliminar la serie."));
+              setDeleteError(
+                errorMessage(cause, "No se pudo eliminar la serie."),
+              );
             });
         }}
       />

@@ -3,6 +3,7 @@
 import { Plus, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { errorMessage } from "../../../components/domains/feedback";
 import { SeriesContextPanel } from "../../../components/domains/series/series-context-panel";
 import { SeriesDetailPanel } from "../../../components/domains/series/series-detail-panel";
 import { SeriesForm } from "../../../components/domains/series/series-form";
