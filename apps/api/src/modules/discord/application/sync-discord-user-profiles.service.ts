@@ -5,15 +5,18 @@ export class SyncDiscordUserProfilesService {
   constructor(
     private readonly repository: DiscordProfileRepository,
     private readonly profiles: DiscordUserProfileGateway,
+    private readonly clock: () => Date = () => new Date(),
   ) {}
 
   async syncBatch(input: {
     afterId?: string;
     limit: number;
     concurrency: number;
+    staleBefore?: Date;
   }): Promise<{
     processed: number;
-    updated: number;
+    changed: number;
+    refreshed: number;
     skipped: number;
     failed: number;
     nextCursor: string | null;
@@ -21,7 +24,8 @@ export class SyncDiscordUserProfilesService {
   }> {
     const rows = await this.repository.listLinked(input);
     let next = 0;
-    let updated = 0;
+    let changed = 0;
+    let refreshed = 0;
     let skipped = 0;
     const failures: { userId: string; code: string }[] = [];
     const worker = async () => {
@@ -34,15 +38,15 @@ export class SyncDiscordUserProfilesService {
             skipped += 1;
             continue;
           }
-          if (
-            await this.repository.updateDiscordProfile({
-              userId: row.userId,
-              expectedDiscordId: row.discordId,
-              discordUsername: profile.username,
-              avatarUrl: profile.avatarUrl,
-            })
-          )
-            updated += 1;
+          const result = await this.repository.updateDiscordProfile({
+            userId: row.userId,
+            expectedDiscordId: row.discordId,
+            discordUsername: profile.username,
+            avatarUrl: profile.avatarUrl,
+            syncedAt: this.clock(),
+          });
+          if (result === "changed") changed += 1;
+          else if (result === "refreshed") refreshed += 1;
           else skipped += 1;
         } catch (error) {
           failures.push({
@@ -62,7 +66,8 @@ export class SyncDiscordUserProfilesService {
     await Promise.all(Array.from({ length: concurrency }, worker));
     return {
       processed: rows.length,
-      updated,
+      changed,
+      refreshed,
       skipped,
       failed: failures.length,
       nextCursor:

@@ -75,6 +75,7 @@ export interface DiscordIdentityLinkWriter {
     discordId: string;
     discordUsername: string;
     discordAvatarUrl: string | null;
+    syncedAt: Date;
   }): Promise<
     "linked" | "discord-id-already-linked" | "discord-link-already-exists"
   >;
@@ -334,6 +335,7 @@ export class DiscordGatewayService {
             isTrustedDiscordAvatarUrl(input.discordAvatarUrl)
               ? input.discordAvatarUrl
               : null,
+          syncedAt: new Date(),
         });
         if (linkResult === "discord-id-already-linked")
           throw new DiscordGatewayError("discord-id-already-linked");

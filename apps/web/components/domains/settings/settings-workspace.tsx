@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ProductSettings } from "../../../lib/domains/settings/types";
 import { Input } from "../../ui/input";
 import { DiscordAuthorizationConfiguration } from "../discord/discord-authorization-configuration";
+import { DiscordProfileSyncCard } from "../discord/discord-profile-sync-card";
 import { MaintenancePanel } from "./maintenance-panel";
 import { ProductSettingsSection } from "./product-settings-section";
 import { SettingsLocalNav, type SettingsSectionId } from "./settings-local-nav";
@@ -232,6 +233,7 @@ export function SettingsWorkspace({
                 </div>
               </div>
               <DiscordAuthorizationConfiguration />
+              <DiscordProfileSyncCard />
             </div>
           ) : null}
           {selected === "maintenance" ? (

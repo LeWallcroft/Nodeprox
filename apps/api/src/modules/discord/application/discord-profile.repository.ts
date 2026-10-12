@@ -2,6 +2,7 @@ export interface DiscordProfileRepository {
   listLinked(input: {
     afterId?: string;
     limit: number;
+    staleBefore?: Date;
   }): Promise<readonly { userId: string; discordId: string }[]>;
 
   updateDiscordProfile(input: {
@@ -9,5 +10,13 @@ export interface DiscordProfileRepository {
     expectedDiscordId: string;
     discordUsername: string;
     avatarUrl: string | null;
-  }): Promise<boolean>;
+    syncedAt: Date;
+  }): Promise<"changed" | "refreshed" | "link-changed">;
+
+  getSyncStatus(input: { staleBefore: Date }): Promise<{
+    linkedUsers: number;
+    missingAvatar: number;
+    staleProfiles: number;
+    oldestSyncedAt: Date | null;
+  }>;
 }

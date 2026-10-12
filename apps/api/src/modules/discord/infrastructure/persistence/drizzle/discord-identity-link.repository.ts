@@ -12,6 +12,7 @@ export class DrizzleDiscordIdentityLinkRepository
     discordId: string;
     discordUsername: string;
     discordAvatarUrl: string | null;
+    syncedAt: Date;
   }): Promise<
     "linked" | "discord-id-already-linked" | "discord-link-already-exists"
   > {
@@ -22,8 +23,9 @@ export class DrizzleDiscordIdentityLinkRepository
           discordId: input.discordId,
           discordUsername: input.discordUsername,
           avatarUrl: input.discordAvatarUrl,
-          discordLinkedAt: new Date(),
-          updatedAt: new Date(),
+          discordLinkedAt: input.syncedAt,
+          discordProfileSyncedAt: input.syncedAt,
+          updatedAt: input.syncedAt,
         })
         .where(and(eq(users.id, input.userId), isNull(users.discordId)))
         .returning({ id: users.id });

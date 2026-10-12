@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getProductSettings, updateProductSettings } from "./api";
 
 const settingsKey = ["admin", "settings"] as const;
-
 export function useProductSettings() {
   return useQuery({
     queryKey: settingsKey,

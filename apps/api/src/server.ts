@@ -1,6 +1,7 @@
 import {
   loadConfig,
   loadDomainEventDispatchConfig,
+  loadDiscordProfileSyncConfig,
   loadProcessingConfig,
   loadStorageConfig,
 } from "@nodeprox/config";
@@ -10,8 +11,10 @@ import { createApiRuntime } from "./composition/create-api-runtime.js";
 import { fatalDiagnostic } from "../../../observability/sanitize-operational-text.js";
 
 const config = loadConfig();
+const discordProfileSyncConfig = loadDiscordProfileSyncConfig();
 const dependencies = createApiDependencies({
   config,
+  discordProfileSyncConfig,
   secureCookie: config.NODE_ENV === "production",
   storage: loadStorageConfig(),
   publicMediaOrigin: config.PUBLIC_MEDIA_ORIGIN,
@@ -29,6 +32,7 @@ const runtime = createApiRuntime({
   config,
   processing: loadProcessingConfig(),
   domainEvents: loadDomainEventDispatchConfig(),
+  discordProfileSync: discordProfileSyncConfig,
   logger: app.log,
 });
 runtime.start();

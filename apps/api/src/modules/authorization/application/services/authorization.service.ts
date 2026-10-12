@@ -9,16 +9,16 @@ import {
 } from "../../domain/permissions.js";
 import type { AuthorizationPolicy } from "../../domain/policies/authorization.policy.js";
 import type {
+  AuthorizationFailureCode,
+  AuthorizationResult,
+  AuthorizationTechnicalFailure,
+} from "../authorization-result.js";
+import type {
   AuthorizationAuditRepository,
   AuthorizationConfigRepository,
   AuthorizationRoleRepository,
   ResourceAuthorizationPort,
 } from "../ports/authorization.ports.js";
-import type {
-  AuthorizationFailureCode,
-  AuthorizationResult,
-  AuthorizationTechnicalFailure,
-} from "../authorization-result.js";
 import type { AuthorizationFailureReporter } from "../ports/authorization-failure-reporter.port.js";
 
 export class AuthorizationService {
@@ -201,6 +201,9 @@ export class AuthorizationService {
     action: string;
     resourceType: string;
     resourceId?: string;
+    result?: "success" | "rejected" | "failed";
+    requestId?: string;
+    reasonCode?: string;
     metadata?: Record<string, unknown>;
   }): Promise<void> {
     await this.audit.append(input);

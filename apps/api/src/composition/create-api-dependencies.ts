@@ -1,9 +1,11 @@
 import { join } from "node:path";
 import {
   DEFAULT_PUBLIC_MEDIA_ORIGIN,
+  loadDiscordProfileSyncConfig,
   loadUploadAdmissionConfig,
   loadStorageProfileConfig,
   type NodeProxConfig,
+  type NodeProxDiscordProfileSyncConfig,
   type NodeProxStorageConfig,
   type NodeProxStorageProfileConfig,
 } from "@nodeprox/config";
@@ -41,14 +43,21 @@ import { DrizzleChapterReplacementRepository } from "../modules/chapter-replacem
 import { DrizzleChapterReplacementProcessingRepository } from "../modules/chapter-replacements/infrastructure/persistence/drizzle/chapter-replacement-processing.repository.js";
 import type { ChapterPermissionService } from "../modules/chapters/application/services/chapter-permission.service.js";
 import { DiscordGatewayService } from "../modules/discord/application/discord-gateway.service.js";
+import type { DiscordProfileRepository } from "../modules/discord/application/discord-profile.repository.js";
+import { DiscordProfileSyncCoordinator } from "../modules/discord/application/discord-profile-sync.coordinator.js";
+import { DiscordProfileSyncRunner } from "../modules/discord/application/discord-profile-sync.runner.js";
 import { DiscordRoleConfigurationService } from "../modules/discord/application/discord-role-configuration.service.js";
+import { SyncDiscordUserProfilesService } from "../modules/discord/application/sync-discord-user-profiles.service.js";
 import type { DiscordSeriesChannelGateway } from "../modules/discord/application/discord-series-channel-gateway.js";
 import { ListSeriesCreationGrantsForAdministrationService } from "../modules/discord/application/list-series-creation-grants-for-administration.service.js";
 import { WebSeriesCreationGrantService } from "../modules/discord/application/web-series-creation-grant.service.js";
 import { DiscordBotGuildRoleVerifier } from "../modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
 import { DiscordBotSeriesChannelGateway } from "../modules/discord/infrastructure/discord-bot-series-channel-gateway.js";
+import { DiscordBotUserProfileGateway } from "../modules/discord/infrastructure/discord-bot-user-profile.gateway.js";
+import { PostgresDiscordProfileSyncLease } from "../modules/discord/infrastructure/postgres/postgres-discord-profile-sync.lease.js";
 import { DrizzleDiscordIdentityLinkRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-identity-link.repository.js";
 import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
+import { DrizzleDiscordProfileRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-profile.repository.js";
 import { RedisLinkCodeStore } from "../modules/discord/infrastructure/redis-link-code.store.js";
 import { DrizzleDomainEventOutbox } from "../modules/events/infrastructure/persistence/drizzle-domain-event-outbox.js";
 import { CompleteImageReplacementService } from "../modules/images/application/services/complete-image-replacement.service.js";
@@ -85,6 +94,12 @@ export interface AppDependencies {
   activeStorageProfile?: ActiveStorageProfilePort;
   publicMediaOrigin?: string;
   operationAuditWriter?: OperationAuditWriter;
+  discordProfileSync?: {
+    repository: DiscordProfileRepository;
+    runner: DiscordProfileSyncRunner;
+    coordinator: DiscordProfileSyncCoordinator;
+    config: NodeProxDiscordProfileSyncConfig;
+  };
   seriesChannelGateway?: DiscordSeriesChannelGateway;
   discord?: {
     internalToken?: string | undefined;
@@ -97,6 +112,7 @@ export interface AppDependencies {
 
 export type ApiCompositionInput = AppDependencies & {
   config?: NodeProxConfig;
+  discordProfileSyncConfig?: NodeProxDiscordProfileSyncConfig;
   environment?: Readonly<Record<string, string | undefined>>;
 };
 
@@ -108,6 +124,45 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
       ? createDatabase(input.config.DATABASE_URL)
       : undefined;
   const database = input.database ?? connection?.db;
+  const discordProfileSyncConfig =
+    input.discordProfileSyncConfig ?? loadDiscordProfileSyncConfig(environment);
+  const discordProfileRepository = database
+    ? new DrizzleDiscordProfileRepository(database)
+    : undefined;
+  const discordProfileSyncRunner = discordProfileRepository
+    ? new DiscordProfileSyncRunner(
+        new SyncDiscordUserProfilesService(
+          discordProfileRepository,
+          new DiscordBotUserProfileGateway(
+            input.discord?.botInternalUrl ??
+              environment.DISCORD_BOT_INTERNAL_URL ??
+              "http://127.0.0.1:3002",
+            input.discord?.internalToken ??
+              environment.DISCORD_BOT_INTERNAL_TOKEN ??
+              "",
+          ),
+        ),
+      )
+    : undefined;
+  const discordProfileSync =
+    input.discordProfileSync ??
+    (connection && discordProfileRepository && discordProfileSyncRunner
+      ? {
+          repository: discordProfileRepository,
+          runner: discordProfileSyncRunner,
+          coordinator: new DiscordProfileSyncCoordinator(
+            new PostgresDiscordProfileSyncLease(connection.sql),
+            discordProfileSyncRunner,
+            {
+              batchSize:
+                discordProfileSyncConfig.DISCORD_PROFILE_SYNC_BATCH_SIZE,
+              concurrency:
+                discordProfileSyncConfig.DISCORD_PROFILE_SYNC_CONCURRENCY,
+            },
+          ),
+          config: discordProfileSyncConfig,
+        }
+      : undefined);
   const storageConfig = input.storage ?? {
     provider: "filesystem" as const,
     uploadMaxSizeBytes: 536870912,
@@ -209,6 +264,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
     operationAuditWriter:
       input.operationAuditWriter ??
       (database ? new DrizzleOperationAuditWriter(database) : undefined),
+    discordProfileSync,
     domainEvents: new DrizzleDomainEventOutbox(),
     notificationRepository: database
       ? new DrizzleNotificationRepository(database)

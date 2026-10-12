@@ -16,8 +16,10 @@ import { registerAuthorization } from "./modules/authorization/presentation/auth
 import { registerSettingsPlugin } from "./modules/authorization/presentation/settings.plugin.js";
 import { registerChapterReplacementPlugin } from "./modules/chapter-replacements/presentation/chapter-replacement.plugin.js";
 import { registerChapterPermissionPlugin } from "./modules/chapters/presentation/chapter-permission.plugin.js";
+import { DiscordProfileSyncAdministrationService } from "./modules/discord/application/discord-profile-sync-administration.service.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
 import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
+import { registerDiscordProfileSyncAdminPlugin } from "./modules/discord/presentation/discord-profile-sync-admin.plugin.js";
 import { registerSeriesGrantAdminPlugin } from "./modules/discord/presentation/series-grant-admin.plugin.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -99,6 +101,17 @@ export function buildApp(
           service: discord.admin,
           authentication,
         });
+    }
+    if (services.discordProfileSync) {
+      registerDiscordProfileSyncAdminPlugin(app, {
+        service: new DiscordProfileSyncAdministrationService(
+          authorization,
+          services.discordProfileSync.repository,
+          services.discordProfileSync.coordinator,
+          services.discordProfileSync.config.DISCORD_PROFILE_SYNC_INTERVAL_MS,
+        ),
+        authentication,
+      });
     }
     registerIdentityPlugin(app, database, authentication, authorization);
     if (!services.notificationRepository)

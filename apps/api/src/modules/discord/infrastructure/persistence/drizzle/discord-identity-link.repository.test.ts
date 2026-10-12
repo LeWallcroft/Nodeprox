@@ -17,6 +17,7 @@ describe("DrizzleDiscordIdentityLinkRepository", () => {
     discordId: "discord-1",
     discordUsername: "user",
     discordAvatarUrl: null,
+    syncedAt: new Date("2026-10-12T00:00:00.000Z"),
   };
 
   it("maps only the known Discord identity unique constraint", async () => {
