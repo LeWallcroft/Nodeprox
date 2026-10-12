@@ -79,7 +79,10 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
     if (dependencies.installSignalHandlers ?? true)
       registerShutdownHandlers(stop);
 
-    const authorizeSeries = new AuthorizeSeriesWorkflow(api);
+    const authorizeSeries = new AuthorizeSeriesWorkflow(
+      api,
+      config.APP_PUBLIC_URL,
+    );
     const configuration = new OperationalPanel(api, authorizeSeries);
     registerInteractionRouter({
       client,

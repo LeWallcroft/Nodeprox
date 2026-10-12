@@ -110,6 +110,7 @@ describe("Discord bot startup", () => {
     DISCORD_GUILD_ID: "guild-id",
     DISCORD_CONTROL_CHANNEL_ID: "channel-id",
     NODEPROX_INTERNAL_API_URL: "http://127.0.0.1:3001",
+    APP_PUBLIC_URL: "https://app.nodeprox.org",
     DISCORD_BOT_INTERNAL_TOKEN: "internal-token",
     DISCORD_BOT_INTERNAL_HOST: "127.0.0.1",
     DISCORD_BOT_INTERNAL_PORT: 0,
