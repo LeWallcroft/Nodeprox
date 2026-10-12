@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import { KnownPersistenceConflictError } from "../../../../../../database/postgres-error.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
@@ -103,12 +104,6 @@ function context() {
   return { userId: value.userId, sessionId: value.sessionId };
 }
 
-function isUnique(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUnique(error.cause);
-}
-
 async function presentIdentity<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work();
@@ -151,7 +146,11 @@ export function registerIdentityPlugin(
         .code(201)
         .send(await service.register(parse(registrationSchema, request.body)));
     } catch (error) {
-      if (isUnique(error)) throw conflict();
+      if (
+        error instanceof KnownPersistenceConflictError &&
+        error.constraint === "users_email_unique"
+      )
+        throw conflict();
       throw error;
     }
   });

@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { isUniqueConstraint } from "../../../../../../../../database/postgres-error.js";
 import {
   auditLogs,
   storageProfiles,
@@ -70,7 +71,14 @@ export class DrizzleStorageProfileRepository
         return profile;
       });
     } catch (error) {
-      if (isUniqueViolation(error)) throw new StorageProfileConflictError();
+      if (
+        isUniqueConstraint(error, [
+          "storage_profiles_public_hostname_unique",
+          "storage_profiles_hostname_label_unique",
+          "storage_profiles_single_active",
+        ])
+      )
+        throw new StorageProfileConflictError();
       throw error;
     }
   }
@@ -151,18 +159,15 @@ export class DrizzleStorageProfileRepository
         return profile;
       });
     } catch (error) {
-      if (isUniqueViolation(error)) throw new StorageProfileConflictError();
+      if (
+        isUniqueConstraint(error, [
+          "storage_profiles_public_hostname_unique",
+          "storage_profiles_hostname_label_unique",
+          "storage_profiles_single_active",
+        ])
+      )
+        throw new StorageProfileConflictError();
       throw error;
     }
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  let current = error;
-  for (let depth = 0; depth < 4; depth++) {
-    if (typeof current !== "object" || current === null) return false;
-    if ("code" in current && current.code === "23505") return true;
-    current = "cause" in current ? current.cause : null;
-  }
-  return false;
 }

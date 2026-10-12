@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { isUniqueConstraint } from "../../../../../../../../database/postgres-error.js";
 import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   chapterReplacementOperations,
@@ -70,7 +71,12 @@ export class DrizzleChapterReplacementProcessingRepository
         return operation ?? null;
       });
     } catch (error) {
-      if (isUniqueViolation(error)) return null;
+      if (
+        isUniqueConstraint(error, [
+          "chapter_replacement_operations_active_chapter_unique",
+        ])
+      )
+        return null;
       throw error;
     }
   }
@@ -227,10 +233,4 @@ function completedResult(
     retiredImageCount: operation.retiredImageCount,
     completedAt: operation.completedAt,
   };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUniqueViolation(error.cause);
 }

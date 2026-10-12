@@ -1,5 +1,6 @@
 import { and, eq, isNull, lte, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { isUniqueConstraint } from "../../../../../../../../database/postgres-error.js";
 import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
 import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
@@ -102,7 +103,13 @@ export class DrizzleUploadRepository
         return toRecord(row);
       });
     } catch (error) {
-      if (error === uploadStateConflict || isUniqueViolation(error))
+      if (
+        error === uploadStateConflict ||
+        isUniqueConstraint(error, [
+          "uploads_active_chapter_unique",
+          "uploads_storage_key_unique",
+        ])
+      )
         return null;
       throw error;
     }
@@ -513,12 +520,6 @@ export class DrizzleUploadRepository
 }
 
 const uploadStateConflict = new Error("upload-state-conflict");
-
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUniqueViolation(error.cause);
-}
 
 function verifiedMatchesUpload(
   verified: Parameters<

@@ -12,6 +12,7 @@ import {
 } from "drizzle-orm";
 import { transitionChapterState } from "../../../../../../../../database/chapter-state-transition.js";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { knownPersistenceConflict } from "../../../../../../../../database/postgres-error.js";
 import {
   auditLogs,
   chapterDeletionOutbox,
@@ -95,20 +96,6 @@ const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
-
-function isDiscordChannelUniqueViolation(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const databaseError = error as {
-    code?: unknown;
-    constraint_name?: unknown;
-    constraint?: unknown;
-  };
-  return (
-    databaseError.code === "23505" &&
-    (databaseError.constraint_name === "series_discord_channel_id_unique" ||
-      databaseError.constraint === "series_discord_channel_id_unique")
-  );
-}
 
 export class DrizzleSeriesRepository
   implements SeriesRepositoryPort, SeriesMutationBoundaryPort
@@ -259,9 +246,9 @@ export class DrizzleSeriesRepository
         return { outcome: "created" as const, series: toSeries(created) };
       });
     } catch (error) {
-      if (isDiscordChannelUniqueViolation(error))
+      if (knownPersistenceConflict(error, ["series_discord_channel_id_unique"]))
         return { outcome: "channel-already-bound" as const };
-      throw error;
+      throw knownPersistenceConflict(error, ["series_slug_unique"]) ?? error;
     }
   }
 
@@ -527,24 +514,30 @@ export class DrizzleSeriesRepository
   async updateIfAuthorized(
     input: Parameters<SeriesMutationBoundaryPort["updateIfAuthorized"]>[0],
   ): ReturnType<SeriesMutationBoundaryPort["updateIfAuthorized"]> {
-    return this.db.transaction(async (tx) => {
-      const context = await this.lockMutationContext({
-        tx,
-        actor: input.actor,
-        seriesId: input.seriesId,
-        permission: PERMISSIONS.SERIES_EDIT,
-        operation: "edit",
+    try {
+      return await this.db.transaction(async (tx) => {
+        const context = await this.lockMutationContext({
+          tx,
+          actor: input.actor,
+          seriesId: input.seriesId,
+          permission: PERMISSIONS.SERIES_EDIT,
+          operation: "edit",
+        });
+        if (context.outcome !== "authorized") return context;
+        const [updated] = await tx
+          .update(series)
+          .set({ ...input.mutation, updatedAt: new Date() })
+          .where(eq(series.id, input.seriesId))
+          .returning();
+        return updated
+          ? { outcome: "updated" as const, series: toSeries(updated) }
+          : { outcome: "conflict" as const };
       });
-      if (context.outcome !== "authorized") return context;
-      const [updated] = await tx
-        .update(series)
-        .set({ ...input.mutation, updatedAt: new Date() })
-        .where(eq(series.id, input.seriesId))
-        .returning();
-      return updated
-        ? { outcome: "updated" as const, series: toSeries(updated) }
-        : { outcome: "conflict" as const };
-    });
+    } catch (error) {
+      if (knownPersistenceConflict(error, ["series_slug_unique"]))
+        return { outcome: "conflict" as const };
+      throw error;
+    }
   }
 
   async deleteIfAuthorized(
@@ -917,27 +910,35 @@ export class DrizzleChapterCoreRepository
     title?: string | null | undefined;
     createdBy: string;
   }) {
-    return this.db.transaction(async (tx) => {
-      const operational = await lockSeriesOperationalRow(tx, input.seriesId);
-      if (!operational) throw new Error("series-not-found");
-      if (
-        !evaluateSeriesOperationalMutation(operational.operationalState).allowed
-      )
-        throw new SeriesInactiveError();
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${input.seriesId}, 0))`,
+    try {
+      return await this.db.transaction(async (tx) => {
+        const operational = await lockSeriesOperationalRow(tx, input.seriesId);
+        if (!operational) throw new Error("series-not-found");
+        if (
+          !evaluateSeriesOperationalMutation(operational.operationalState)
+            .allowed
+        )
+          throw new SeriesInactiveError();
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${input.seriesId}, 0))`,
+        );
+        const [row] = await tx
+          .insert(chapters)
+          .values({
+            ...input,
+            chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
+            publicKey: ChapterNumber.parse(input.chapterNumber).toPublicKey(),
+          })
+          .returning();
+        if (!row) throw new Error("chapter-create-failed");
+        return toChapter(row);
+      });
+    } catch (error) {
+      throw (
+        knownPersistenceConflict(error, ["chapters_series_number_unique"]) ??
+        error
       );
-      const [row] = await tx
-        .insert(chapters)
-        .values({
-          ...input,
-          chapterNumber: ChapterNumber.parse(input.chapterNumber).toNumber(),
-          publicKey: ChapterNumber.parse(input.chapterNumber).toPublicKey(),
-        })
-        .returning();
-      if (!row) throw new Error("chapter-create-failed");
-      return toChapter(row);
-    });
+    }
   }
 
   async listBySeries(seriesId: string) {
@@ -1140,43 +1141,49 @@ export class DrizzleChapterCoreRepository
   ): ReturnType<ChapterMutationBoundaryPort["updateIfAuthorized"]> {
     const snapshot = await this.findById(input.chapterId);
     if (!snapshot) return { outcome: "not-found" };
-    return this.db.transaction(async (tx) => {
-      const context = await this.lockMutationContext({
-        tx,
-        actor: input.actor,
-        chapterId: input.chapterId,
-        expectedSeriesId: snapshot.seriesId,
-        permission: PERMISSIONS.CHAPTERS_EDIT,
-        allowHelper: true,
+    try {
+      return await this.db.transaction(async (tx) => {
+        const context = await this.lockMutationContext({
+          tx,
+          actor: input.actor,
+          chapterId: input.chapterId,
+          expectedSeriesId: snapshot.seriesId,
+          permission: PERMISSIONS.CHAPTERS_EDIT,
+          allowHelper: true,
+        });
+        if (context.outcome !== "authorized") return context;
+        if (context.chapter.status === "deleting")
+          return { outcome: "conflict" as const };
+        if (
+          context.chapter.chapterNumber !== input.expectedChapterNumber ||
+          (input.mutation.chapterNumber !== undefined &&
+            input.mutation.chapterNumber !== context.chapter.chapterNumber)
+        )
+          return { outcome: "conflict" as const };
+        const [updated] = await tx
+          .update(chapters)
+          .set({
+            ...input.mutation,
+            ...(input.mutation.chapterNumber === undefined
+              ? {}
+              : {
+                  chapterNumber: ChapterNumber.parse(
+                    input.mutation.chapterNumber,
+                  ).toNumber(),
+                }),
+            updatedAt: new Date(),
+          })
+          .where(eq(chapters.id, input.chapterId))
+          .returning();
+        return updated
+          ? { outcome: "updated" as const, chapter: toChapter(updated) }
+          : { outcome: "conflict" as const };
       });
-      if (context.outcome !== "authorized") return context;
-      if (context.chapter.status === "deleting")
+    } catch (error) {
+      if (knownPersistenceConflict(error, ["chapters_series_number_unique"]))
         return { outcome: "conflict" as const };
-      if (
-        context.chapter.chapterNumber !== input.expectedChapterNumber ||
-        (input.mutation.chapterNumber !== undefined &&
-          input.mutation.chapterNumber !== context.chapter.chapterNumber)
-      )
-        return { outcome: "conflict" as const };
-      const [updated] = await tx
-        .update(chapters)
-        .set({
-          ...input.mutation,
-          ...(input.mutation.chapterNumber === undefined
-            ? {}
-            : {
-                chapterNumber: ChapterNumber.parse(
-                  input.mutation.chapterNumber,
-                ).toNumber(),
-              }),
-          updatedAt: new Date(),
-        })
-        .where(eq(chapters.id, input.chapterId))
-        .returning();
-      return updated
-        ? { outcome: "updated" as const, chapter: toChapter(updated) }
-        : { outcome: "conflict" as const };
-    });
+      throw error;
+    }
   }
 
   async delete(id: string) {

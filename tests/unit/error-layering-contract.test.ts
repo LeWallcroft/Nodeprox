@@ -15,6 +15,14 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("HTTP error layering", () => {
+  it("keeps SQLSTATE inspection out of Presentation", () => {
+    const violations = sourceFiles(join(root, "apps/api/src"))
+      .filter((file) => /[/\\]presentation[/\\]/.test(file))
+      .filter((file) => /23505/.test(readFileSync(file, "utf8")))
+      .map((file) => relative(root, file));
+    expect(violations).toEqual([]);
+  });
+
   it("keeps AppError imports out of domain, application and infrastructure", () => {
     const violations = sourceFiles(join(root, "apps/api/src"))
       .filter((file) =>

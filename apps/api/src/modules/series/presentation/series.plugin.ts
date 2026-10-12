@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import { KnownPersistenceConflictError } from "../../../../../../database/postgres-error.js";
 import { AppError } from "../../../errors/app-error.js";
 import {
   getRequestContext,
@@ -230,12 +231,6 @@ function parse<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   return result.data;
 }
 
-function isUnique(errorValue: unknown): boolean {
-  if (typeof errorValue !== "object" || errorValue === null) return false;
-  if ("code" in errorValue && errorValue.code === "23505") return true;
-  return "cause" in errorValue && isUnique(errorValue.cause);
-}
-
 export function registerSeriesPlugin(
   app: FastifyInstance,
   db: NodeProxDatabase,
@@ -350,7 +345,11 @@ export function registerSeriesPlugin(
       return reply.code(201).send(result);
     } catch (cause) {
       if (cause instanceof InvalidSeriesSlugError) throw invalidSeriesSlug;
-      if (isUnique(cause)) throw seriesSlugConflict;
+      if (
+        cause instanceof KnownPersistenceConflictError &&
+        cause.constraint === "series_slug_unique"
+      )
+        throw seriesSlugConflict;
       throw cause;
     }
   });
@@ -509,7 +508,6 @@ export function registerSeriesPlugin(
       if ("conflict" in result) throw conflict;
       return result;
     } catch (cause) {
-      if (isUnique(cause)) throw conflict;
       throw cause;
     }
   });
@@ -646,7 +644,10 @@ export function registerSeriesPlugin(
         return reply.code(201).send(result);
       } catch (cause) {
         if (cause instanceof SeriesInactiveError) throw seriesInactive;
-        if (isUnique(cause)) {
+        if (
+          cause instanceof KnownPersistenceConflictError &&
+          cause.constraint === "chapters_series_number_unique"
+        ) {
           const requestContext = getRequestContext();
           request.log.info(
             {
@@ -720,7 +721,6 @@ export function registerSeriesPlugin(
         if ("conflict" in result) throw conflict;
         return result.chapter;
       } catch (cause) {
-        if (isUnique(cause)) throw conflict;
         throw cause;
       }
     },

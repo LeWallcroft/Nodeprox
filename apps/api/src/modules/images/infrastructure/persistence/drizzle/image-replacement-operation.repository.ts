@@ -1,5 +1,6 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { isUniqueConstraint } from "../../../../../../../../database/postgres-error.js";
 import { lockSeriesOperationalRow } from "../../../../../../../../database/series-operational-lock.js";
 import {
   chapters,
@@ -98,7 +99,12 @@ export class DrizzleImageReplacementOperationRepository
         return map(row);
       });
     } catch (error) {
-      if (isUniqueViolation(error)) return null;
+      if (
+        isUniqueConstraint(error, [
+          "image_replacement_operations_candidate_key_unique",
+        ])
+      )
+        return null;
       throw error;
     }
   }
@@ -234,12 +240,6 @@ export class DrizzleImageReplacementOperationRepository
       return row ? map(row) : this.findById(input.operationId);
     });
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  if (typeof error !== "object" || error === null) return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUniqueViolation(error.cause);
 }
 
 function map(

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import { KnownPersistenceConflictError } from "../../../../../../database/postgres-error.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
@@ -81,7 +82,11 @@ export function registerImportBatchPlugin(
         if ("forbidden" in result) return { outcome: "denied" as const };
         return { outcome: "created" as const, chapterId: result.id };
       } catch (error) {
-        if (isUnique(error)) return { outcome: "conflict" as const };
+        if (
+          error instanceof KnownPersistenceConflictError &&
+          error.constraint === "chapters_series_number_unique"
+        )
+          return { outcome: "conflict" as const };
         throw error;
       }
     },
@@ -264,10 +269,4 @@ function problem(code: string, detail: string, statusCode: number) {
             : "Validation failed",
     type: `https://nodeprox.dev/problems/${code}`,
   });
-}
-
-function isUnique(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUnique(error.cause);
 }
