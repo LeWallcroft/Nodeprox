@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { createWorkerDependencies } from "./composition/create-worker-dependencies.js";
 import { createWorkerRuntime } from "./composition/create-worker-runtime.js";
+import { fatalDiagnostic } from "../../../observability/sanitize-operational-text.js";
 
 const dependencies = createWorkerDependencies();
 const runtime = createWorkerRuntime(dependencies);
@@ -16,7 +17,7 @@ function shutdown(): Promise<void> {
 function signalShutdown() {
   void shutdown().catch((error: unknown) => {
     dependencies.logger.fatal(
-      { err: error, event: "worker-shutdown-failed" },
+      { ...fatalDiagnostic(error), event: "worker-shutdown-failed" },
       "Worker shutdown failed",
     );
     process.exitCode = 1;
@@ -34,13 +35,13 @@ function fatal(
   fatalStarted = true;
   process.exitCode = 1;
   dependencies.logger.fatal(
-    { err: reason, event },
+    { ...fatalDiagnostic(reason), event },
     "Fatal worker process failure",
   );
   void shutdown()
     .catch((error: unknown) => {
       dependencies.logger.fatal(
-        { err: error, event: "worker-fatal-shutdown-failed" },
+        { ...fatalDiagnostic(error), event: "worker-fatal-shutdown-failed" },
         "Fatal worker shutdown failed",
       );
     })

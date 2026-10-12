@@ -41,6 +41,22 @@ describe("HTTP error layering", () => {
     expect(violations).toEqual([]);
   });
 
+  it("keeps PostgreSQL-native inspection out of API Application", () => {
+    const application = sourceFiles(join(root, "apps/api/src/modules")).filter(
+      (file) => /[/\\]application[/\\]/.test(file),
+    );
+    const violations = application
+      .filter((file) => {
+        const source = readFileSync(file, "utf8");
+        return (
+          /\b(?:23505|23503|23514|40001|40P01)\b/.test(source) ||
+          /\bconstraint_name\b|\.(?:constraint|constraintName)\b/.test(source)
+        );
+      })
+      .map((file) => relative(root, file));
+    expect(violations).toEqual([]);
+  });
+
   it("keeps AppError imports out of domain, application and infrastructure", () => {
     const violations = sourceFiles(join(root, "apps/api/src"))
       .filter((file) =>
@@ -53,5 +69,53 @@ describe("HTTP error layering", () => {
       )
       .map((file) => relative(root, file));
     expect(violations).toEqual([]);
+  });
+
+  it("keeps workflow and correlation identities explicit", () => {
+    const seriesLifecycleFiles = [
+      "apps/api/src/modules/series/application/ports/series-lifecycle.ports.ts",
+      "apps/api/src/modules/series/application/services/series-lifecycle.service.ts",
+      "apps/api/src/modules/series/infrastructure/persistence/drizzle/series-lifecycle.repository.ts",
+      "apps/api/src/modules/series/presentation/series.plugin.ts",
+    ];
+    const sources = seriesLifecycleFiles.map((path) =>
+      readFileSync(join(root, path), "utf8"),
+    );
+    const combined = sources.join("\n");
+    for (const identity of [
+      "correlationRequestId",
+      "reactivationRequestId",
+      "originRequestId",
+    ]) {
+      expect(combined).toContain(identity);
+    }
+
+    const crossDomainContracts = sourceFiles(join(root, "apps"))
+      .filter((file) => /(?:discord|events|worker)/.test(file))
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+    for (const identity of [
+      "providerRequestId",
+      "interactionId",
+      "eventId",
+      "jobId",
+    ]) {
+      expect(crossDomainContracts).toContain(identity);
+    }
+
+    const contractSources = sources.slice(0, 3);
+    const ambiguousWorkflowFields = contractSources.flatMap((source, index) => {
+      const lifecycleSource = source.replace(
+        /requestId\s*:\s*correlationRequestId/g,
+        "",
+      );
+      return /\brequestId\s*[:?]/.test(lifecycleSource)
+        ? [seriesLifecycleFiles[index]]
+        : [];
+    });
+    expect(ambiguousWorkflowFields).toEqual([]);
+    expect(sources[3]).toContain(
+      "/series/:seriesId/reactivation-requests/:reactivationRequestId/",
+    );
   });
 });

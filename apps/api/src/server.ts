@@ -7,6 +7,7 @@ import {
 import { buildApp } from "./app.js";
 import { createApiDependencies } from "./composition/create-api-dependencies.js";
 import { createApiRuntime } from "./composition/create-api-runtime.js";
+import { fatalDiagnostic } from "../../../observability/sanitize-operational-text.js";
 
 const config = loadConfig();
 const dependencies = createApiDependencies({
@@ -51,7 +52,7 @@ function shutdown(): Promise<void> {
 function signalShutdown() {
   void shutdown().catch((error: unknown) => {
     app.log.fatal(
-      { err: error, event: "api-shutdown-failed" },
+      { ...fatalDiagnostic(error), event: "api-shutdown-failed" },
       "API shutdown failed",
     );
     process.exitCode = 1;
@@ -68,11 +69,14 @@ function fatal(
   if (fatalStarted) return;
   fatalStarted = true;
   process.exitCode = 1;
-  app.log.fatal({ err: reason, event }, "Fatal API process failure");
+  app.log.fatal(
+    { ...fatalDiagnostic(reason), event },
+    "Fatal API process failure",
+  );
   void shutdown()
     .catch((error: unknown) => {
       app.log.fatal(
-        { err: error, event: "api-fatal-shutdown-failed" },
+        { ...fatalDiagnostic(error), event: "api-fatal-shutdown-failed" },
         "Fatal API shutdown failed",
       );
     })
@@ -87,7 +91,7 @@ try {
   await app.listen({ host: config.API_HOST, port: config.API_PORT });
 } catch (error) {
   app.log.fatal(
-    { err: error, event: "api-listen-failed" },
+    { ...fatalDiagnostic(error), event: "api-listen-failed" },
     "API listen failed",
   );
   process.exitCode = 1;

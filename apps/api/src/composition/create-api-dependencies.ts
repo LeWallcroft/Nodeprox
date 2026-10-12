@@ -47,6 +47,7 @@ import { ListSeriesCreationGrantsForAdministrationService } from "../modules/dis
 import { WebSeriesCreationGrantService } from "../modules/discord/application/web-series-creation-grant.service.js";
 import { DiscordBotGuildRoleVerifier } from "../modules/discord/infrastructure/discord-bot-guild-role-verifier.js";
 import { DiscordBotSeriesChannelGateway } from "../modules/discord/infrastructure/discord-bot-series-channel-gateway.js";
+import { DrizzleDiscordIdentityLinkRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-identity-link.repository.js";
 import { DrizzleDiscordAuthorizedRoleConfigurationRepository } from "../modules/discord/infrastructure/persistence/drizzle/discord-authorized-role-configuration.repository.js";
 import { RedisLinkCodeStore } from "../modules/discord/infrastructure/redis-link-code.store.js";
 import { DrizzleDomainEventOutbox } from "../modules/events/infrastructure/persistence/drizzle-domain-event-outbox.js";
@@ -252,6 +253,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
             : undefined,
           verifier,
           seriesChannelGateway,
+          new DrizzleDiscordIdentityLinkRepository(),
           (error) =>
             logger.error(
               { err: error },
