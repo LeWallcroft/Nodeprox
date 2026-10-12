@@ -69,8 +69,24 @@ describe("paginated master-detail layout stability", () => {
       "apps/web/components/ui/detail-panel.tsx",
       "utf8",
     );
+    const sharedPanelShell = detailShell.slice(
+      detailShell.indexOf("export function DetailPanel("),
+      detailShell.indexOf("export function DetailPanelHeader"),
+    );
+    const sharedContent = detailShell.slice(
+      detailShell.indexOf("export function DetailPanelContent"),
+      detailShell.indexOf("export function DetailPanelActions"),
+    );
     const list = readFileSync(
       "apps/web/components/domains/series/series-list.tsx",
+      "utf8",
+    );
+    const context = readFileSync(
+      "apps/web/components/domains/series/series-context-panel.tsx",
+      "utf8",
+    );
+    const dataTable = readFileSync(
+      "apps/web/components/ui/data-table.tsx",
       "utf8",
     );
 
@@ -78,7 +94,35 @@ describe("paginated master-detail layout stability", () => {
     expect(page).not.toContain('selectedSeriesId ? "grid-cols');
     expect(page).toContain("<SeriesDetailPanel");
     expect(detail).toContain("<DetailPanel>");
-    expect(detailShell).toContain("xl:h-full");
+    expect(detail.match(/<DetailPanelContent scrollable>/g)).toHaveLength(2);
+    const selectedSeriesLayout = detail.slice(
+      detail.indexOf("const canEdit"),
+      detail.indexOf("<AppDialog"),
+    );
+    const scrollableContentEnd = selectedSeriesLayout.indexOf(
+      "</DetailPanelContent>",
+    );
+    const actionsStart = selectedSeriesLayout.indexOf("<DetailPanelActions>");
+    const actionsEnd = selectedSeriesLayout.indexOf("</DetailPanelActions>");
+    expect(scrollableContentEnd).toBeGreaterThanOrEqual(0);
+    expect(actionsStart).toBeGreaterThan(scrollableContentEnd);
+    expect(actionsEnd).toBeGreaterThan(actionsStart);
+    expect(selectedSeriesLayout.slice(0, scrollableContentEnd)).not.toMatch(
+      /<(?:Button|Link)\b/,
+    );
+    expect(selectedSeriesLayout.slice(actionsStart, actionsEnd)).toMatch(
+      /<(?:Button|Link)\b/,
+    );
+    expect(sharedPanelShell).toContain("xl:h-full");
+    expect(sharedPanelShell).toContain("overflow-hidden");
+    expect(sharedPanelShell).not.toContain("overflow-y-auto");
+    expect(detailShell).toContain('<header className="shrink-0');
+    expect(detailShell).toContain('<footer className="grid shrink-0');
+    expect(sharedContent).toContain(
+      'className={`min-h-0 flex-1 p-4 ${scrollable ? "overflow-y-auto"',
+    );
+    expect(context).toContain("xl:h-[640px]");
+    expect(context).not.toContain("xl:h-full");
     expect(list).toContain("h-[76px]");
     expect(list).toContain('index === items.length - 1 ? "border-b-0"');
     expect(list).toContain("grid-rows-[2rem_1rem]");
@@ -86,6 +130,10 @@ describe("paginated master-detail layout stability", () => {
     expect(list).toContain("h-4 max-w-[18rem] truncate");
     expect(list).not.toContain('selected ? "border-2"');
     expect(list).not.toContain("transition-all");
+    expect(page).toContain("const pageSize = 10;");
+    expect(list.match(/items\.map\(/g)).toHaveLength(1);
+    expect(list).not.toContain("Array.from");
+    expect(dataTable).toContain('data-table-filler="true"');
   });
 
   it("keeps the reserved table surface free of pseudo-row separators", () => {
