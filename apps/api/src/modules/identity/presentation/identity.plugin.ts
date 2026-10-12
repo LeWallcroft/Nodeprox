@@ -11,9 +11,11 @@ import { validateMutationOrigin } from "../../authentication/presentation/origin
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import {
-  IdentityService,
+  IdentityAuthorizationDeniedError,
+  IdentityCursorInvalidError,
   IdentityStateConflictError,
-} from "../application/services/identity.service.js";
+} from "../application/errors/identity.errors.js";
+import { IdentityService } from "../application/services/identity.service.js";
 
 const registrationSchema = z
   .object({
@@ -107,6 +109,29 @@ function isUnique(error: unknown): boolean {
   return "cause" in error && isUnique(error.cause);
 }
 
+async function presentIdentity<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof IdentityAuthorizationDeniedError)
+      throw problem(
+        "authorization-denied",
+        "You are not authorized to manage users.",
+        403,
+        "Forbidden",
+      );
+    if (error instanceof IdentityCursorInvalidError)
+      throw problem(
+        "validation-failed",
+        "The lookup cursor is invalid.",
+        422,
+        "Validation failed",
+      );
+    if (error instanceof IdentityStateConflictError) throw conflict();
+    throw error;
+  }
+}
+
 export function registerIdentityPlugin(
   app: FastifyInstance,
   db: NodeProxDatabase,
@@ -136,15 +161,19 @@ export function registerIdentityPlugin(
     authentication.cookies,
   );
   app.get("/admin/users", { preHandler: session }, async () =>
-    service.list(context()),
+    presentIdentity(() => service.list(context())),
   );
   app.get("/admin/users/lookup", { preHandler: session }, async (request) =>
-    service.lookup(context(), parse(lookupSchema, request.query)),
+    presentIdentity(() =>
+      service.lookup(context(), parse(lookupSchema, request.query)),
+    ),
   );
   app.get("/admin/users/management", { preHandler: session }, async (request) =>
-    service.listManagement(
-      context(),
-      parse(managementListSchema, request.query),
+    presentIdentity(() =>
+      service.listManagement(
+        context(),
+        parse(managementListSchema, request.query),
+      ),
     ),
   );
 
@@ -154,10 +183,8 @@ export function registerIdentityPlugin(
     async (request) => {
       const { userId } = parse(userIdSchema, request.params);
       try {
-        const result = await service.review(
-          context(),
-          userId,
-          parse(reviewSchema, request.body),
+        const result = await presentIdentity(() =>
+          service.review(context(), userId, parse(reviewSchema, request.body)),
         );
         if (!result) throw notFound();
         return result;
