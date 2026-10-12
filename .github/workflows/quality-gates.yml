@@ -161,9 +161,52 @@ jobs:
       # applies migrations and owns its API, Worker and upload mock lifecycle.
       - run: pnpm test:e2e
 
+  production-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.19.0
+          run_install: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build production runtime images
+        run: |
+          docker build -f apps/api/Dockerfile --target runtime -t nodeprox-api:latest .
+          docker build -f apps/api/Dockerfile --target migration -t nodeprox-migrate:latest .
+          docker build -f apps/worker/Dockerfile --target runtime -t nodeprox-worker:latest .
+          docker build -f apps/web/Dockerfile --target runtime -t nodeprox-web:latest .
+          docker build -f apps/discord-bot/Dockerfile -t nodeprox-discord-bot:latest .
+      - name: Smoke production runtime images
+        run: pnpm smoke:production-images
+      - name: Build production Compose stack with safe CI configuration
+        shell: bash
+        run: |
+          safe_env_file="$RUNNER_TEMP/nodeprox-compose-ci.env"
+          cat > "$safe_env_file" <<EOF
+          NODEPROX_ENV_FILE=$safe_env_file
+          POSTGRES_DB=nodeprox_ci
+          POSTGRES_USER=nodeprox_ci
+          POSTGRES_PASSWORD=ci-placeholder-only
+          REDIS_PASSWORD=ci-placeholder-only
+          DISCORD_APPLICATION_ID=000000000000000000
+          DISCORD_BOT_TOKEN=ci-placeholder-only
+          DISCORD_GUILD_ID=000000000000000000
+          DISCORD_CONTROL_CHANNEL_ID=000000000000000000
+          DISCORD_BOT_INTERNAL_TOKEN=ci-placeholder-only
+          DATABASE_URL=postgres://nodeprox_ci:ci-placeholder-only@postgres:5432/nodeprox_ci
+          REDIS_URL=redis://:ci-placeholder-only@redis:6379
+          EOF
+          docker compose -f docker-compose.prod.yml --env-file "$safe_env_file" build
+
   quality-gates:
     if: ${{ always() }}
-    needs: [static, unit, integration, build, e2e]
+    needs: [static, unit, integration, build, e2e, production-images]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -174,3 +217,4 @@ jobs:
           test "${{ needs.integration.result }}" = "success"
           test "${{ needs.build.result }}" = "success"
           test "${{ needs.e2e.result }}" = "success"
+          test "${{ needs.production-images.result }}" = "success"
