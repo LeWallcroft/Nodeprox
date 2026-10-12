@@ -100,7 +100,7 @@ export function SeriesDetailPanel({
         <DetailPanelHeader>
           <h2 className="m-0 text-base font-semibold">Detalle de la serie</h2>
         </DetailPanelHeader>
-        <DetailPanelContent>
+        <DetailPanelContent scrollable>
           {loading ? (
             <LoadingState label="Cargando detalle de la serie" />
           ) : null}
@@ -158,7 +158,7 @@ export function SeriesDetailPanel({
           </button>
         </div>
       </DetailPanelHeader>
-      <DetailPanelContent>
+      <DetailPanelContent scrollable>
         <div className="flex items-start gap-3">
           <ContentImage
             alt={`Portada de ${series.title}`}

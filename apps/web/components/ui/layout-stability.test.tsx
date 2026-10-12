@@ -73,12 +73,23 @@ describe("paginated master-detail layout stability", () => {
       "apps/web/components/domains/series/series-list.tsx",
       "utf8",
     );
+    const context = readFileSync(
+      "apps/web/components/domains/series/series-context-panel.tsx",
+      "utf8",
+    );
+    const dataTable = readFileSync(
+      "apps/web/components/ui/data-table.tsx",
+      "utf8",
+    );
 
     expect(page).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(380px,420px)]");
     expect(page).not.toContain('selectedSeriesId ? "grid-cols');
     expect(page).toContain("<SeriesDetailPanel");
     expect(detail).toContain("<DetailPanel>");
+    expect(detail.match(/<DetailPanelContent scrollable>/g)).toHaveLength(2);
     expect(detailShell).toContain("xl:h-full");
+    expect(context).toContain("xl:h-[640px]");
+    expect(context).not.toContain("xl:h-full");
     expect(list).toContain("h-[76px]");
     expect(list).toContain('index === items.length - 1 ? "border-b-0"');
     expect(list).toContain("grid-rows-[2rem_1rem]");
@@ -86,6 +97,10 @@ describe("paginated master-detail layout stability", () => {
     expect(list).toContain("h-4 max-w-[18rem] truncate");
     expect(list).not.toContain('selected ? "border-2"');
     expect(list).not.toContain("transition-all");
+    expect(page).toContain("const pageSize = 10;");
+    expect(list.match(/items\.map\(/g)).toHaveLength(1);
+    expect(list).not.toContain("Array.from");
+    expect(dataTable).toContain('data-table-filler="true"');
   });
 
   it("keeps the reserved table surface free of pseudo-row separators", () => {
