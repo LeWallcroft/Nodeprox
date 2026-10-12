@@ -4,6 +4,12 @@ const images = [
   {
     name: "api",
     image: "nodeprox-api:latest",
+    runtimeModules: [
+      {
+        url: "file:///app/dist/observability/sanitize-operational-text.js",
+        exports: ["sanitizeOperationalText", "fatalDiagnostic"],
+      },
+    ],
     imports: [
       "@nodeprox/config",
       "@nodeprox/schemas",
@@ -19,6 +25,12 @@ const images = [
   {
     name: "worker",
     image: "nodeprox-worker:latest",
+    runtimeModules: [
+      {
+        url: "file:///app/dist/observability/sanitize-operational-text.js",
+        exports: ["sanitizeOperationalText", "fatalDiagnostic"],
+      },
+    ],
     imports: [
       "@nodeprox/config",
       "@nodeprox/storage",
@@ -64,10 +76,14 @@ function runDocker(arguments_, label) {
   }
 }
 
-for (const { name, image, imports } of images) {
-  const importProgram = `${imports
-    .map((specifier) => `await import(${JSON.stringify(specifier)})`)
-    .join(";")};`;
+for (const { name, image, imports, runtimeModules = [] } of images) {
+  const importProgram = [
+    ...imports.map((specifier) => `await import(${JSON.stringify(specifier)})`),
+    ...runtimeModules.map(
+      ({ url, exports }, index) =>
+        `const runtimeModule${index} = await import(${JSON.stringify(url)}); if (${JSON.stringify(exports)}.some((name) => typeof runtimeModule${index}[name] !== "function")) throw new Error("Missing runtime exports in ${url}");`,
+    ),
+  ].join(";");
   runDocker(
     ["run", "--rm", "--entrypoint", "node", image, "-e", importProgram],
     `${name} runtime import resolution`,

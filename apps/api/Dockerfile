@@ -12,6 +12,7 @@ COPY apps/web/package.json apps/web/package.json
 COPY apps/worker/package.json apps/worker/package.json
 COPY packages ./packages
 COPY database ./database
+COPY observability ./observability
 COPY apps/api ./apps/api
 COPY apps/worker ./apps/worker
 COPY apps/web ./apps/web
