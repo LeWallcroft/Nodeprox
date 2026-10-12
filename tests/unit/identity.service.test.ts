@@ -142,7 +142,10 @@ describe("A1 identity service", () => {
     } as never);
     await expect(
       service.review(context, "user-1", { status: "active", role: "uploader" }),
-    ).rejects.toMatchObject({ statusCode: 403 });
+    ).rejects.toMatchObject({
+      name: "IdentityAuthorizationDeniedError",
+      message: "authorization-denied",
+    });
   });
 
   it("rejects invalid status transitions", async () => {

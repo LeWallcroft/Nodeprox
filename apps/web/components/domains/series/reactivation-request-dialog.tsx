@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { errorMessage } from "../feedback";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 
@@ -42,9 +43,7 @@ export function ReactivationRequestDialog({
                 .then(() => onOpenChange(false))
                 .catch((cause: unknown) =>
                   setError(
-                    cause instanceof Error
-                      ? cause.message
-                      : "No se pudo crear la solicitud.",
+                    errorMessage(cause, "No se pudo crear la solicitud."),
                   ),
                 );
             }}

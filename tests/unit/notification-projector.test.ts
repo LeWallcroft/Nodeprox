@@ -56,6 +56,7 @@ function event(
     aggregateType: "series_creation_grant",
     aggregateId: randomUUID(),
     actorUserId: null,
+    originRequestId: null,
     payload: { targetUserId: randomUUID(), actorDiscordId: "not-projected" },
     occurredAt: new Date(),
     attemptCount: 0,

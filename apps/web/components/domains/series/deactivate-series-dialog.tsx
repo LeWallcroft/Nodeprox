@@ -1,9 +1,11 @@
 "use client";
 
+import { CircleAlert } from "lucide-react";
 import { useState } from "react";
 import type { Series } from "../../../lib/domains/series/types";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
+import { SearchableCombobox } from "../../ui/searchable-combobox";
 import { errorMessage } from "../feedback";
 
 const reasons = [
@@ -71,23 +73,17 @@ export function DeactivateSeriesDialog({
       }
     >
       <div className="grid gap-3">
-        <label className="grid gap-1 text-sm">
-          Motivo
-          <select
-            className="min-h-control rounded-control border border-border bg-surface px-3"
-            value={reason}
-            onChange={(event) => {
-              setReason(event.target.value as typeof reason);
-              setError("");
-            }}
-          >
-            {reasons.map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SearchableCombobox
+          id="series-deactivation-reason"
+          label="Motivo"
+          value={reason}
+          options={reasons.map(([id, label]) => ({ id, label }))}
+          onChange={(value) => {
+            setReason(value as typeof reason);
+            setError("");
+          }}
+          placeholder="Selecciona el motivo…"
+        />
         <label className="grid gap-1 text-sm">
           Detalle del motivo{" "}
           {reason === "other" ? "(obligatorio)" : "(opcional)"}
@@ -114,9 +110,17 @@ export function DeactivateSeriesDialog({
           ) : null}
         </label>
         {error ? (
-          <p role="alert" className="text-destructive-text">
-            {error}
-          </p>
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-3 rounded-control bg-destructive-surface p-3 text-sm text-destructive-text"
+          >
+            <CircleAlert
+              aria-hidden="true"
+              className="mt-0.5 size-4 shrink-0"
+            />
+            <p className="m-0">{error}</p>
+          </div>
         ) : null}
       </div>
     </AppDialog>

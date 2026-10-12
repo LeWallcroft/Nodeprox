@@ -13,6 +13,8 @@ export class NodeProxApiError extends Error {
   constructor(
     readonly code: string | null,
     readonly status: number,
+    readonly requestId: string | null = null,
+    readonly category?: string,
   ) {
     super(code ?? "nodeprox-api-error");
   }
@@ -74,14 +76,20 @@ export class NodeProxApiClient implements NodeProxDiscordApi {
     } catch {
       throw new NodeProxApiError(null, 0);
     }
-    const payload = (await response.json().catch(() => null)) as {
-      code?: unknown;
-    } | null;
+    const rawPayload: unknown = await response.json().catch(() => null);
+    const payload =
+      rawPayload && typeof rawPayload === "object" && !Array.isArray(rawPayload)
+        ? (rawPayload as Record<string, unknown>)
+        : null;
     if (!response.ok)
       throw new NodeProxApiError(
         typeof payload?.code === "string" ? payload.code : null,
         response.status,
+        typeof payload?.requestId === "string"
+          ? payload.requestId
+          : response.headers.get("x-request-id"),
+        typeof payload?.category === "string" ? payload.category : undefined,
       );
-    return payload as T;
+    return rawPayload as T;
   }
 }

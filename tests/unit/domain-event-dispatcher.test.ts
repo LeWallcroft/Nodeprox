@@ -118,6 +118,7 @@ function event(overrides: Partial<StoredEvent> = {}): StoredEvent {
     aggregateType: "series_creation_grant",
     aggregateId: randomUUID(),
     actorUserId: null,
+    originRequestId: null,
     payload: { targetUserId: randomUUID() },
     occurredAt: new Date("2026-09-14T00:00:00.000Z"),
     attemptCount: 0,
@@ -139,7 +140,8 @@ function handler(input: {
 
 describe("DomainEventDispatcher", () => {
   it("runs registered handlers and only marks an event processed after all succeed", async () => {
-    const outbox = new MemoryOutbox([event()]);
+    const stored = event({ originRequestId: "http-request-123" });
+    const outbox = new MemoryOutbox([stored]);
     const first = handler({ name: "first" });
     const second = handler({ name: "second" });
     const dispatcher = new DomainEventDispatcher(
@@ -155,6 +157,16 @@ describe("DomainEventDispatcher", () => {
       skipped: 0,
     });
     expect(outbox.events[0]?.processedAt).toBeInstanceOf(Date);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventId: stored.id,
+        aggregateType: stored.aggregateType,
+        aggregateId: stored.aggregateId,
+        originRequestId: "http-request-123",
+        attemptCount: 0,
+      }),
+      expect.any(String),
+    );
   });
 
   it("keeps failures retryable and increments attempt count", async () => {

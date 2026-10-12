@@ -7,6 +7,7 @@ import {
 import { buildApp } from "./app.js";
 import { createApiDependencies } from "./composition/create-api-dependencies.js";
 import { createApiRuntime } from "./composition/create-api-runtime.js";
+import { fatalDiagnostic } from "../../../observability/sanitize-operational-text.js";
 
 const config = loadConfig();
 const dependencies = createApiDependencies({
@@ -32,20 +33,67 @@ const runtime = createApiRuntime({
 });
 runtime.start();
 
-let shuttingDown = false;
-async function shutdown() {
-  if (shuttingDown) return;
-  shuttingDown = true;
-  await runtime.stop();
-  await app.close();
-  await dependencies.connection?.sql.end();
+let stopping: Promise<void> | null = null;
+function shutdown(): Promise<void> {
+  if (stopping) return stopping;
+  stopping = (async () => {
+    try {
+      await runtime.stop();
+    } finally {
+      try {
+        await app.close();
+      } finally {
+        await dependencies.connection?.sql.end();
+      }
+    }
+  })();
+  return stopping;
 }
-process.once("SIGTERM", () => void shutdown());
-process.once("SIGINT", () => void shutdown());
+function signalShutdown() {
+  void shutdown().catch((error: unknown) => {
+    app.log.fatal(
+      { ...fatalDiagnostic(error), event: "api-shutdown-failed" },
+      "API shutdown failed",
+    );
+    process.exitCode = 1;
+  });
+}
+process.once("SIGTERM", signalShutdown);
+process.once("SIGINT", signalShutdown);
+
+let fatalStarted = false;
+function fatal(
+  reason: unknown,
+  event: "uncaughtException" | "unhandledRejection",
+) {
+  if (fatalStarted) return;
+  fatalStarted = true;
+  process.exitCode = 1;
+  app.log.fatal(
+    { ...fatalDiagnostic(reason), event },
+    "Fatal API process failure",
+  );
+  void shutdown()
+    .catch((error: unknown) => {
+      app.log.fatal(
+        { ...fatalDiagnostic(error), event: "api-fatal-shutdown-failed" },
+        "Fatal API shutdown failed",
+      );
+    })
+    .finally(() => process.exit(1));
+}
+process.once("uncaughtException", (error) => fatal(error, "uncaughtException"));
+process.once("unhandledRejection", (reason) =>
+  fatal(reason, "unhandledRejection"),
+);
 
 try {
   await app.listen({ host: config.API_HOST, port: config.API_PORT });
 } catch (error) {
-  app.log.error(error);
+  app.log.fatal(
+    { ...fatalDiagnostic(error), event: "api-listen-failed" },
+    "API listen failed",
+  );
   process.exitCode = 1;
+  await shutdown();
 }

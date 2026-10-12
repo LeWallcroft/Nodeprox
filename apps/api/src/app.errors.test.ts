@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppError } from "./errors/app-error.js";
+import { ExternalDependencyFailure } from "./errors/technical-failure.js";
 import { buildApp } from "./app.js";
 import {
   markOperationAuditRecorded,
@@ -18,6 +19,46 @@ function createAuditWriter() {
 }
 
 describe("API error handling", () => {
+  it("returns a safe 503 for a typed provider failure", async () => {
+    const app = buildApp({ logger: false });
+    app.get("/provider-error", async () => {
+      throw new ExternalDependencyFailure({
+        code: "brevo-delivery-failed",
+        dependency: "brevo",
+        retryable: true,
+        providerRequestId: "secret-provider-reference",
+        cause: new Error("API key leaked in provider response"),
+      });
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/provider-error",
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      code: "external-dependency-unavailable",
+      category: "external_dependency",
+      requestId: response.headers["x-request-id"],
+    });
+    expect(response.body).not.toContain("secret-provider-reference");
+    expect(response.body).not.toContain("API key leaked");
+    await app.close();
+  });
+
+  it("does not interpret an unknown SQL unique violation as a business conflict", async () => {
+    const app = buildApp({ logger: false });
+    app.get("/unknown-unique", async () => {
+      throw { cause: { code: "23505", constraint: "unknown_unique" } };
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: "/unknown-unique",
+    });
+    expect(response.statusCode).toBe(500);
+    expect(response.json().code).toBe("internal-error");
+    await app.close();
+  });
+
   it("returns RFC 9457 Problem Details for AppError", async () => {
     const app = buildApp({ logger: false });
     app.get("/test-error", async () => {

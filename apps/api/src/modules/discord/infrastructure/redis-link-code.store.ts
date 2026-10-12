@@ -1,4 +1,5 @@
 import { Redis } from "ioredis";
+import { ExternalDependencyFailure } from "../../../errors/technical-failure.js";
 import type {
   DiscordLinkChallengeStore,
   DiscordLinkChallengeStoreClaimResult,
@@ -41,37 +42,39 @@ export class RedisLinkCodeStore implements DiscordLinkChallengeStore {
     ttlSeconds: number;
   }) {
     await this.connect();
-    await this.redis.eval(
-      [
-        "local previous = redis.call('GET', KEYS[1])",
-        "if previous then",
-        "  local ok, pointer = pcall(cjson.decode, previous)",
-        "  if ok and pointer.codeDigest then redis.call('DEL', ARGV[1] .. pointer.codeDigest) end",
-        "end",
-        "redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[4])",
-        "redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])",
-        "return 1",
-      ].join("\n"),
-      2,
-      userKey(input.userId),
-      codeKey(input.codeDigest),
-      `${keyPrefix}:code:`,
-      JSON.stringify({
-        userId: input.userId,
-        state: "active",
-      } satisfies CodeRecord),
-      JSON.stringify({
-        codeDigest: input.codeDigest,
-        expiresAt: input.expiresAt.toISOString(),
-      } satisfies UserPointer),
-      input.ttlSeconds,
+    await this.command(() =>
+      this.redis.eval(
+        [
+          "local previous = redis.call('GET', KEYS[1])",
+          "if previous then",
+          "  local ok, pointer = pcall(cjson.decode, previous)",
+          "  if ok and pointer.codeDigest then redis.call('DEL', ARGV[1] .. pointer.codeDigest) end",
+          "end",
+          "redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[4])",
+          "redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])",
+          "return 1",
+        ].join("\n"),
+        2,
+        userKey(input.userId),
+        codeKey(input.codeDigest),
+        `${keyPrefix}:code:`,
+        JSON.stringify({
+          userId: input.userId,
+          state: "active",
+        } satisfies CodeRecord),
+        JSON.stringify({
+          codeDigest: input.codeDigest,
+          expiresAt: input.expiresAt.toISOString(),
+        } satisfies UserPointer),
+        input.ttlSeconds,
+      ),
     );
   }
 
   async getActiveForUser(userId: string) {
     await this.connect();
     const pointer = parseJson<UserPointer>(
-      await this.redis.get(userKey(userId)),
+      await this.command(() => this.redis.get(userKey(userId))),
     );
     if (!pointer?.codeDigest || !pointer.expiresAt) return null;
     return {
@@ -82,24 +85,26 @@ export class RedisLinkCodeStore implements DiscordLinkChallengeStore {
 
   async claim(input: { codeDigest: string; interactionId: string }) {
     await this.connect();
-    const result = await this.redis.eval(
-      [
-        "local value = redis.call('GET', KEYS[1])",
-        "if not value then return 'not_found' end",
-        "local ok, record = pcall(cjson.decode, value)",
-        "if not ok or not record.userId then return 'not_found' end",
-        "if record.state == 'active' then",
-        "  record.state = 'claimed'",
-        "  record.claimInteractionId = ARGV[1]",
-        "  redis.call('SET', KEYS[1], cjson.encode(record), 'KEEPTTL')",
-        "  return 'claimed|' .. record.userId",
-        "end",
-        "if record.claimInteractionId == ARGV[1] then return 'same|' .. record.userId end",
-        "return 'other'",
-      ].join("\n"),
-      1,
-      codeKey(input.codeDigest),
-      input.interactionId,
+    const result = await this.command(() =>
+      this.redis.eval(
+        [
+          "local value = redis.call('GET', KEYS[1])",
+          "if not value then return 'not_found' end",
+          "local ok, record = pcall(cjson.decode, value)",
+          "if not ok or not record.userId then return 'not_found' end",
+          "if record.state == 'active' then",
+          "  record.state = 'claimed'",
+          "  record.claimInteractionId = ARGV[1]",
+          "  redis.call('SET', KEYS[1], cjson.encode(record), 'KEEPTTL')",
+          "  return 'claimed|' .. record.userId",
+          "end",
+          "if record.claimInteractionId == ARGV[1] then return 'same|' .. record.userId end",
+          "return 'other'",
+        ].join("\n"),
+        1,
+        codeKey(input.codeDigest),
+        input.interactionId,
+      ),
     );
     const value = typeof result === "string" ? result : "not_found";
     if (value === "not_found") return { status: "not_found" } as const;
@@ -114,20 +119,22 @@ export class RedisLinkCodeStore implements DiscordLinkChallengeStore {
 
   async releaseClaim(input: { codeDigest: string; interactionId: string }) {
     await this.connect();
-    await this.redis.eval(
-      [
-        "local value = redis.call('GET', KEYS[1])",
-        "if not value then return 0 end",
-        "local ok, record = pcall(cjson.decode, value)",
-        "if not ok or record.state ~= 'claimed' or record.claimInteractionId ~= ARGV[1] then return 0 end",
-        "record.state = 'active'",
-        "record.claimInteractionId = nil",
-        "redis.call('SET', KEYS[1], cjson.encode(record), 'KEEPTTL')",
-        "return 1",
-      ].join("\n"),
-      1,
-      codeKey(input.codeDigest),
-      input.interactionId,
+    await this.command(() =>
+      this.redis.eval(
+        [
+          "local value = redis.call('GET', KEYS[1])",
+          "if not value then return 0 end",
+          "local ok, record = pcall(cjson.decode, value)",
+          "if not ok or record.state ~= 'claimed' or record.claimInteractionId ~= ARGV[1] then return 0 end",
+          "record.state = 'active'",
+          "record.claimInteractionId = nil",
+          "redis.call('SET', KEYS[1], cjson.encode(record), 'KEEPTTL')",
+          "return 1",
+        ].join("\n"),
+        1,
+        codeKey(input.codeDigest),
+        input.interactionId,
+      ),
     );
   }
 
@@ -137,30 +144,54 @@ export class RedisLinkCodeStore implements DiscordLinkChallengeStore {
     interactionId: string;
   }) {
     await this.connect();
-    await this.redis.eval(
-      [
-        "local codeValue = redis.call('GET', KEYS[2])",
-        "if codeValue then",
-        "  local codeOk, record = pcall(cjson.decode, codeValue)",
-        "  if codeOk and record.userId == ARGV[1] and record.state == 'claimed' and record.claimInteractionId == ARGV[3] then redis.call('DEL', KEYS[2]) end",
-        "end",
-        "local userValue = redis.call('GET', KEYS[1])",
-        "if userValue then",
-        "  local userOk, pointer = pcall(cjson.decode, userValue)",
-        "  if userOk and pointer.codeDigest == ARGV[2] then redis.call('DEL', KEYS[1]) end",
-        "end",
-        "return 1",
-      ].join("\n"),
-      2,
-      userKey(input.userId),
-      codeKey(input.codeDigest),
-      input.userId,
-      input.codeDigest,
-      input.interactionId,
+    await this.command(() =>
+      this.redis.eval(
+        [
+          "local codeValue = redis.call('GET', KEYS[2])",
+          "if codeValue then",
+          "  local codeOk, record = pcall(cjson.decode, codeValue)",
+          "  if codeOk and record.userId == ARGV[1] and record.state == 'claimed' and record.claimInteractionId == ARGV[3] then redis.call('DEL', KEYS[2]) end",
+          "end",
+          "local userValue = redis.call('GET', KEYS[1])",
+          "if userValue then",
+          "  local userOk, pointer = pcall(cjson.decode, userValue)",
+          "  if userOk and pointer.codeDigest == ARGV[2] then redis.call('DEL', KEYS[1]) end",
+          "end",
+          "return 1",
+        ].join("\n"),
+        2,
+        userKey(input.userId),
+        codeKey(input.codeDigest),
+        input.userId,
+        input.codeDigest,
+        input.interactionId,
+      ),
     );
   }
 
   private async connect() {
-    if (this.redis.status === "wait") await this.redis.connect();
+    if (this.redis.status === "wait")
+      await this.command(() => this.redis.connect());
+  }
+
+  private async command<T>(operation: () => Promise<T>): Promise<T> {
+    try {
+      return await operation();
+    } catch (cause) {
+      const providerCode =
+        typeof cause === "object" &&
+        cause !== null &&
+        "code" in cause &&
+        typeof cause.code === "string"
+          ? cause.code
+          : undefined;
+      throw new ExternalDependencyFailure({
+        code: "redis-unavailable",
+        dependency: "redis",
+        retryable: !["NOAUTH", "WRONGPASS"].includes(providerCode ?? ""),
+        providerCode,
+        cause,
+      });
+    }
   }
 }

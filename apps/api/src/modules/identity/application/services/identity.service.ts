@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { AppError } from "../../../../errors/app-error.js";
 import type { PasswordHasherPort } from "../../../authentication/domain/contracts/authentication.contracts.js";
 import type {
   UserRecord,
@@ -9,19 +8,15 @@ import { normalizeEmail } from "../../../authentication/domain/value-objects/ema
 import type { AuthorizationService } from "../../../authorization/application/services/authorization.service.js";
 import type { AuthorizationContext } from "../../../authorization/domain/authorization.types.js";
 import { PERMISSIONS } from "../../../authorization/domain/permissions.js";
+import {
+  IdentityAuthorizationDeniedError,
+  IdentityCursorInvalidError,
+  IdentityStateConflictError,
+} from "../errors/identity.errors.js";
 import type {
   IdentityRole,
   IdentityUserRepositoryPort,
 } from "../ports/identity.ports.js";
-
-const unauthorized = () =>
-  new AppError({
-    code: "authorization-denied",
-    detail: "You are not authorized to manage users.",
-    statusCode: 403,
-    title: "Forbidden",
-    type: "https://nodeprox.dev/problems/authorization-denied",
-  });
 
 export type PublicUserRecord = Pick<
   UserRecord,
@@ -201,7 +196,7 @@ export class IdentityService {
       context,
       PERMISSIONS.ADMIN_USERS_MANAGE,
     );
-    if (!decision.allowed) throw unauthorized();
+    if (!decision.allowed) throw new IdentityAuthorizationDeniedError();
   }
 
   /**
@@ -220,7 +215,8 @@ export class IdentityService {
         PERMISSIONS.DISCORD_SERIES_GRANT_ISSUE,
       ),
     ]);
-    if (!manageUsers.allowed && !issueGrant.allowed) throw unauthorized();
+    if (!manageUsers.allowed && !issueGrant.allowed)
+      throw new IdentityAuthorizationDeniedError();
   }
 }
 
@@ -231,13 +227,7 @@ function decodeLookupCursor(value: string): { email: string; id: string } {
       throw new Error("invalid cursor");
     return parsed;
   } catch {
-    throw new AppError({
-      code: "validation-failed",
-      detail: "The lookup cursor is invalid.",
-      statusCode: 422,
-      title: "Validation failed",
-      type: "https://nodeprox.dev/problems/validation-failed",
-    });
+    throw new IdentityCursorInvalidError();
   }
 }
 
@@ -255,11 +245,4 @@ function isReviewTransitionAllowed(
   if (existing.status === "active") return input.status === "suspended";
   if (existing.status === "suspended") return input.status === "active";
   return false;
-}
-
-export class IdentityStateConflictError extends Error {
-  constructor() {
-    super("identity-state-conflict");
-    this.name = "IdentityStateConflictError";
-  }
 }

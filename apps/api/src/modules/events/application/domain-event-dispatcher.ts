@@ -162,6 +162,9 @@ export class DomainEventDispatcher {
     return {
       eventId: event.id,
       eventType: event.eventType,
+      aggregateType: event.aggregateType,
+      aggregateId: event.aggregateId,
+      originRequestId: event.originRequestId,
       attemptCount: event.attemptCount,
       ...extra,
     };

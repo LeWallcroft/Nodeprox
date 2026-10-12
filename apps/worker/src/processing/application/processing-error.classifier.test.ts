@@ -1,10 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
+  StorageObjectNotFoundError,
+  StorageProviderUnavailableError,
+} from "@nodeprox/storage/errors";
+import { ProcessingPermanentFailure } from "./processing.errors.js";
+import {
   classifyProcessingError,
   sanitizeProcessingErrorMessage,
 } from "./processing-error.classifier.js";
 
 describe("classifyProcessingError", () => {
+  it("prioritizes typed source and transient storage failures", () => {
+    expect(
+      classifyProcessingError(new StorageObjectNotFoundError()),
+    ).toMatchObject({
+      code: "SOURCE_OBJECT_MISSING",
+      retryable: false,
+    });
+    expect(
+      classifyProcessingError(
+        new StorageProviderUnavailableError({
+          providerCode: "InternalError",
+          httpStatus: 500,
+        }),
+      ),
+    ).toMatchObject({
+      code: "STORAGE_WRITE_FAILED",
+      retryable: true,
+    });
+    expect(
+      classifyProcessingError(
+        new ProcessingPermanentFailure("VALIDATION_MANIFEST_MISMATCH"),
+      ),
+    ).toMatchObject({
+      code: "VALIDATION_MANIFEST_MISMATCH",
+      retryable: false,
+    });
+  });
+  it("finds SQLSTATE through a bounded cause chain", () => {
+    expect(
+      classifyProcessingError(
+        new Error("wrapped", {
+          cause: Object.assign(new Error("db"), { code: "40001" }),
+        }),
+      ),
+    ).toMatchObject({
+      code: "DB_PUBLICATION_FAILED",
+      retryable: true,
+    });
+  });
   it.each([
     ["23505", false],
     ["23503", false],

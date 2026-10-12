@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
 import {
   auditLogs,
@@ -66,6 +66,18 @@ export interface DiscordLinkChallengeStore {
     codeDigest: string;
     interactionId: string;
   }): Promise<void>;
+}
+
+export interface DiscordIdentityLinkWriter {
+  updateDiscordIdentity(input: {
+    tx: NodeProxTransaction;
+    userId: string;
+    discordId: string;
+    discordUsername: string;
+    discordAvatarUrl: string | null;
+  }): Promise<
+    "linked" | "discord-id-already-linked" | "discord-link-already-exists"
+  >;
 }
 
 export class InMemoryLinkCodeStore implements DiscordLinkChallengeStore {
@@ -155,15 +167,6 @@ const discordLinkCode = () =>
 export const digestDiscordLinkCode = (code: string) =>
   createHash("sha256").update(code).digest("hex");
 
-function isUniqueViolation(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "23505"
-  );
-}
-
 const cleanReference = (value: string | undefined) => {
   const cleaned = value?.trim().replace(/[<>]/g, "") ?? "";
   if (cleaned.length > 240) throw new DiscordGatewayError("validation-failed");
@@ -183,6 +186,7 @@ export class DiscordGatewayService {
       | undefined,
     private readonly roleVerifier?: DiscordGuildRoleVerifier,
     private readonly seriesChannelGateway?: DiscordSeriesChannelGateway,
+    private readonly identityLinkWriter?: DiscordIdentityLinkWriter,
     private readonly onChallengeFinalizeFailure: (
       error: unknown,
     ) => void = () => {},
@@ -257,6 +261,7 @@ export class DiscordGatewayService {
   }
 
   async confirmLink(input: {
+    originRequestId?: string | undefined;
     code: string;
     discordId: string;
     discordUsername: string;
@@ -317,22 +322,22 @@ export class DiscordGatewayService {
           .for("update");
         if (linked && linked.id !== user.id)
           throw new DiscordGatewayError("discord-id-already-linked");
-        const [updated] = await tx
-          .update(users)
-          .set({
-            discordId: input.discordId,
-            discordUsername: input.discordUsername,
-            avatarUrl:
-              input.discordAvatarUrl &&
-              isTrustedDiscordAvatarUrl(input.discordAvatarUrl)
-                ? input.discordAvatarUrl
-                : null,
-            discordLinkedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(and(eq(users.id, user.id), isNull(users.discordId)))
-          .returning({ id: users.id });
-        if (!updated)
+        if (!this.identityLinkWriter)
+          throw new Error("discord-identity-link-writer-required");
+        const linkResult = await this.identityLinkWriter.updateDiscordIdentity({
+          tx,
+          userId: user.id,
+          discordId: input.discordId,
+          discordUsername: input.discordUsername,
+          discordAvatarUrl:
+            input.discordAvatarUrl &&
+            isTrustedDiscordAvatarUrl(input.discordAvatarUrl)
+              ? input.discordAvatarUrl
+              : null,
+        });
+        if (linkResult === "discord-id-already-linked")
+          throw new DiscordGatewayError("discord-id-already-linked");
+        if (linkResult !== "linked")
           throw new DiscordGatewayError("discord-link-already-exists");
         await tx.insert(discordInteractions).values({
           interactionId: input.interactionId,
@@ -356,6 +361,7 @@ export class DiscordGatewayService {
         await this.events.append(
           {
             type: "discord.identity.linked",
+            originRequestId: input.originRequestId ?? null,
             aggregateType: "user",
             aggregateId: user.id,
             actorUserId: user.id,
@@ -385,13 +391,12 @@ export class DiscordGatewayService {
         codeDigest,
         interactionId: input.interactionId,
       });
-      if (isUniqueViolation(error))
-        throw new DiscordGatewayError("discord-id-already-linked");
       throw error;
     }
   }
 
   async issueGrant(input: {
+    originRequestId?: string | undefined;
     targetDiscordId: string;
     reference?: string | undefined;
     actorDiscordId: string;
@@ -471,6 +476,7 @@ export class DiscordGatewayService {
       await this.events.append(
         {
           type: "series.creation_grant.issued",
+          originRequestId: input.originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: grant.id,
           payload: {
@@ -493,6 +499,7 @@ export class DiscordGatewayService {
   }
 
   async invalidateGrant(input: {
+    originRequestId?: string | undefined;
     grantId: string;
     actorDiscordId: string;
     actorRoleIds: string[];
@@ -555,6 +562,7 @@ export class DiscordGatewayService {
       await this.events.append(
         {
           type: "series.creation_grant.invalidated",
+          originRequestId: input.originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: input.grantId,
           payload: {

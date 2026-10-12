@@ -1,0 +1,2 @@
+ALTER TABLE "domain_event_outbox" ADD COLUMN "origin_request_id" text;--> statement-breakpoint
+CREATE INDEX "domain_event_outbox_origin_request_idx" ON "domain_event_outbox" USING btree ("origin_request_id");

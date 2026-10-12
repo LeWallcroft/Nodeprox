@@ -1,5 +1,6 @@
 import type { Job } from "bullmq";
 import { UnrecoverableError } from "bullmq";
+import { StorageProviderUnavailableError } from "@nodeprox/storage/errors";
 import { describe, expect, it, vi } from "vitest";
 import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
 import { createWorkerRuntime } from "./create-worker-runtime.js";
@@ -16,6 +17,44 @@ function fakeJob(name: string, attemptsMade = 0): Job {
 }
 
 describe("Worker composition", () => {
+  it("logs typed storage provider correlation on a failed job", () => {
+    const callbacks = new Map<string, (...args: unknown[]) => void>();
+    const logger = { error: vi.fn(), info: vi.fn() };
+    createWorkerRuntime(
+      {
+        config: { REDIS_URL: "redis://localhost:6379" },
+        processing: { PROCESSING_QUEUE_NAME: "chapter-processing" },
+        storageConfig: { provider: "filesystem" },
+        logger,
+      } as never,
+      () =>
+        ({
+          on: (event: string, callback: (...args: unknown[]) => void) => {
+            callbacks.set(event, callback);
+            return undefined as never;
+          },
+          close: vi.fn(),
+        }) as never,
+    );
+    callbacks.get("failed")?.(
+      fakeJob("chapter-processing"),
+      new StorageProviderUnavailableError({
+        providerCode: "InternalError",
+        providerRequestId: "provider-123",
+        httpStatus: 500,
+      }),
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        code: "STORAGE_PROVIDER_UNAVAILABLE",
+        retryable: true,
+        providerCode: "InternalError",
+        providerRequestId: "provider-123",
+        httpStatus: 500,
+      }),
+      "Worker job failed",
+    );
+  });
   it("completes an expected Admission rejection without a second BullMQ attempt", async () => {
     const validate = vi.fn().mockResolvedValue(undefined);
     const handler = createWorkerJobHandler({

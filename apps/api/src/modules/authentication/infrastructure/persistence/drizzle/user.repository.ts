@@ -11,6 +11,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { NodeProxDatabase } from "../../../../../../../../database/client.js";
+import { knownPersistenceConflict } from "../../../../../../../../database/postgres-error.js";
 import {
   auditLogs,
   chapterPermissions,
@@ -50,9 +51,13 @@ export class UserRepository implements UserRepositoryPort {
   }
 
   async create(input: typeof users.$inferInsert): Promise<UserRecord> {
-    const [user] = await this.db.insert(users).values(input).returning();
-    if (!user) throw new Error("User insert returned no record");
-    return toUserRecord(user);
+    try {
+      const [user] = await this.db.insert(users).values(input).returning();
+      if (!user) throw new Error("User insert returned no record");
+      return toUserRecord(user);
+    } catch (error) {
+      throw knownPersistenceConflict(error, ["users_email_unique"]) ?? error;
+    }
   }
 
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {

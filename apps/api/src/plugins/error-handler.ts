@@ -1,6 +1,8 @@
 import type { ProblemDetails } from "@nodeprox/types";
 import type { FastifyInstance } from "fastify";
+import { StorageError } from "@nodeprox/storage/errors";
 import { AppError } from "../errors/app-error.js";
+import { ExternalDependencyFailure } from "../errors/technical-failure.js";
 import { problemCategoryForStatus } from "../errors/error-codes.js";
 import { sanitizeOperationalText } from "../observability/sanitize-operational-text.js";
 import type { OperationAuditWriter } from "../observability/operation-audit-writer.js";
@@ -13,6 +15,15 @@ const internalError: ProblemDetails = {
   detail: "An unexpected error occurred.",
   code: "internal-error",
   category: "internal",
+};
+
+const externalDependencyError: ProblemDetails = {
+  type: "https://nodeprox.dev/problems/external-dependency-unavailable",
+  title: "Service temporarily unavailable",
+  status: 503,
+  detail: "A dependent service is temporarily unavailable. Please retry later.",
+  code: "external-dependency-unavailable",
+  category: "external_dependency",
 };
 
 function auditResultFor(
@@ -108,6 +119,31 @@ export function registerErrorHandler(
         .status(error.statusCode)
         .type("application/problem+json")
         .send(error.toProblemDetails(request.url, requestId));
+    }
+
+    if (
+      error instanceof ExternalDependencyFailure ||
+      error instanceof StorageError
+    ) {
+      request.log.error(
+        {
+          requestId,
+          actorId: context?.actorId ?? context?.userId,
+          code: error.code,
+          retryable: error.retryable,
+          ...(error instanceof ExternalDependencyFailure
+            ? { dependency: error.dependency }
+            : { dependency: "b2" }),
+          providerCode: error.providerCode,
+          providerRequestId: error.providerRequestId,
+          httpStatus: error.httpStatus,
+        },
+        "External dependency failed",
+      );
+      return reply
+        .status(503)
+        .type("application/problem+json")
+        .send({ ...externalDependencyError, instance: request.url, requestId });
     }
 
     request.log.error(

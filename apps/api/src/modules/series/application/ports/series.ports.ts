@@ -31,6 +31,7 @@ export interface SeriesRepositoryPort {
     grantId?: string | undefined;
     discordChannelId?: string | undefined;
     discordChannelNameSnapshot?: string | undefined;
+    originRequestId?: string | undefined;
   }): Promise<
     | { outcome: "created"; series: SeriesRecord }
     | {

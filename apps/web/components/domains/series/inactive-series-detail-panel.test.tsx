@@ -16,7 +16,7 @@ const fixture = vi.hoisted(() => ({
     actorUserId: string;
     responsibleUserIdAtEvent: string | null;
     responsibleLabelSnapshot: string | null;
-    sourceRequestId: string | null;
+    sourceReactivationRequestId: string | null;
     occurredAt: string;
   }>,
   requestStatus: "pending" as "pending" | "approved" | "rejected" | "cancelled",
@@ -129,7 +129,7 @@ function historyEntry(
     actorUserId: "actor-1",
     responsibleUserIdAtEvent: null,
     responsibleLabelSnapshot: "@responsable histórico",
-    sourceRequestId: null,
+    sourceReactivationRequestId: null,
     occurredAt: "2026-10-01T00:00:00.000Z",
   };
 }

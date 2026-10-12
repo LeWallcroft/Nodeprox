@@ -107,6 +107,17 @@ export async function apiRequestServer<T>(
       }
       throw normalizeApiError(response.status, payload);
     } catch (error) {
+      if (requestOptions.signal?.aborted) {
+        throw requestOptions.signal.reason ?? error;
+      }
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        error.name === "AbortError"
+      ) {
+        throw error;
+      }
       if (error instanceof ApiUnavailableError || error instanceof ApiError)
         throw error;
       if (retry === "bootstrap" && attempt < maxAttempts) {

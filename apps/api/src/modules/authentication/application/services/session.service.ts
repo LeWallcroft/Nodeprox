@@ -1,4 +1,3 @@
-import { AppError } from "../../../../errors/app-error.js";
 import type {
   PasswordHasherPort,
   SessionRepositoryPort,
@@ -15,14 +14,7 @@ import {
   hashSessionToken,
 } from "../../infrastructure/crypto/session-token-generator.js";
 import type { LoginInput } from "../dto/login.dto.js";
-
-const INVALID_CREDENTIALS = {
-  code: "invalid-credentials",
-  detail: "Invalid credentials.",
-  statusCode: 401,
-  title: "Authentication failed",
-  type: "https://nodeprox.dev/problems/invalid-credentials",
-} as const;
+import { AuthenticationRejectedError } from "../errors/authentication.errors.js";
 
 export class SessionService {
   constructor(
@@ -41,7 +33,7 @@ export class SessionService {
     const user = await this.users.findByEmail(email);
     if (!user) {
       await this.passwords.verifyDummy(input.password);
-      throw new AppError(INVALID_CREDENTIALS);
+      throw new AuthenticationRejectedError("invalid-credentials");
     }
     if (user.status !== "active") {
       const valid = await this.passwords.verify(
@@ -49,20 +41,14 @@ export class SessionService {
         input.password,
       );
       if (valid && user.status === "pending")
-        throw new AppError({
-          code: "account-pending",
-          detail: "The account is pending administrative approval.",
-          statusCode: 403,
-          title: "Account pending",
-          type: "https://nodeprox.dev/problems/account-pending",
-        });
-      throw new AppError(INVALID_CREDENTIALS);
+        throw new AuthenticationRejectedError("account-pending");
+      throw new AuthenticationRejectedError("invalid-credentials");
     }
     const valid = await this.passwords.verify(
       user.passwordHash,
       input.password,
     );
-    if (!valid) throw new AppError(INVALID_CREDENTIALS);
+    if (!valid) throw new AuthenticationRejectedError("invalid-credentials");
     if (this.passwords.needsRehash(user.passwordHash)) {
       await this.users.updatePasswordHash(
         user.id,

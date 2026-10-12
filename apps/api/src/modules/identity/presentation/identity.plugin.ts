@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import { KnownPersistenceConflictError } from "../../../../../../database/postgres-error.js";
 import { AppError } from "../../../errors/app-error.js";
 import { getRequestContext } from "../../../plugins/request-context.js";
 import type { SessionService } from "../../authentication/application/services/session.service.js";
@@ -11,9 +12,11 @@ import { validateMutationOrigin } from "../../authentication/presentation/origin
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import type { AuthorizationService } from "../../authorization/application/services/authorization.service.js";
 import {
-  IdentityService,
+  IdentityAuthorizationDeniedError,
+  IdentityCursorInvalidError,
   IdentityStateConflictError,
-} from "../application/services/identity.service.js";
+} from "../application/errors/identity.errors.js";
+import { IdentityService } from "../application/services/identity.service.js";
 
 const registrationSchema = z
   .object({
@@ -101,10 +104,27 @@ function context() {
   return { userId: value.userId, sessionId: value.sessionId };
 }
 
-function isUnique(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  if ("code" in error && error.code === "23505") return true;
-  return "cause" in error && isUnique(error.cause);
+async function presentIdentity<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof IdentityAuthorizationDeniedError)
+      throw problem(
+        "authorization-denied",
+        "You are not authorized to manage users.",
+        403,
+        "Forbidden",
+      );
+    if (error instanceof IdentityCursorInvalidError)
+      throw problem(
+        "validation-failed",
+        "The lookup cursor is invalid.",
+        422,
+        "Validation failed",
+      );
+    if (error instanceof IdentityStateConflictError) throw conflict();
+    throw error;
+  }
 }
 
 export function registerIdentityPlugin(
@@ -126,7 +146,11 @@ export function registerIdentityPlugin(
         .code(201)
         .send(await service.register(parse(registrationSchema, request.body)));
     } catch (error) {
-      if (isUnique(error)) throw conflict();
+      if (
+        error instanceof KnownPersistenceConflictError &&
+        error.constraint === "users_email_unique"
+      )
+        throw conflict();
       throw error;
     }
   });
@@ -136,15 +160,19 @@ export function registerIdentityPlugin(
     authentication.cookies,
   );
   app.get("/admin/users", { preHandler: session }, async () =>
-    service.list(context()),
+    presentIdentity(() => service.list(context())),
   );
   app.get("/admin/users/lookup", { preHandler: session }, async (request) =>
-    service.lookup(context(), parse(lookupSchema, request.query)),
+    presentIdentity(() =>
+      service.lookup(context(), parse(lookupSchema, request.query)),
+    ),
   );
   app.get("/admin/users/management", { preHandler: session }, async (request) =>
-    service.listManagement(
-      context(),
-      parse(managementListSchema, request.query),
+    presentIdentity(() =>
+      service.listManagement(
+        context(),
+        parse(managementListSchema, request.query),
+      ),
     ),
   );
 
@@ -154,10 +182,8 @@ export function registerIdentityPlugin(
     async (request) => {
       const { userId } = parse(userIdSchema, request.params);
       try {
-        const result = await service.review(
-          context(),
-          userId,
-          parse(reviewSchema, request.body),
+        const result = await presentIdentity(() =>
+          service.review(context(), userId, parse(reviewSchema, request.body)),
         );
         if (!result) throw notFound();
         return result;

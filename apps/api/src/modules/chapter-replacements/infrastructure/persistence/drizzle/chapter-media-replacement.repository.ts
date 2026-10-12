@@ -326,6 +326,7 @@ export class DrizzleChapterMediaReplacementRepository
         throw new Error("chapter-replacement-completion-conflict");
       await tx.insert(domainEventOutbox).values({
         eventType: "upload.completed",
+        originRequestId: input.requestId ?? null,
         aggregateType: "chapter_replacement",
         aggregateId: operation.id,
         actorUserId: operation.requestedByUserId,

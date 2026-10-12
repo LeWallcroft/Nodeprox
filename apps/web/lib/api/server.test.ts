@@ -100,6 +100,40 @@ describe("server API boundary", () => {
     expect(sleep).toHaveBeenCalledWith(250);
   });
 
+  it("preserves caller cancellation and does not retry it", async () => {
+    const controller = new AbortController();
+    const abortError = new DOMException(
+      "The operation was aborted",
+      "AbortError",
+    );
+    const fetcher = vi.fn().mockRejectedValue(abortError);
+    const sleep = vi.fn();
+
+    await expect(
+      apiRequestServer(
+        "/auth/session",
+        { retry: "bootstrap", signal: controller.signal },
+        dependencies(fetcher, sleep),
+      ),
+    ).rejects.toBe(abortError);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+
+    controller.abort(abortError);
+    const abortedFetcher = vi
+      .fn()
+      .mockRejectedValue(new TypeError("fetch failed"));
+    await expect(
+      apiRequestServer(
+        "/auth/session",
+        { retry: "bootstrap", signal: controller.signal },
+        dependencies(abortedFetcher, sleep),
+      ),
+    ).rejects.toBe(abortError);
+    expect(abortedFetcher).toHaveBeenCalledOnce();
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
   it.each([401, 403, 404])("fails fast for HTTP %s", async (status) => {
     const fetcher = vi.fn().mockResolvedValue(new Response("", { status }));
     const sleep = vi.fn();

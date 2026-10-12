@@ -202,6 +202,7 @@ describe("Notification inbox", () => {
       aggregateType: "series_creation_grant",
       aggregateId: randomUUID(),
       actorUserId: null,
+      originRequestId: null,
       payload: { targetUserId: firstUserId, guildId: "not-persisted" },
       occurredAt: new Date(),
       attemptCount: 0,

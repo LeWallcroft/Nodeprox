@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { ApiError } from "../../../lib/api/types";
 import { hasCapability } from "../../../lib/auth/visibility";
 import type {
   Series,
@@ -91,6 +92,7 @@ export function SeriesDetailPanel({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [managingHelpers, setManagingHelpers] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBlockedByMedia, setDeleteBlockedByMedia] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   if (!series)
     return (
@@ -105,7 +107,7 @@ export function SeriesDetailPanel({
           {error ? (
             <ErrorState
               title="No se pudo cargar el detalle"
-              description={error.message}
+              description={errorMessage(error)}
               action={
                 onRetry ? (
                   <Button type="button" onClick={onRetry}>
@@ -372,22 +374,42 @@ export function SeriesDetailPanel({
         confirmLabel="Eliminar serie"
         description="Se eliminarán la serie y sus capítulos vacíos. La acción se bloqueará si hay imágenes, archivos subidos, historial de almacenamiento o una carga o reemplazo en curso. En ese caso podrás deshabilitar la serie para conservar su contenido."
         error={deleteError}
+        confirmActionVisible={!deleteBlockedByMedia}
+        {...(deleteBlockedByMedia && onDeactivate
+          ? {
+              alternativeAction: {
+                label: "Deshabilitar serie",
+                onClick: () => {
+                  setConfirmingDelete(false);
+                  setDeleteError(null);
+                  setDeleteBlockedByMedia(false);
+                  setDeactivating(true);
+                },
+              },
+            }
+          : {})}
         open={confirmingDelete}
         pending={deletePending}
         title="¿Eliminar serie?"
         onOpenChange={(open) => {
           setConfirmingDelete(open);
-          if (!open) setDeleteError(null);
+          if (!open) {
+            setDeleteError(null);
+            setDeleteBlockedByMedia(false);
+          }
         }}
         onConfirm={() => {
           setDeleteError(null);
           void onDelete()
             .then(() => setConfirmingDelete(false))
-            .catch((cause: unknown) =>
+            .catch((cause: unknown) => {
+              setDeleteBlockedByMedia(
+                cause instanceof ApiError && cause.code === "series-has-media",
+              );
               setDeleteError(
                 errorMessage(cause, "No se pudo eliminar la serie."),
-              ),
-            );
+              );
+            });
         }}
       />
       {onDeactivate ? (

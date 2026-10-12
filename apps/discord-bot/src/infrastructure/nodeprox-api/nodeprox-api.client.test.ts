@@ -59,6 +59,49 @@ describe("NodeProxApiClient", () => {
     ).rejects.toEqual(new NodeProxApiError("discord-link-code-invalid", 400));
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
+  it("prefers the Problem Details request ID and never exposes provider detail", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          code: "discord-link-code-invalid",
+          requestId: "body-request",
+          category: "validation",
+          detail: "secret provider detail",
+        }),
+        { status: 400, headers: { "x-request-id": "header-request" } },
+      ),
+    );
+    const client = new NodeProxApiClient(
+      "https://api.example.test",
+      "token",
+      fetcher,
+    );
+    await expect(client.getIntegration()).rejects.toMatchObject({
+      code: "discord-link-code-invalid",
+      requestId: "body-request",
+      category: "validation",
+      status: 400,
+    });
+    await expect(client.getIntegration()).rejects.not.toThrow(
+      "secret provider detail",
+    );
+  });
+  it("falls back to the response request ID header", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ code: "unavailable" }), {
+        status: 503,
+        headers: { "x-request-id": "header-request" },
+      }),
+    );
+    const client = new NodeProxApiClient(
+      "https://api.example.test",
+      "token",
+      fetcher,
+    );
+    await expect(client.getIntegration()).rejects.toMatchObject({
+      requestId: "header-request",
+    });
+  });
 
   it("issues grants only through the internal M2M endpoint", async () => {
     const fetcher = vi.fn().mockResolvedValue(

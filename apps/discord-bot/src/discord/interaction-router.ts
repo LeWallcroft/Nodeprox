@@ -8,6 +8,7 @@ import type {
   UserSelectMenuInteraction,
 } from "discord.js";
 import type { Logger } from "pino";
+import { NodeProxApiError } from "../infrastructure/nodeprox-api/nodeprox-api.client.js";
 import { CommandUserError } from "./commands/command-user-error.js";
 import { DiscordInteractionError } from "./commands/discord-interaction-error.js";
 import { isAllowedControlChannel } from "./guards/control-channel.guard.js";
@@ -132,16 +133,23 @@ export function registerInteractionRouter(input: {
           err: source,
           errorName: error instanceof Error ? error.name : typeof error,
           errorCode:
-            error instanceof DiscordInteractionError
-              ? error.failure
-              : undefined,
+            source instanceof NodeProxApiError
+              ? source.code
+              : error instanceof DiscordInteractionError
+                ? error.failure
+                : undefined,
+          apiRequestId:
+            source instanceof NodeProxApiError ? source.requestId : undefined,
+          apiStatus:
+            source instanceof NodeProxApiError ? source.status : undefined,
           errorMessage: error instanceof Error ? error.message : String(error),
           command: handlerName,
           interactionId: interaction.id,
           guildId: interaction.guildId,
           channelId: interaction.channelId,
           discordUserId: interaction.user.id,
-          status: "failed",
+          status: source instanceof NodeProxApiError ? source.status : "failed",
+          result: "failed",
           durationMs: Date.now() - startedAt,
         },
         "Discord command failed",

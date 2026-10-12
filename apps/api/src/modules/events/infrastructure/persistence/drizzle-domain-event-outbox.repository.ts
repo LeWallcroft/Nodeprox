@@ -27,6 +27,7 @@ export class DrizzleDomainEventOutboxRepository
           aggregateType: domainEventOutbox.aggregateType,
           aggregateId: domainEventOutbox.aggregateId,
           actorUserId: domainEventOutbox.actorUserId,
+          originRequestId: domainEventOutbox.originRequestId,
           payload: domainEventOutbox.payload,
           occurredAt: domainEventOutbox.occurredAt,
           attemptCount: domainEventOutbox.attemptCount,

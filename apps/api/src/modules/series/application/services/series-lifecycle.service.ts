@@ -19,7 +19,7 @@ export class SeriesLifecycleService {
       seriesId: string;
       reason: SeriesInactiveReason;
       reasonDetail?: string | null | undefined;
-      requestId?: string | undefined;
+      correlationRequestId?: string | undefined;
     },
   ) {
     return this.mutations.deactivate({ actor: context, ...input });
@@ -30,7 +30,7 @@ export class SeriesLifecycleService {
     input: {
       seriesId: string;
       resolutionNote?: string | null | undefined;
-      requestId?: string | undefined;
+      correlationRequestId?: string | undefined;
     },
   ) {
     return this.mutations.reactivate({ actor: context, ...input });
@@ -41,7 +41,7 @@ export class SeriesLifecycleService {
     input: {
       seriesId: string;
       note?: string | null | undefined;
-      requestId?: string | undefined;
+      correlationRequestId?: string | undefined;
     },
   ) {
     return this.mutations.requestReactivation({ actor: context, ...input });
@@ -51,7 +51,8 @@ export class SeriesLifecycleService {
     context: AuthorizationContext,
     input: {
       seriesId: string;
-      requestId: string;
+      reactivationRequestId: string;
+      correlationRequestId?: string | undefined;
       resolutionNote?: string | null | undefined;
     },
   ) {
@@ -62,7 +63,8 @@ export class SeriesLifecycleService {
     context: AuthorizationContext,
     input: {
       seriesId: string;
-      requestId: string;
+      reactivationRequestId: string;
+      correlationRequestId?: string | undefined;
       resolutionNote?: string | null | undefined;
     },
   ) {

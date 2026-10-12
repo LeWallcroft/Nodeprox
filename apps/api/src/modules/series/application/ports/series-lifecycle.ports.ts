@@ -31,7 +31,7 @@ export type SeriesLifecycleDetail = {
     actorUserId: string;
     responsibleUserIdAtEvent: string | null;
     responsibleLabelSnapshot: string | null;
-    sourceRequestId: string | null;
+    sourceReactivationRequestId: string | null;
     occurredAt: Date;
   }>;
   requests: Array<{
@@ -53,32 +53,35 @@ export interface SeriesLifecycleMutationPort {
     seriesId: string;
     reason: SeriesInactiveReason;
     reasonDetail?: string | null | undefined;
-    requestId?: string | undefined;
+    correlationRequestId?: string | undefined;
   }): Promise<{ outcome: "deactivated" } | SeriesLifecycleFailure>;
   reactivate(input: {
     actor: AuthorizationContext;
     seriesId: string;
     resolutionNote?: string | null | undefined;
-    requestId?: string | undefined;
+    correlationRequestId?: string | undefined;
   }): Promise<{ outcome: "reactivated" } | SeriesLifecycleFailure>;
   requestReactivation(input: {
     actor: AuthorizationContext;
     seriesId: string;
     note?: string | null | undefined;
-    requestId?: string | undefined;
+    correlationRequestId?: string | undefined;
   }): Promise<
-    { outcome: "requested"; requestId: string } | SeriesLifecycleFailure
+    | { outcome: "requested"; reactivationRequestId: string }
+    | SeriesLifecycleFailure
   >;
   approveReactivation(input: {
     actor: AuthorizationContext;
     seriesId: string;
-    requestId: string;
+    reactivationRequestId: string;
+    correlationRequestId?: string | undefined;
     resolutionNote?: string | null | undefined;
   }): Promise<{ outcome: "approved" } | SeriesLifecycleFailure>;
   rejectReactivation(input: {
     actor: AuthorizationContext;
     seriesId: string;
-    requestId: string;
+    reactivationRequestId: string;
+    correlationRequestId?: string | undefined;
     resolutionNote?: string | null | undefined;
   }): Promise<{ outcome: "rejected" } | SeriesLifecycleFailure>;
 }

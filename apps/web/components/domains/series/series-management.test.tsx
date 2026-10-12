@@ -55,6 +55,18 @@ describe("Series management presentation", () => {
     expect(panel).toContain(
       'errorMessage(cause, "No se pudo eliminar la serie.")',
     );
+    const seriesPage = readFileSync(
+      "apps/web/app/(dashboard)/series/page.tsx",
+      "utf8",
+    );
+    expect(seriesPage).not.toContain("setActionError(errorMessage(cause))");
+    expect(seriesPage).not.toContain('role="alert"');
+    expect(
+      readFileSync("apps/web/components/ui/confirmation-dialog.tsx", "utf8"),
+    ).toContain("bg-destructive-surface p-3 text-sm text-destructive-text");
+    expect(panel).toContain('cause.code === "series-has-media"');
+    expect(panel).toContain("confirmActionVisible={!deleteBlockedByMedia}");
+    expect(panel).toContain('label: "Deshabilitar serie"');
   });
 
   it("explains why deactivation is blocked and requires details for Otros", () => {
@@ -68,6 +80,12 @@ describe("Series management presentation", () => {
       'errorMessage(cause, "No se pudo deshabilitar la serie.")',
     );
     expect(dialog).toContain('role="alert"');
+    expect(dialog).toContain(
+      "bg-destructive-surface p-3 text-sm text-destructive-text",
+    );
+    expect(dialog).toContain("SearchableCombobox");
+    expect(dialog).toContain('id="series-deactivation-reason"');
+    expect(dialog).not.toContain("<select");
   });
 
   it("styles Series deactivation as a consequential action", () => {

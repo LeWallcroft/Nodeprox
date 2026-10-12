@@ -72,7 +72,7 @@ export class DrizzleSeriesLifecycleRepository
     actor: Actor,
     seriesId: string,
     action: string,
-    requestId?: string,
+    correlationRequestId?: string,
     metadata: Record<string, unknown> = {},
   ) {
     await tx.insert(auditLogs).values({
@@ -80,7 +80,7 @@ export class DrizzleSeriesLifecycleRepository
       action,
       resourceType: "series",
       resourceId: seriesId,
-      ...(requestId ? { requestId } : {}),
+      ...(correlationRequestId ? { requestId: correlationRequestId } : {}),
       metadata: { seriesId, ...metadata },
     });
   }
@@ -134,7 +134,7 @@ export class DrizzleSeriesLifecycleRepository
         input.actor,
         input.seriesId,
         "series.lifecycle.deactivated",
-        input.requestId,
+        input.correlationRequestId,
         { reason: input.reason },
       );
       return { outcome: "deactivated" as const };
@@ -204,7 +204,7 @@ export class DrizzleSeriesLifecycleRepository
           input.actor,
           input.seriesId,
           "series.reactivation.cancelled",
-          input.requestId,
+          input.correlationRequestId,
         );
       }
       await tx.insert(seriesOperationalHistory).values({
@@ -222,7 +222,7 @@ export class DrizzleSeriesLifecycleRepository
         input.actor,
         input.seriesId,
         "series.lifecycle.reactivated",
-        input.requestId,
+        input.correlationRequestId,
       );
       return { outcome: "reactivated" as const };
     });
@@ -291,6 +291,7 @@ export class DrizzleSeriesLifecycleRepository
       const occurredAt = new Date();
       await tx.insert(domainEventOutbox).values({
         eventType: "series.reactivation.requested",
+        originRequestId: input.correlationRequestId ?? null,
         aggregateType: "series",
         aggregateId: input.seriesId,
         actorUserId: input.actor.userId,
@@ -306,9 +307,12 @@ export class DrizzleSeriesLifecycleRepository
         input.actor,
         input.seriesId,
         "series.reactivation.requested",
-        input.requestId,
+        input.correlationRequestId,
       );
-      return { outcome: "requested" as const, requestId: created.id };
+      return {
+        outcome: "requested" as const,
+        reactivationRequestId: created.id,
+      };
     });
   }
 
@@ -345,7 +349,7 @@ export class DrizzleSeriesLifecycleRepository
       const [request] = await tx
         .select()
         .from(seriesReactivationRequests)
-        .where(eq(seriesReactivationRequests.id, input.requestId))
+        .where(eq(seriesReactivationRequests.id, input.reactivationRequestId))
         .for("update")
         .limit(1);
       if (!request || request.seriesId !== input.seriesId)
@@ -392,8 +396,9 @@ export class DrizzleSeriesLifecycleRepository
             input.actor,
             input.seriesId,
             "series.assignment.changed_on_reactivation",
-            request.id,
+            input.correlationRequestId,
             {
+              reactivationRequestId: request.id,
               previousResponsibleUserId: assignment?.responsibleUserId ?? null,
               responsibleUserId: request.requestedBy,
             },
@@ -425,7 +430,7 @@ export class DrizzleSeriesLifecycleRepository
           inactiveReason: previous?.reason,
           inactiveReasonDetail: previous?.detail,
           actorUserId: input.actor.userId,
-          sourceRequestId: request.id,
+          sourceReactivationRequestId: request.id,
           ...snapshot,
           occurredAt: now,
         });
@@ -434,12 +439,16 @@ export class DrizzleSeriesLifecycleRepository
           input.actor,
           input.seriesId,
           "series.reactivation.approved",
+          input.correlationRequestId,
+          { reactivationRequestId: request.id },
         );
         await this.audit(
           tx,
           input.actor,
           input.seriesId,
           "series.lifecycle.reactivated",
+          input.correlationRequestId,
+          { reactivationRequestId: request.id },
         );
       } else {
         await this.audit(
@@ -447,6 +456,8 @@ export class DrizzleSeriesLifecycleRepository
           input.actor,
           input.seriesId,
           "series.reactivation.rejected",
+          input.correlationRequestId,
+          { reactivationRequestId: request.id },
         );
       }
       return {

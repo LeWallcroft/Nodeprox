@@ -11,7 +11,8 @@ export type ErrorPresentation = {
 /** Presentation-only mapping. Feature components depend on stable codes, never `detail`. */
 export function resolveErrorPresentation(error: unknown): ErrorPresentation {
   const details = error instanceof ApiError ? error.details : undefined;
-  const code = details?.code;
+  const code =
+    details?.code ?? (error instanceof ApiError ? error.code : undefined);
   const requestId = details?.requestId;
   const known: Record<string, Omit<ErrorPresentation, "requestId">> = {
     "chapter-conflict": {
@@ -131,9 +132,7 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
     return {
       title: "Revisa los datos ingresados",
       message:
-        error instanceof ApiError
-          ? error.message
-          : "La solicitud no es válida.",
+        "La solicitud no es válida. Revisa los datos e inténtalo nuevamente.",
       severity: "warning",
       presentation: "inline",
       ...(requestId ? { requestId } : {}),
@@ -150,13 +149,15 @@ export function resolveErrorPresentation(error: unknown): ErrorPresentation {
   return {
     title: "No se pudo completar la operación",
     message:
-      error instanceof ApiError ? error.message : "Inténtalo nuevamente.",
+      "Inténtalo nuevamente. Si el problema continúa, contacta a soporte.",
     severity: "error",
     presentation: "toast",
     ...(requestId ? { requestId } : {}),
   };
 }
 
-export function problemReference(problem?: ProblemDetails): string | undefined {
+export function problemReference(
+  problem?: Partial<ProblemDetails>,
+): string | undefined {
   return problem?.requestId;
 }

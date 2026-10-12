@@ -20,21 +20,38 @@ export class BrevoTransactionalEmail implements TransactionalEmailPort {
     resetUrl: string;
     expiresAt: Date;
   }): Promise<void> {
-    const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-      method: "POST",
-      headers: {
-        "api-key": this.config.apiKey,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        sender: { email: this.config.fromEmail, name: this.config.fromName },
-        to: [{ email: input.to }],
-        subject: "Restablece tu contraseña · NodeProx",
-        htmlContent: passwordResetTemplate(input),
-        textContent: passwordResetText(input),
-      }),
-    });
-    if (!response.ok) throw new Error("Brevo password reset delivery failed");
+    let response: Response;
+    try {
+      response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": this.config.apiKey,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          sender: { email: this.config.fromEmail, name: this.config.fromName },
+          to: [{ email: input.to }],
+          subject: "Restablece tu contraseña · NodeProx",
+          htmlContent: passwordResetTemplate(input),
+          textContent: passwordResetText(input),
+        }),
+      });
+    } catch (cause) {
+      throw new ExternalDependencyFailure({
+        code: "brevo-unavailable",
+        dependency: "brevo",
+        retryable: true,
+        cause,
+      });
+    }
+    if (!response.ok)
+      throw new ExternalDependencyFailure({
+        code: "brevo-delivery-failed",
+        dependency: "brevo",
+        retryable: [408, 429, 500, 502, 503, 504].includes(response.status),
+        httpStatus: response.status,
+        providerRequestId: response.headers.get("x-request-id") ?? undefined,
+      });
   }
 }
 
@@ -132,3 +149,4 @@ Continúa aquí: ${input.resetUrl}
 Este enlace expira el ${input.expiresAt.toISOString()} y sólo puede usarse una vez.
 Si no realizaste esta solicitud, puedes ignorar este correo.`;
 }
+import { ExternalDependencyFailure } from "../../../../errors/technical-failure.js";

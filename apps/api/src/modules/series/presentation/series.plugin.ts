@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { NodeProxDatabase } from "../../../../../../database/client.js";
+import { KnownPersistenceConflictError } from "../../../../../../database/postgres-error.js";
 import { AppError } from "../../../errors/app-error.js";
 import {
   getRequestContext,
@@ -104,8 +105,8 @@ const noteSchema = z
 const requestSchema = z
   .object({ note: z.string().max(1000).nullable().optional() })
   .strict();
-const requestIdSchema = z
-  .object({ seriesId: z.uuid(), requestId: z.uuid() })
+const reactivationRequestIdSchema = z
+  .object({ seriesId: z.uuid(), reactivationRequestId: z.uuid() })
   .strict();
 
 const error = (
@@ -230,12 +231,6 @@ function parse<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   return result.data;
 }
 
-function isUnique(errorValue: unknown): boolean {
-  if (typeof errorValue !== "object" || errorValue === null) return false;
-  if ("code" in errorValue && errorValue.code === "23505") return true;
-  return "cause" in errorValue && isUnique(errorValue.cause);
-}
-
 export function registerSeriesPlugin(
   app: FastifyInstance,
   db: NodeProxDatabase,
@@ -295,7 +290,10 @@ export function registerSeriesPlugin(
         seriesCreateSchema,
         request.body,
       );
-      const result = await seriesService.create(context(), input);
+      const result = await seriesService.create(context(), {
+        ...input,
+        originRequestId: getRequestContext()?.requestId,
+      });
       if ("forbidden" in result) throw forbidden;
       if ("outcome" in result) {
         if (result.outcome === "channel-required")
@@ -350,7 +348,11 @@ export function registerSeriesPlugin(
       return reply.code(201).send(result);
     } catch (cause) {
       if (cause instanceof InvalidSeriesSlugError) throw invalidSeriesSlug;
-      if (isUnique(cause)) throw seriesSlugConflict;
+      if (
+        cause instanceof KnownPersistenceConflictError &&
+        cause.constraint === "series_slug_unique"
+      )
+        throw seriesSlugConflict;
       throw cause;
     }
   });
@@ -384,7 +386,7 @@ export function registerSeriesPlugin(
         await lifecycleService.deactivate(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
@@ -400,7 +402,7 @@ export function registerSeriesPlugin(
         await lifecycleService.reactivate(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
@@ -416,7 +418,7 @@ export function registerSeriesPlugin(
         await lifecycleService.requestReactivation(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
       return reply.code(201).send(result);
@@ -424,30 +426,32 @@ export function registerSeriesPlugin(
   );
 
   app.post(
-    "/series/:seriesId/reactivation-requests/:requestId/approve",
+    "/series/:seriesId/reactivation-requests/:reactivationRequestId/approve",
     { preHandler: session },
     async (request) => {
-      const params = parse(requestIdSchema, request.params);
+      const params = parse(reactivationRequestIdSchema, request.params);
       const body = parse(noteSchema, request.body ?? {});
       return lifecycleOutcome(
         await lifecycleService.approveReactivation(context(), {
           ...params,
           ...body,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
   );
 
   app.post(
-    "/series/:seriesId/reactivation-requests/:requestId/reject",
+    "/series/:seriesId/reactivation-requests/:reactivationRequestId/reject",
     { preHandler: session },
     async (request) => {
-      const params = parse(requestIdSchema, request.params);
+      const params = parse(reactivationRequestIdSchema, request.params);
       const body = parse(noteSchema, request.body ?? {});
       return lifecycleOutcome(
         await lifecycleService.rejectReactivation(context(), {
           ...params,
           ...body,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
@@ -497,21 +501,16 @@ export function registerSeriesPlugin(
 
   app.patch("/series/:seriesId", { preHandler: session }, async (request) => {
     const { seriesId } = parse(idSchema, request.params);
-    try {
-      const result = await seriesService.update(
-        context(),
-        seriesId,
-        parse(seriesPatchSchema, request.body),
-      );
-      if (!result) throw notFound;
-      if ("forbidden" in result) throw forbidden;
-      if ("inactive" in result) throw seriesInactive;
-      if ("conflict" in result) throw conflict;
-      return result;
-    } catch (cause) {
-      if (isUnique(cause)) throw conflict;
-      throw cause;
-    }
+    const result = await seriesService.update(
+      context(),
+      seriesId,
+      parse(seriesPatchSchema, request.body),
+    );
+    if (!result) throw notFound;
+    if ("forbidden" in result) throw forbidden;
+    if ("inactive" in result) throw seriesInactive;
+    if ("conflict" in result) throw conflict;
+    return result;
   });
 
   app.delete(
@@ -646,7 +645,13 @@ export function registerSeriesPlugin(
         return reply.code(201).send(result);
       } catch (cause) {
         if (cause instanceof SeriesInactiveError) throw seriesInactive;
-        if (isUnique(cause)) {
+        if (
+          cause instanceof KnownPersistenceConflictError &&
+          [
+            "chapters_series_number_unique",
+            "chapters_series_public_key_unique",
+          ].includes(cause.constraint)
+        ) {
           const requestContext = getRequestContext();
           request.log.info(
             {
@@ -708,21 +713,16 @@ export function registerSeriesPlugin(
     { preHandler: session },
     async (request) => {
       const { chapterId } = parse(chapterIdSchema, request.params);
-      try {
-        const result = await chapterCore.update(
-          context(),
-          chapterId,
-          parse(chapterPatchSchema, request.body),
-        );
-        if ("notFound" in result) throw notFound;
-        if ("denied" in result) throw forbidden;
-        if ("inactive" in result) throw seriesInactive;
-        if ("conflict" in result) throw conflict;
-        return result.chapter;
-      } catch (cause) {
-        if (isUnique(cause)) throw conflict;
-        throw cause;
-      }
+      const result = await chapterCore.update(
+        context(),
+        chapterId,
+        parse(chapterPatchSchema, request.body),
+      );
+      if ("notFound" in result) throw notFound;
+      if ("denied" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
+      if ("conflict" in result) throw conflict;
+      return result.chapter;
     },
   );
 

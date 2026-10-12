@@ -22,6 +22,7 @@ const knownDuplicateName = `nodeprox_known_duplicate_${randomUUID().replaceAll("
 const unexpectedDuplicateName = `nodeprox_unexpected_duplicate_${randomUUID().replaceAll("-", "")}`;
 const multipleDuplicatesName = `nodeprox_multiple_duplicates_${randomUUID().replaceAll("-", "")}`;
 const grantProvenanceName = `nodeprox_grant_provenance_${randomUUID().replaceAll("-", "")}`;
+const incidentCorrelationName = `nodeprox_incident_${randomUUID().replaceAll("-", "")}`;
 const admin = postgres(infrastructure.databaseUrl, { max: 1 });
 
 function databaseUrl(name: string): string {
@@ -70,6 +71,7 @@ beforeAll(async () => {
   await createDatabaseNamed(unexpectedDuplicateName);
   await createDatabaseNamed(multipleDuplicatesName);
   await createDatabaseNamed(grantProvenanceName);
+  await createDatabaseNamed(incidentCorrelationName);
 });
 
 afterAll(async () => {
@@ -80,10 +82,38 @@ afterAll(async () => {
   await dropDatabaseNamed(unexpectedDuplicateName);
   await dropDatabaseNamed(multipleDuplicatesName);
   await dropDatabaseNamed(grantProvenanceName);
+  await dropDatabaseNamed(incidentCorrelationName);
   await admin.end();
 });
 
 describe("convergent migration sequence", () => {
+  it("upgrades historical domain events through 0045 with NULL origin and an index", async () => {
+    const database = createDatabase(databaseUrl(incidentCorrelationName));
+    const subset = await migrationsThrough(44);
+    const eventId = randomUUID();
+    try {
+      await migrate(database.db, { migrationsFolder: subset });
+      await database.sql`
+        INSERT INTO domain_event_outbox (id, event_type, aggregate_type, aggregate_id, payload)
+        VALUES (${eventId}, 'historical.event', 'series', ${randomUUID()}, '{}'::jsonb)
+      `;
+      await migrate(database.db, { migrationsFolder: "database/migrations" });
+      const [historical] = await database.sql<
+        { originRequestId: string | null }[]
+      >`
+        SELECT origin_request_id AS "originRequestId" FROM domain_event_outbox WHERE id = ${eventId}
+      `;
+      expect(historical?.originRequestId).toBeNull();
+      const [index] = await database.sql<{ indexname: string }[]>`
+        SELECT indexname FROM pg_indexes WHERE tablename = 'domain_event_outbox'
+          AND indexname = 'domain_event_outbox_origin_request_idx'
+      `;
+      expect(index?.indexname).toBe("domain_event_outbox_origin_request_idx");
+    } finally {
+      await database.sql.end();
+      await rm(subset, { recursive: true, force: true });
+    }
+  }, 120_000);
   it("backfills Discord grant provenance and enforces Web/Discord source constraints", async () => {
     const database = createDatabase(databaseUrl(grantProvenanceName));
     const subset = await migrationsThrough(30);

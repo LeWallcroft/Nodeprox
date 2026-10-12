@@ -4,6 +4,7 @@ export interface DomainEventEnvelope {
   aggregateType: string;
   aggregateId: string;
   actorUserId: string | null;
+  originRequestId: string | null;
   payload: Record<string, unknown>;
   occurredAt: Date;
   attemptCount: number;
