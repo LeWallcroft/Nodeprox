@@ -1,4 +1,7 @@
 export interface DiscordProfileRepository {
+  findLinkedByDiscordId(
+    discordId: string,
+  ): Promise<{ userId: string; discordId: string } | null>;
   listLinked(input: {
     afterId?: string;
     limit: number;

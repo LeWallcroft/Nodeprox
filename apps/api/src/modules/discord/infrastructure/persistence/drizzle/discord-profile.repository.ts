@@ -20,6 +20,17 @@ export class DrizzleDiscordProfileRepository
 {
   constructor(private readonly db: NodeProxDatabase) {}
 
+  async findLinkedByDiscordId(discordId: string) {
+    const [row] = await this.db
+      .select({ userId: users.id, discordId: users.discordId })
+      .from(users)
+      .where(eq(users.discordId, discordId))
+      .limit(1);
+    return row?.discordId
+      ? { userId: row.userId, discordId: row.discordId }
+      : null;
+  }
+
   listLinked(input: { afterId?: string; limit: number; staleBefore?: Date }) {
     return this.db
       .select({ userId: users.id, discordId: users.discordId })

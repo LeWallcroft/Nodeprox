@@ -8,6 +8,10 @@ const schema = z.object({
   NODEPROX_INTERNAL_API_URL: z.url(),
   APP_PUBLIC_URL: z.url().default("http://localhost:3000"),
   DISCORD_BOT_INTERNAL_TOKEN: z.string().trim().min(1),
+  DISCORD_PROFILE_EVENTS_ENABLED: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
   DISCORD_BOT_INTERNAL_HOST: z.string().trim().min(1).default("127.0.0.1"),
   DISCORD_BOT_INTERNAL_PORT: z.coerce
     .number()

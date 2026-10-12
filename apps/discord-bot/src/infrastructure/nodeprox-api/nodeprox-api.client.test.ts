@@ -2,6 +2,34 @@ import { describe, expect, it, vi } from "vitest";
 import { NodeProxApiClient, NodeProxApiError } from "./nodeprox-api.client.js";
 
 describe("NodeProxApiClient", () => {
+  it("signals only the Discord ID with an empty authenticated body", async () => {
+    const fetcher = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ accepted: true }), { status: 200 }),
+      );
+    const client = new NodeProxApiClient(
+      "https://api.example.test",
+      "internal-token",
+      fetcher,
+    );
+    await expect(
+      client.notifyProfileChanged({ discordId: "12345678901234567" }),
+    ).resolves.toEqual({ accepted: true });
+    expect(fetcher).toHaveBeenCalledWith(
+      new URL(
+        "/internal/discord/users/12345678901234567/profile-changed",
+        "https://api.example.test",
+      ),
+      expect.objectContaining({
+        method: "POST",
+        body: "{}",
+        headers: expect.objectContaining({
+          authorization: "Bearer internal-token",
+        }),
+      }),
+    );
+  });
   it("sends only the M2M contract and bounded request", async () => {
     const fetcher = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ linked: true, idempotent: false }), {

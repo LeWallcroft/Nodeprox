@@ -4,16 +4,17 @@ import { DiscordUserProfileUnavailableError } from "../application/discord-user-
 
 describe("DiscordBotUserProfileGateway", () => {
   it("accepts only the exact safe response and trusted Discord avatar", async () => {
-    const fetcher = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          id: "12345678901234567",
-          username: "reader",
-          avatarUrl:
-            "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
-        }),
-        { status: 200 },
-      ),
+    const fetcher = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "12345678901234567",
+            username: "reader",
+            avatarUrl:
+              "https://cdn.discordapp.com/avatars/12345678901234567/hash.webp",
+          }),
+          { status: 200 },
+        ),
     );
     const gateway = new DiscordBotUserProfileGateway(
       "http://discord-bot:3002",
@@ -26,6 +27,10 @@ describe("DiscordBotUserProfileGateway", () => {
     expect(fetcher).toHaveBeenCalledWith(
       expect.any(URL),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    await gateway.getProfile("12345678901234567", { force: true });
+    expect(fetcher.mock.calls[1]?.[0].toString()).toBe(
+      "http://discord-bot:3002/internal/discord/users/12345678901234567/profile?force=true",
     );
   });
 

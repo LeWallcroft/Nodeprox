@@ -1,9 +1,96 @@
 import { describe, expect, it, vi } from "vitest";
 import { SyncDiscordUserProfilesService } from "./sync-discord-user-profiles.service.js";
+import { DiscordUserProfileUnavailableError } from "./discord-user-profile.gateway.js";
 
 describe("SyncDiscordUserProfilesService", () => {
+  it("refreshes a linked profile with a force-fresh fetch", async () => {
+    const repository = {
+      findLinkedByDiscordId: vi.fn().mockResolvedValue({
+        userId: "user-1",
+        discordId: "12345678901234567",
+      }),
+      listLinked: vi.fn(),
+      updateDiscordProfile: vi.fn().mockResolvedValue("changed"),
+      getSyncStatus: vi.fn(),
+    };
+    const profiles = {
+      getProfile: vi.fn().mockResolvedValue({
+        id: "12345678901234567",
+        username: "new-name",
+        avatarUrl: null,
+      }),
+    };
+    const service = new SyncDiscordUserProfilesService(repository, profiles);
+    expect(
+      await service.syncLinkedProfileByDiscordId("12345678901234567"),
+    ).toBe("changed");
+    expect(profiles.getProfile).toHaveBeenCalledWith("12345678901234567", {
+      force: true,
+    });
+    expect(repository.updateDiscordProfile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-1",
+        expectedDiscordId: "12345678901234567",
+      }),
+    );
+    expect(repository.listLinked).not.toHaveBeenCalled();
+  });
+
+  it("does not mutate unlinked or unavailable profiles", async () => {
+    const repository = {
+      findLinkedByDiscordId: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue({
+          userId: "user-1",
+          discordId: "12345678901234567",
+        }),
+      listLinked: vi.fn(),
+      updateDiscordProfile: vi.fn(),
+      getSyncStatus: vi.fn(),
+    };
+    const profiles = {
+      getProfile: vi
+        .fn()
+        .mockRejectedValue(new DiscordUserProfileUnavailableError()),
+    };
+    const service = new SyncDiscordUserProfilesService(repository, profiles);
+    expect(
+      await service.syncLinkedProfileByDiscordId("12345678901234567"),
+    ).toBe("not-linked");
+    expect(
+      await service.syncLinkedProfileByDiscordId("12345678901234567"),
+    ).toBe("unavailable");
+    expect(repository.updateDiscordProfile).not.toHaveBeenCalled();
+  });
+
+  it("reports a link race without overwriting the newer identity", async () => {
+    const repository = {
+      findLinkedByDiscordId: vi.fn().mockResolvedValue({
+        userId: "user-1",
+        discordId: "12345678901234567",
+      }),
+      listLinked: vi.fn(),
+      updateDiscordProfile: vi.fn().mockResolvedValue("link-changed"),
+      getSyncStatus: vi.fn(),
+    };
+    const profiles = {
+      getProfile: vi.fn().mockResolvedValue({
+        id: "12345678901234567",
+        username: "name",
+        avatarUrl: null,
+      }),
+    };
+    expect(
+      await new SyncDiscordUserProfilesService(
+        repository,
+        profiles,
+      ).syncLinkedProfileByDiscordId("12345678901234567"),
+    ).toBe("link-changed");
+  });
   it("continues after an unavailable profile and guards updates through the repository", async () => {
     const repository = {
+      findLinkedByDiscordId: vi.fn(),
       listLinked: vi.fn().mockResolvedValue([
         { userId: "u1", discordId: "12345678901234567" },
         { userId: "u2", discordId: "22345678901234567" },
@@ -29,6 +116,7 @@ describe("SyncDiscordUserProfilesService", () => {
       refreshed: 0,
       failed: 1,
     });
+    expect(profiles.getProfile).toHaveBeenCalledWith("22345678901234567");
     expect(result.failures[0]).toMatchObject({ userId: "u1", code: "Error" });
     expect(repository.updateDiscordProfile).toHaveBeenCalledWith({
       userId: "u2",
@@ -41,6 +129,7 @@ describe("SyncDiscordUserProfilesService", () => {
 
   it("skips an unavailable Discord user without changing the linked projection", async () => {
     const repository = {
+      findLinkedByDiscordId: vi.fn(),
       listLinked: vi
         .fn()
         .mockResolvedValue([{ userId: "u1", discordId: "12345678901234567" }]),
@@ -59,6 +148,7 @@ describe("SyncDiscordUserProfilesService", () => {
 
   it("passes stale cutoff to repository selection", async () => {
     const repository = {
+      findLinkedByDiscordId: vi.fn(),
       listLinked: vi.fn().mockResolvedValue([]),
       updateDiscordProfile: vi.fn(),
       getSyncStatus: vi.fn(),

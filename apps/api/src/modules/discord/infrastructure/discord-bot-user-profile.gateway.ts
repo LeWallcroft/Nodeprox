@@ -14,13 +14,19 @@ export class DiscordBotUserProfileGateway implements DiscordUserProfileGateway {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async getProfile(discordId: string): Promise<DiscordUserProfile | null> {
+  async getProfile(
+    discordId: string,
+    options?: { force?: boolean },
+  ): Promise<DiscordUserProfile | null> {
     if (!snowflake.test(discordId))
       throw new DiscordUserProfileUnavailableError();
     let response: Response;
     try {
       response = await this.fetcher(
-        new URL(`/internal/discord/users/${discordId}/profile`, this.baseUrl),
+        new URL(
+          `/internal/discord/users/${discordId}/profile${options?.force ? "?force=true" : ""}`,
+          this.baseUrl,
+        ),
         {
           headers: { authorization: `Bearer ${this.internalToken}` },
           signal: AbortSignal.timeout(5_000),

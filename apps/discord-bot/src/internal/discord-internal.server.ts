@@ -191,7 +191,13 @@ export function createDiscordInternalServer(input: {
         return;
       }
       try {
-        const user = await input.client.users.fetch(profileDiscordId);
+        const force =
+          new URL(request.url ?? "", "http://localhost").searchParams.get(
+            "force",
+          ) === "true";
+        const user = force
+          ? await input.client.users.fetch(profileDiscordId, { force: true })
+          : await input.client.users.fetch(profileDiscordId);
         send(response, 200, {
           id: user.id,
           username: user.username,

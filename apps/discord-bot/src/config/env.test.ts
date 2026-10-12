@@ -11,6 +11,24 @@ const valid = {
 };
 
 describe("Discord bot configuration", () => {
+  it("defaults profile events off and parses explicit booleans", () => {
+    expect(loadDiscordBotConfig(valid).DISCORD_PROFILE_EVENTS_ENABLED).toBe(
+      false,
+    );
+    expect(
+      loadDiscordBotConfig({
+        ...valid,
+        DISCORD_PROFILE_EVENTS_ENABLED: "false",
+      }).DISCORD_PROFILE_EVENTS_ENABLED,
+    ).toBe(false);
+    expect(
+      loadDiscordBotConfig({ ...valid, DISCORD_PROFILE_EVENTS_ENABLED: "true" })
+        .DISCORD_PROFILE_EVENTS_ENABLED,
+    ).toBe(true);
+    expect(() =>
+      loadDiscordBotConfig({ ...valid, DISCORD_PROFILE_EVENTS_ENABLED: "yes" }),
+    ).toThrow("Discord bot configuration is invalid.");
+  });
   it.each([
     "DISCORD_BOT_TOKEN",
     "DISCORD_GUILD_ID",

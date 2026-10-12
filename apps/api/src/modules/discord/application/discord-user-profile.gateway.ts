@@ -5,7 +5,10 @@ export type DiscordUserProfile = {
 };
 
 export interface DiscordUserProfileGateway {
-  getProfile(discordId: string): Promise<DiscordUserProfile | null>;
+  getProfile(
+    discordId: string,
+    options?: { force?: boolean },
+  ): Promise<DiscordUserProfile | null>;
 }
 
 export class DiscordUserProfileUnavailableError extends Error {

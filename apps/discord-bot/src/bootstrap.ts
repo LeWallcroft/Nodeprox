@@ -13,6 +13,7 @@ import {
   registerShutdownHandlers,
 } from "./discord/lifecycle.js";
 import { registerGuildCommands } from "./discord/register-commands.js";
+import { registerDiscordProfileUpdateListener } from "./discord/profile-update-listener.js";
 import { BotHealthState } from "./health/health.js";
 import type { NodeProxDiscordApi } from "./infrastructure/nodeprox-api/contracts.js";
 import { NodeProxApiClient } from "./infrastructure/nodeprox-api/nodeprox-api.client.js";
@@ -70,12 +71,23 @@ export async function startBot(dependencies: StartBotDependencies = {}) {
       throw new Error("Discord bot integration configuration does not match.");
     logger.info("discord_bot.integration.validated");
 
-    const client = dependencies.client ?? createDiscordClient();
-    const stop = bindClientLifecycle({
+    const client =
+      dependencies.client ??
+      createDiscordClient({
+        profileEventsEnabled: config.DISCORD_PROFILE_EVENTS_ENABLED,
+      });
+    const profileUpdates = config.DISCORD_PROFILE_EVENTS_ENABLED
+      ? registerDiscordProfileUpdateListener({ client, api, logger })
+      : null;
+    const stopLifecycle = bindClientLifecycle({
       client,
       health,
       logger,
     });
+    const stop = async (signal: string) => {
+      profileUpdates?.stop();
+      await stopLifecycle(signal);
+    };
     if (dependencies.installSignalHandlers ?? true)
       registerShutdownHandlers(stop);
 

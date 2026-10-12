@@ -155,7 +155,7 @@ const discordProfileSyncConfigSchema = z.object({
     .number()
     .int()
     .min(900000)
-    .default(3600000),
+    .default(1200000),
   DISCORD_PROFILE_SYNC_BATCH_SIZE: z.coerce
     .number()
     .int()

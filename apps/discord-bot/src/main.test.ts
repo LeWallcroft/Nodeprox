@@ -112,6 +112,7 @@ describe("Discord bot startup", () => {
     NODEPROX_INTERNAL_API_URL: "http://127.0.0.1:3001",
     APP_PUBLIC_URL: "https://app.nodeprox.org",
     DISCORD_BOT_INTERNAL_TOKEN: "internal-token",
+    DISCORD_PROFILE_EVENTS_ENABLED: false,
     DISCORD_BOT_INTERNAL_HOST: "127.0.0.1",
     DISCORD_BOT_INTERNAL_PORT: 0,
     LOG_LEVEL: "silent",
@@ -143,6 +144,7 @@ describe("Discord bot startup", () => {
       api: {
         getIntegration,
         confirmLink: vi.fn(),
+        notifyProfileChanged: vi.fn(),
         issueSeriesCreationGrant: vi.fn(),
       },
       client: client as never,
@@ -185,6 +187,7 @@ describe("Discord bot startup", () => {
       api: {
         getIntegration,
         confirmLink: vi.fn(),
+        notifyProfileChanged: vi.fn(),
         issueSeriesCreationGrant: vi.fn(),
       },
       client: client as never,
@@ -237,6 +240,7 @@ describe("Discord bot startup", () => {
         api: {
           getIntegration: vi.fn().mockRejectedValue(transportError),
           confirmLink: vi.fn(),
+          notifyProfileChanged: vi.fn(),
           issueSeriesCreationGrant: vi.fn(),
         },
         client: client as never,
@@ -286,6 +290,7 @@ describe("Discord bot startup", () => {
               .fn()
               .mockRejectedValue(new NodeProxApiError(null, status)),
             confirmLink: vi.fn(),
+            notifyProfileChanged: vi.fn(),
             issueSeriesCreationGrant: vi.fn(),
           },
           client: client as never,
@@ -325,6 +330,7 @@ describe("Discord bot startup", () => {
             controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
           }),
           confirmLink: vi.fn(),
+          notifyProfileChanged: vi.fn(),
           issueSeriesCreationGrant: vi.fn(),
         },
         client: client as never,
@@ -363,6 +369,7 @@ describe("Discord bot startup", () => {
             controlChannelId: config.DISCORD_CONTROL_CHANNEL_ID,
           }),
           confirmLink: vi.fn(),
+          notifyProfileChanged: vi.fn(),
           issueSeriesCreationGrant: vi.fn(),
         },
         client: client as never,
