@@ -8,6 +8,21 @@ export class PostgresDiscordProfileSyncLease
 {
   constructor(private readonly sql: ReturnType<typeof createDatabase>["sql"]) {}
 
+  async isHeld(): Promise<boolean> {
+    const [result] = await this.sql`
+      select exists (
+        select 1
+        from pg_locks
+        where locktype = 'advisory'
+          and database = (select oid from pg_database where datname = current_database())
+          and granted
+          and objsubid = 1
+          and ((classid::bigint << 32) | objid::bigint) = hashtextextended('nodeprox:discord-profile-sync', 0)
+      ) as held
+    `;
+    return result?.held === true;
+  }
+
   async tryAcquire() {
     const reserved = await this.sql.reserve();
     try {

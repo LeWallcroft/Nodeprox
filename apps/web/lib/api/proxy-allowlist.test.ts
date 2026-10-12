@@ -19,8 +19,7 @@ describe("same-origin proxy allowlist", () => {
       ["admin/users", ["GET"]],
       ["admin/users/id", ["PATCH"]],
       ["admin/settings", ["GET", "PATCH"]],
-      ["admin/maintenance/discord-profiles", ["GET"]],
-      ["admin/maintenance/discord-profiles/sync", ["POST"]],
+      ["admin/discord/profile-sync", ["GET", "POST"]],
       ["admin/series-creation-grants/id/invalidate", ["POST"]],
       ["series", ["GET", "POST"]],
       ["series/id", ["GET", "PATCH", "DELETE"]],
@@ -63,6 +62,16 @@ describe("same-origin proxy allowlist", () => {
       "admin/users/id/series-responsibilities-extra",
     ])
       expect(isAllowedProxyRoute(path, "GET")).toBe(false);
+    for (const oldRoute of [
+      "admin/maintenance/discord-profiles",
+      "admin/maintenance/discord-profiles/sync",
+    ]) {
+      expect(isAllowedProxyRoute(oldRoute, "GET")).toBe(false);
+      expect(isAllowedProxyRoute(oldRoute, "POST")).toBe(false);
+    }
+    expect(isAllowedProxyRoute("admin/discord/profile-sync/extra", "GET")).toBe(
+      false,
+    );
   });
 
   it("allows only chapter operation validation reports and retries with their exact methods", () => {

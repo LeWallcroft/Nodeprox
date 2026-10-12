@@ -20,8 +20,19 @@ describe("DiscordProfileSyncCoordinator", () => {
         () => new Promise<typeof summary>((resolve) => (finish = resolve)),
       ),
     };
-    const leaseHandle = { release: vi.fn().mockResolvedValue(undefined) };
-    const lease = { tryAcquire: vi.fn().mockResolvedValue(leaseHandle) };
+    let held = false;
+    const leaseHandle = {
+      release: vi.fn().mockImplementation(async () => {
+        held = false;
+      }),
+    };
+    const lease = {
+      tryAcquire: vi.fn().mockImplementation(async () => {
+        held = true;
+        return leaseHandle;
+      }),
+      isHeld: vi.fn().mockImplementation(async () => held),
+    };
     const coordinator = new DiscordProfileSyncCoordinator(
       lease,
       runner as never,
@@ -31,7 +42,7 @@ describe("DiscordProfileSyncCoordinator", () => {
     await expect(coordinator.trigger({ mode: "force" })).resolves.toEqual({
       accepted: true,
     });
-    expect(coordinator.isRunning()).toBe(true);
+    await expect(coordinator.isRunningDistributed()).resolves.toBe(true);
     await expect(
       coordinator.trigger({ mode: "stale", staleBefore: new Date() }),
     ).resolves.toEqual({
@@ -42,13 +53,16 @@ describe("DiscordProfileSyncCoordinator", () => {
     finish(summary);
     await coordinator.waitForIdle();
     expect(leaseHandle.release).toHaveBeenCalledTimes(1);
-    expect(coordinator.isRunning()).toBe(false);
+    await expect(coordinator.isRunningDistributed()).resolves.toBe(false);
   });
 
   it("does not start when another process holds the advisory lease", async () => {
     const runner = { run: vi.fn() };
     const coordinator = new DiscordProfileSyncCoordinator(
-      { tryAcquire: vi.fn().mockResolvedValue(null) },
+      {
+        tryAcquire: vi.fn().mockResolvedValue(null),
+        isHeld: vi.fn().mockResolvedValue(true),
+      },
       runner as never,
       options,
     );
@@ -57,19 +71,22 @@ describe("DiscordProfileSyncCoordinator", () => {
       reason: "already-running",
     });
     expect(runner.run).not.toHaveBeenCalled();
-    expect(coordinator.isRunning()).toBe(false);
+    await expect(coordinator.isRunningDistributed()).resolves.toBe(true);
   });
 
   it("releases the lease and clears local state after runner failure", async () => {
     const release = vi.fn().mockResolvedValue(undefined);
     const coordinator = new DiscordProfileSyncCoordinator(
-      { tryAcquire: vi.fn().mockResolvedValue({ release }) },
+      {
+        tryAcquire: vi.fn().mockResolvedValue({ release }),
+        isHeld: vi.fn().mockResolvedValue(false),
+      },
       { run: vi.fn().mockRejectedValue(new Error("safe-to-hide")) } as never,
       options,
     );
     await coordinator.trigger({ mode: "force" });
     await coordinator.waitForIdle();
     expect(release).toHaveBeenCalledOnce();
-    expect(coordinator.isRunning()).toBe(false);
+    await expect(coordinator.isRunningDistributed()).resolves.toBe(false);
   });
 });

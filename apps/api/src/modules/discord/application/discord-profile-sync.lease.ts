@@ -4,4 +4,5 @@ export interface DiscordProfileSyncLeaseHandle {
 
 export interface DiscordProfileSyncLeasePort {
   tryAcquire(): Promise<DiscordProfileSyncLeaseHandle | null>;
+  isHeld(): Promise<boolean>;
 }

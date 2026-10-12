@@ -3,11 +3,12 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
+import { DiscordProfileSyncCoordinator } from "../../apps/api/src/modules/discord/application/discord-profile-sync.coordinator.js";
 import { DrizzleDiscordIdentityLinkRepository } from "../../apps/api/src/modules/discord/infrastructure/persistence/drizzle/discord-identity-link.repository.js";
 import { DrizzleDiscordProfileRepository } from "../../apps/api/src/modules/discord/infrastructure/persistence/drizzle/discord-profile.repository.js";
 import { PostgresDiscordProfileSyncLease } from "../../apps/api/src/modules/discord/infrastructure/postgres/postgres-discord-profile-sync.lease.js";
-import { auditLogs, users } from "../../database/schema/index.js";
 import { createDatabase } from "../../database/client.js";
+import { auditLogs, users } from "../../database/schema/index.js";
 
 const infrastructure = inject("infrastructure");
 const database = createDatabase(infrastructure.databaseUrl);
@@ -32,7 +33,7 @@ const profileSystem = {
   repository: profileRepository,
   runner: { setLogger: vi.fn() },
   coordinator: {
-    isRunning: vi.fn(() => false),
+    isRunningDistributed: vi.fn().mockResolvedValue(false),
     trigger: vi.fn().mockResolvedValue({ accepted: true }),
     waitForIdle: vi.fn().mockResolvedValue(undefined),
     setLogger: vi.fn(),
@@ -244,29 +245,49 @@ describe("Discord profile projection synchronization", () => {
     const second = new PostgresDiscordProfileSyncLease(database.sql);
     const handle = await first.tryAcquire();
     expect(handle).not.toBeNull();
+    await expect(first.isHeld()).resolves.toBe(true);
+    await expect(second.isHeld()).resolves.toBe(true);
+    const secondCoordinator = new DiscordProfileSyncCoordinator(
+      second,
+      { run: vi.fn() } as never,
+      { batchSize: 200, concurrency: 5 },
+    );
+    await expect(secondCoordinator.isRunningDistributed()).resolves.toBe(true);
     await expect(second.tryAcquire()).resolves.toBeNull();
     await handle?.release();
+    await expect(second.isHeld()).resolves.toBe(false);
+    await expect(secondCoordinator.isRunningDistributed()).resolves.toBe(false);
     const nextHandle = await second.tryAcquire();
     expect(nextHandle).not.toBeNull();
     await nextHandle?.release();
   });
 
-  it("protects maintenance status and force trigger with server-side authorization and request audit", async () => {
+  it("protects Discord profile sync with server-side authorization and request audit", async () => {
     const anonymousStatus = await app.inject({
       method: "GET",
-      url: "/admin/maintenance/discord-profiles",
+      url: "/admin/discord/profile-sync",
     });
     const anonymousTrigger = await app.inject({
       method: "POST",
-      url: "/admin/maintenance/discord-profiles/sync",
+      url: "/admin/discord/profile-sync",
     });
     expect(anonymousStatus.statusCode).toBe(401);
     expect(anonymousTrigger.statusCode).toBe(401);
 
+    await expect(
+      app.inject({ method: "GET", url: "/admin/maintenance/discord-profiles" }),
+    ).resolves.toMatchObject({ statusCode: 404 });
+    await expect(
+      app.inject({
+        method: "POST",
+        url: "/admin/maintenance/discord-profiles/sync",
+      }),
+    ).resolves.toMatchObject({ statusCode: 404 });
+
     const uploaderCookie = await login(emails[1]);
     const forbidden = await app.inject({
       method: "GET",
-      url: "/admin/maintenance/discord-profiles",
+      url: "/admin/discord/profile-sync",
       headers: { cookie: uploaderCookie },
     });
     expect(forbidden.statusCode).toBe(403);
@@ -274,7 +295,7 @@ describe("Discord profile projection synchronization", () => {
     const adminCookie = await login(emails[0]);
     const status = await app.inject({
       method: "GET",
-      url: "/admin/maintenance/discord-profiles",
+      url: "/admin/discord/profile-sync",
       headers: { cookie: adminCookie },
     });
     expect(status.statusCode, status.body).toBe(200);
@@ -282,7 +303,7 @@ describe("Discord profile projection synchronization", () => {
 
     const invalidBody = await app.inject({
       method: "POST",
-      url: "/admin/maintenance/discord-profiles/sync",
+      url: "/admin/discord/profile-sync",
       headers: { cookie: adminCookie },
       payload: { discordId: adminDiscordId, avatarUrl: "https://evil.test/a" },
     });
@@ -290,7 +311,7 @@ describe("Discord profile projection synchronization", () => {
 
     const accepted = await app.inject({
       method: "POST",
-      url: "/admin/maintenance/discord-profiles/sync",
+      url: "/admin/discord/profile-sync",
       headers: { cookie: adminCookie },
       payload: {},
     });
@@ -301,13 +322,20 @@ describe("Discord profile projection synchronization", () => {
     });
     const requestId = accepted.headers["x-request-id"];
     const audit = await database.db
-      .select({ requestId: auditLogs.requestId, action: auditLogs.action })
+      .select({
+        requestId: auditLogs.requestId,
+        action: auditLogs.action,
+        result: auditLogs.result,
+        reasonCode: auditLogs.reasonCode,
+      })
       .from(auditLogs)
       .where(inArray(auditLogs.actorId, [adminId]))
       .limit(1);
     expect(audit).toContainEqual({
       requestId,
       action: "discord.profile_sync.triggered",
+      result: "success",
+      reasonCode: null,
     });
 
     profileSystem.coordinator.trigger.mockResolvedValueOnce({
@@ -316,7 +344,7 @@ describe("Discord profile projection synchronization", () => {
     });
     const concurrent = await app.inject({
       method: "POST",
-      url: "/admin/maintenance/discord-profiles/sync",
+      url: "/admin/discord/profile-sync",
       headers: { cookie: adminCookie },
       payload: {},
     });
@@ -324,6 +352,14 @@ describe("Discord profile projection synchronization", () => {
     expect(concurrent.json()).toEqual({
       accepted: false,
       reason: "already-running",
+    });
+    const rejectedAudit = await database.db
+      .select({ result: auditLogs.result, reasonCode: auditLogs.reasonCode })
+      .from(auditLogs)
+      .where(inArray(auditLogs.actorId, [adminId]));
+    expect(rejectedAudit).toContainEqual({
+      result: "rejected",
+      reasonCode: "already-running",
     });
   });
 

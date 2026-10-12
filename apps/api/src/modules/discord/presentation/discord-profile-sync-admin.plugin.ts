@@ -6,9 +6,9 @@ import type { SessionService } from "../../authentication/application/services/s
 import type { SessionCookieAdapter } from "../../authentication/infrastructure/http/session-cookie.adapter.js";
 import { requireSession } from "../../authentication/presentation/session-guards.js";
 import {
-  DiscordProfileMaintenanceForbiddenError,
-  type DiscordProfileMaintenanceService,
-} from "../application/discord-profile-maintenance.service.js";
+  DiscordProfileSyncAdministrationForbiddenError,
+  type DiscordProfileSyncAdministrationService,
+} from "../application/discord-profile-sync-administration.service.js";
 
 const emptyBodySchema = z.object({}).strict();
 
@@ -16,7 +16,7 @@ function failure(code: string, statusCode: number, detail: string): AppError {
   return new AppError({
     code,
     statusCode,
-    title: statusCode === 403 ? "Forbidden" : "Maintenance operation failed",
+    title: statusCode === 403 ? "Forbidden" : "Discord profile sync failed",
     detail,
     type: `https://nodeprox.dev/problems/${code}`,
   });
@@ -37,19 +37,19 @@ function context() {
 }
 
 function map(error: unknown): never {
-  if (error instanceof DiscordProfileMaintenanceForbiddenError)
+  if (error instanceof DiscordProfileSyncAdministrationForbiddenError)
     throw failure(
       "authorization-denied",
       403,
-      "You are not authorized to manage system maintenance.",
+      "You are not authorized to configure the Discord integration.",
     );
   throw error;
 }
 
-export function registerDiscordProfileMaintenancePlugin(
+export function registerDiscordProfileSyncAdminPlugin(
   app: FastifyInstance,
   input: {
-    service: DiscordProfileMaintenanceService;
+    service: DiscordProfileSyncAdministrationService;
     authentication: { service: SessionService; cookies: SessionCookieAdapter };
   },
 ): void {
@@ -57,20 +57,16 @@ export function registerDiscordProfileMaintenancePlugin(
     input.authentication.service,
     input.authentication.cookies,
   );
-  app.get(
-    "/admin/maintenance/discord-profiles",
-    { preHandler: session },
-    async () => {
-      try {
-        const request = context();
-        return await input.service.getStatus(request.actor);
-      } catch (error) {
-        return map(error);
-      }
-    },
-  );
+  app.get("/admin/discord/profile-sync", { preHandler: session }, async () => {
+    try {
+      const request = context();
+      return await input.service.getStatus(request.actor);
+    } catch (error) {
+      return map(error);
+    }
+  });
   app.post(
-    "/admin/maintenance/discord-profiles/sync",
+    "/admin/discord/profile-sync",
     { preHandler: session },
     async (request, reply) => {
       const parsed = emptyBodySchema.safeParse(request.body ?? {});

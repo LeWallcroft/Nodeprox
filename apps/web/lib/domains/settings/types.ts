@@ -14,15 +14,3 @@ export type ProductSettingField = {
 export type ProductSettings = {
   sections: Array<{ id: string; label: string; fields: ProductSettingField[] }>;
 };
-
-export type DiscordProfileSyncStatus = {
-  linkedUsers: number;
-  missingAvatar: number;
-  staleProfiles: number;
-  oldestSyncedAt: string | null;
-  syncRunning: boolean;
-};
-
-export type DiscordProfileSyncTriggerResult =
-  | { accepted: true }
-  | { accepted: false; reason: "already-running" };

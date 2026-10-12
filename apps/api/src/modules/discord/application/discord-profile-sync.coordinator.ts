@@ -23,8 +23,8 @@ export class DiscordProfileSyncCoordinator {
     this.options.logger = logger;
   }
 
-  isRunning(): boolean {
-    return this.running;
+  async isRunningDistributed(): Promise<boolean> {
+    return this.lease.isHeld();
   }
 
   async trigger(input: {
