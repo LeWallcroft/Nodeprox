@@ -125,7 +125,7 @@ describe("Notification inbox", () => {
 
     await expect(dispatcher.runOnce()).resolves.toMatchObject({
       claimed: 1,
-      processed: 1,
+      dispatched: 1,
     });
     const [firstDelivery] = await database.db
       .select({ processedAt: domainEventOutbox.processedAt })
@@ -136,11 +136,11 @@ describe("Notification inbox", () => {
     // Simulates a crash after the idempotent projection but before completion.
     await database.db
       .update(domainEventOutbox)
-      .set({ processedAt: null, nextAttemptAt: null })
+      .set({ processedAt: null, completionKind: null, nextAttemptAt: null })
       .where(eq(domainEventOutbox.id, eventId));
     await expect(dispatcher.runOnce()).resolves.toMatchObject({
       claimed: 1,
-      processed: 1,
+      dispatched: 1,
     });
     const rows = await database.db
       .select({ id: notifications.id })

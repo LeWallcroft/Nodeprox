@@ -4,6 +4,7 @@ import type { NodeProxDatabase } from "../../../../../../../database/client.js";
 import { domainEventOutbox } from "../../../../../../../database/schema/index.js";
 import type {
   ClaimedDomainEventEnvelope,
+  DomainEventCompletionKind,
   DomainEventOutboxRepository,
 } from "../../application/domain-event-outbox.repository.js";
 
@@ -67,15 +68,17 @@ export class DrizzleDomainEventOutboxRepository
     });
   }
 
-  async markProcessed(input: {
+  async complete(input: {
     eventId: string;
     claimToken: string;
-    processedAt: Date;
+    completedAt: Date;
+    completionKind: DomainEventCompletionKind;
   }): Promise<boolean> {
     const [updated] = await this.db
       .update(domainEventOutbox)
       .set({
-        processedAt: input.processedAt,
+        processedAt: input.completedAt,
+        completionKind: input.completionKind,
         claimToken: null,
         claimedAt: null,
         lockedUntil: null,

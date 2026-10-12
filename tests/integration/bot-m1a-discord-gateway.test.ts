@@ -300,7 +300,7 @@ describe("BOT-M1A internal Discord gateway", () => {
       .where(eq(domainEventOutbox.aggregateId, linkUserId));
     expect(
       events.filter((entry) => entry.eventType === "discord.identity.linked"),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
   });
 
   it("does not replace an existing NodeProx link or a linked Discord identity", async () => {
@@ -436,10 +436,19 @@ describe("BOT-M1A internal Discord gateway", () => {
           eq(domainEventOutbox.eventType, "series.creation_grant.consumed"),
         ),
       );
-    expect(events).toHaveLength(1);
+    expect(events).toHaveLength(0);
+    const consumptionAudits = await database.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.resourceId, grantId));
+    expect(
+      consumptionAudits.some(
+        (entry) => entry.action === "discord.series_grant.consumed",
+      ),
+    ).toBe(true);
   });
 
-  it("rolls back the Series consumption event when Series creation fails", async () => {
+  it("rolls back grant consumption when Series creation fails", async () => {
     const title = `Atomic collision ${randomUUID()}`;
     await database.db.insert(series).values({
       title,

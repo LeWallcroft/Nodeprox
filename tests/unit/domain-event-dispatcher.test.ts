@@ -12,10 +12,12 @@ import {
 import type {
   ClaimedDomainEventEnvelope,
   DomainEventOutboxRepository,
+  DomainEventCompletionKind,
 } from "../../apps/api/src/modules/events/application/domain-event-outbox.repository.js";
 
 type StoredEvent = DomainEventEnvelope & {
   processedAt?: Date;
+  completionKind?: DomainEventCompletionKind;
   claimToken?: string;
   lockedUntil?: Date;
   nextAttemptAt?: Date;
@@ -56,14 +58,16 @@ class MemoryOutbox implements DomainEventOutboxRepository {
       });
   }
 
-  async markProcessed(input: {
+  async complete(input: {
     eventId: string;
     claimToken: string;
-    processedAt: Date;
+    completedAt: Date;
+    completionKind: DomainEventCompletionKind;
   }): Promise<boolean> {
     const event = this.findClaimed(input.eventId, input.claimToken);
     if (!event) return false;
-    event.processedAt = input.processedAt;
+    event.processedAt = input.completedAt;
+    event.completionKind = input.completionKind;
     delete event.claimToken;
     delete event.lockedUntil;
     delete event.nextAttemptAt;
@@ -152,11 +156,14 @@ describe("DomainEventDispatcher", () => {
 
     await expect(dispatcher.runOnce()).resolves.toEqual({
       claimed: 1,
-      processed: 1,
+      dispatched: 1,
+      terminal: 0,
       failed: 0,
-      skipped: 0,
+      deferred: 0,
+      claimLost: 0,
     });
     expect(outbox.events[0]?.processedAt).toBeInstanceOf(Date);
+    expect(outbox.events[0]?.completionKind).toBe("dispatched");
     expect(logger.debug).toHaveBeenCalledWith(
       expect.objectContaining({
         eventId: stored.id,
@@ -185,9 +192,11 @@ describe("DomainEventDispatcher", () => {
 
     await expect(dispatcher.runOnce()).resolves.toEqual({
       claimed: 1,
-      processed: 0,
+      dispatched: 0,
+      terminal: 0,
       failed: 1,
-      skipped: 0,
+      deferred: 0,
+      claimLost: 0,
     });
     expect(outbox.events[0]?.attemptCount).toBe(1);
     expect(outbox.events[0]?.processedAt).toBeUndefined();
@@ -216,15 +225,17 @@ describe("DomainEventDispatcher", () => {
     stored.nextAttemptAt = new Date(0);
     await expect(dispatcher.runOnce()).resolves.toEqual({
       claimed: 1,
-      processed: 1,
+      dispatched: 1,
+      terminal: 0,
       failed: 0,
-      skipped: 0,
+      deferred: 0,
+      claimLost: 0,
     });
     expect(stored.processedAt).toBeInstanceOf(Date);
   });
 
   it("defers unknown event types without marking them processed", async () => {
-    const stored = event({ eventType: "discord.identity.linked" });
+    const stored = event({ eventType: "unknown.event" });
     const outbox = new MemoryOutbox([stored]);
     const dispatcher = new DomainEventDispatcher(
       outbox,
@@ -234,14 +245,102 @@ describe("DomainEventDispatcher", () => {
 
     await expect(dispatcher.runOnce()).resolves.toEqual({
       claimed: 1,
-      processed: 0,
+      dispatched: 0,
+      terminal: 0,
       failed: 0,
-      skipped: 1,
+      deferred: 1,
+      claimLost: 0,
     });
     expect(stored.processedAt).toBeUndefined();
     expect(stored.attemptCount).toBe(0);
     expect(stored.nextAttemptAt).toBeInstanceOf(Date);
   });
+
+  it("drains legacy events without handlers or an attempt increment", async () => {
+    const stored = event({ eventType: "discord.identity.linked" });
+    const outbox = new MemoryOutbox([stored]);
+    const dispatcher = new DomainEventDispatcher(
+      outbox,
+      new DefaultDomainEventHandlerRegistry([]),
+      logger,
+    );
+    expect(await dispatcher.runOnce()).toEqual({
+      claimed: 1,
+      dispatched: 0,
+      terminal: 1,
+      failed: 0,
+      deferred: 0,
+      claimLost: 0,
+    });
+    expect(stored.completionKind).toBe("terminal-no-handler");
+    expect(stored.attemptCount).toBe(0);
+    expect((await dispatcher.runOnce()).claimed).toBe(0);
+  });
+
+  it("defers a required event with no handler", async () => {
+    const stored = event();
+    const outbox = new MemoryOutbox([stored]);
+    const result = await new DomainEventDispatcher(
+      outbox,
+      new DefaultDomainEventHandlerRegistry([]),
+      logger,
+    ).runOnce();
+    expect(result.deferred).toBe(1);
+    expect(stored.processedAt).toBeUndefined();
+    expect(stored.attemptCount).toBe(0);
+  });
+
+  it("does not run a handler for terminal legacy events", async () => {
+    const stored = event({ eventType: "discord.identity.linked" });
+    const handle = vi.fn();
+    const result = await new DomainEventDispatcher(
+      new MemoryOutbox([stored]),
+      new DefaultDomainEventHandlerRegistry([
+        handler({
+          name: "conflict",
+          eventTypes: ["discord.identity.linked"],
+          handle,
+        }),
+      ]),
+      logger,
+    ).runOnce();
+    expect(result.deferred).toBe(1);
+    expect(handle).not.toHaveBeenCalled();
+    expect(stored.processedAt).toBeUndefined();
+  });
+
+  it.each(["complete", "defer", "recordFailure"] as const)(
+    "counts a lost claim from %s without claiming the transition persisted",
+    async (transition) => {
+      const stored = event({
+        eventType:
+          transition === "complete"
+            ? "discord.identity.linked"
+            : transition === "defer"
+              ? "unknown.event"
+              : "series.creation_grant.issued",
+      });
+      const outbox = new MemoryOutbox([stored]);
+      vi.spyOn(outbox, transition).mockResolvedValue(false);
+      const failing = handler({
+        name: "failure",
+        handle: async () => {
+          throw new Error("failure");
+        },
+      });
+      const result = await new DomainEventDispatcher(
+        outbox,
+        new DefaultDomainEventHandlerRegistry(
+          transition === "recordFailure" ? [failing] : [],
+        ),
+        logger,
+      ).runOnce();
+      expect(result.claimLost).toBe(1);
+      expect(
+        result.dispatched + result.terminal + result.deferred + result.failed,
+      ).toBe(0);
+    },
+  );
 
   it("only resolves handlers registered for the event type", () => {
     const selected = handler({ name: "selected" });

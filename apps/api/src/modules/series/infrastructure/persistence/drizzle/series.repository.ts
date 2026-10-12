@@ -45,7 +45,6 @@ import type { ChapterMutationBoundaryPort } from "../../../../chapters/applicati
 import { evaluateChapterDelete } from "../../../../chapters/domain/chapter-delete.policy.js";
 import { ChapterNumber } from "../../../../chapters/domain/chapter-number.js";
 import { evaluateChapterContextualAuthorization } from "../../../../chapters/domain/chapter-permission.policy.js";
-import type { DomainEventOutbox } from "../../../../events/application/domain-event-outbox.js";
 import type {
   ChapterCoreRepositoryPort,
   SeriesListProjection,
@@ -100,10 +99,7 @@ const toChapter = (row: typeof chapters.$inferSelect): ChapterCoreRecord => ({
 export class DrizzleSeriesRepository
   implements SeriesRepositoryPort, SeriesMutationBoundaryPort
 {
-  constructor(
-    private readonly db: NodeProxDatabase,
-    private readonly events?: DomainEventOutbox,
-  ) {}
+  constructor(private readonly db: NodeProxDatabase) {}
 
   async createWithCreationPolicy(input: {
     title: string;
@@ -177,18 +173,6 @@ export class DrizzleSeriesRepository
             initial: true,
           },
         });
-        await this.events?.append(
-          {
-            type: "series.responsibility.assigned",
-            originRequestId: input.originRequestId ?? null,
-            aggregateType: "series",
-            aggregateId: created.id,
-            actorUserId: input.createdBy,
-            payload: { responsibleUserId: input.createdBy, initial: true },
-            occurredAt: new Date(),
-          },
-          tx,
-        );
         if (grant) {
           const [consumed] = await tx
             .update(seriesCreationGrants)
@@ -213,18 +197,6 @@ export class DrizzleSeriesRepository
             resourceId: grant.id,
             metadata: { grantId: grant.id, seriesId: created.id },
           });
-          await this.events?.append(
-            {
-              type: "series.creation_grant.consumed",
-              originRequestId: input.originRequestId ?? null,
-              aggregateType: "series_creation_grant",
-              aggregateId: grant.id,
-              actorUserId: input.createdBy,
-              payload: { grantId: grant.id, seriesId: created.id },
-              occurredAt: new Date(),
-            },
-            tx,
-          );
         }
         if (input.actorRole === "gestor")
           await tx.insert(auditLogs).values({
@@ -234,19 +206,6 @@ export class DrizzleSeriesRepository
             resourceId: created.id,
             metadata: { channelId: input.discordChannelId },
           });
-        if (input.actorRole === "gestor")
-          await this.events?.append(
-            {
-              type: "series.channel.bound",
-              originRequestId: input.originRequestId ?? null,
-              aggregateType: "series",
-              aggregateId: created.id,
-              actorUserId: input.createdBy,
-              payload: { channelId: discordChannelId },
-              occurredAt: new Date(),
-            },
-            tx,
-          );
         return { outcome: "created" as const, series: toSeries(created) };
       });
     } catch (error) {
@@ -672,20 +631,6 @@ export class DrizzleSeriesRepository
           responsibleUserId: input.responsibleUserId,
         },
       });
-      await this.events?.append(
-        {
-          type: "series.responsibility.reassigned",
-          aggregateType: "series",
-          aggregateId: input.seriesId,
-          actorUserId: input.actor.userId,
-          payload: {
-            previousResponsibleUserId: previous?.responsibleUserId ?? null,
-            responsibleUserId: input.responsibleUserId,
-          },
-          occurredAt: new Date(),
-        },
-        tx,
-      );
       return { outcome: "assigned" as const };
     });
   }
@@ -798,20 +743,6 @@ export class DrizzleSeriesRepository
             reason: "admin-bulk-replace",
           },
         });
-        await this.events?.append(
-          {
-            type: "series.responsibility.reassigned",
-            aggregateType: "series",
-            aggregateId: seriesId,
-            actorUserId: input.actor.userId,
-            payload: {
-              previousResponsibleUserId: previous?.responsibleUserId ?? null,
-              responsibleUserId: input.responsibleUserId,
-            },
-            occurredAt: new Date(),
-          },
-          tx,
-        );
       }
 
       if (toAssign.length || toRelease.length) {

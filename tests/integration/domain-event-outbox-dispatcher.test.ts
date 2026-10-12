@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { eq, inArray } from "drizzle-orm";
 import { afterEach, describe, expect, inject, it } from "vitest";
 import { DrizzleDomainEventOutboxRepository } from "../../apps/api/src/modules/events/infrastructure/persistence/drizzle-domain-event-outbox.repository.js";
+import { DomainEventDispatcher } from "../../apps/api/src/modules/events/application/domain-event-dispatcher.js";
+import { DefaultDomainEventHandlerRegistry } from "../../apps/api/src/modules/events/application/domain-event-handler.js";
 import { createDatabase } from "../../database/client.js";
 import { domainEventOutbox } from "../../database/schema/index.js";
 
@@ -11,12 +13,16 @@ const first = new DrizzleDomainEventOutboxRepository(database.db);
 const second = new DrizzleDomainEventOutboxRepository(database.db);
 const insertedIds: string[] = [];
 
-async function insertEvent(input: { occurredAt: Date; processedAt?: Date }) {
+async function insertEvent(input: {
+  occurredAt: Date;
+  processedAt?: Date;
+  eventType?: string;
+}) {
   const id = randomUUID();
   insertedIds.push(id);
   await database.db.insert(domainEventOutbox).values({
     id,
-    eventType: "series.creation_grant.issued",
+    eventType: input.eventType ?? "series.creation_grant.issued",
     aggregateType: "series_creation_grant",
     aggregateId: randomUUID(),
     payload: { targetUserId: randomUUID() },
@@ -35,6 +41,89 @@ afterEach(async () => {
 });
 
 describe("Domain event outbox leases", () => {
+  const logger = { debug() {}, warn() {}, error() {} };
+
+  it("persists dispatched completion and protects the claim token", async () => {
+    const id = await insertEvent({ occurredAt: new Date(0) });
+    const dispatcher = new DomainEventDispatcher(
+      first,
+      new DefaultDomainEventHandlerRegistry([
+        {
+          handlerName: "fixture",
+          eventTypes: ["series.creation_grant.issued"],
+          async handle() {},
+        },
+      ]),
+      logger,
+    );
+    expect((await dispatcher.runOnce()).dispatched).toBeGreaterThanOrEqual(1);
+    const [row] = await database.db
+      .select()
+      .from(domainEventOutbox)
+      .where(eq(domainEventOutbox.id, id));
+    expect(row?.completionKind).toBe("dispatched");
+    expect(row?.processedAt).toBeInstanceOf(Date);
+    expect(
+      await first.complete({
+        eventId: id,
+        claimToken: "wrong",
+        completedAt: new Date(),
+        completionKind: "dispatched",
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    "series.responsibility.assigned",
+    "series.responsibility.reassigned",
+    "series.channel.bound",
+    "series.creation_grant.consumed",
+    "series.creation_grant.invalidated",
+    "discord.identity.linked",
+  ])(
+    "drains legacy event %s by normal claim without handler execution",
+    async (eventType) => {
+      const id = await insertEvent({ occurredAt: new Date(0), eventType });
+      const dispatcher = new DomainEventDispatcher(
+        first,
+        new DefaultDomainEventHandlerRegistry([]),
+        logger,
+      );
+      expect((await dispatcher.runOnce()).terminal).toBe(1);
+      const [row] = await database.db
+        .select()
+        .from(domainEventOutbox)
+        .where(eq(domainEventOutbox.id, id));
+      expect(row?.completionKind).toBe("terminal-no-handler");
+      expect(row?.attemptCount).toBe(0);
+      const reclaimed = await first.claimPending({
+        now: new Date(),
+        limit: 100,
+        leaseDurationMs: 30_000,
+      });
+      expect(reclaimed.some((event) => event.id === id)).toBe(false);
+    },
+  );
+
+  it.each(["unknown.event", "series.creation_grant.issued"])(
+    "defers unhandled or unknown %s without incrementing attempts",
+    async (eventType) => {
+      const id = await insertEvent({ occurredAt: new Date(0), eventType });
+      const result = await new DomainEventDispatcher(
+        first,
+        new DefaultDomainEventHandlerRegistry([]),
+        logger,
+      ).runOnce();
+      expect(result.deferred).toBe(1);
+      const [row] = await database.db
+        .select()
+        .from(domainEventOutbox)
+        .where(eq(domainEventOutbox.id, id));
+      expect(row?.processedAt).toBeNull();
+      expect(row?.completionKind).toBeNull();
+      expect(row?.attemptCount).toBe(0);
+    },
+  );
   it("claims pending events deterministically and never claims processed events", async () => {
     const now = new Date("2026-09-15T00:00:00.000Z");
     const oldest = await insertEvent({

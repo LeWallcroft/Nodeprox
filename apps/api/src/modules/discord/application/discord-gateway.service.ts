@@ -360,22 +360,6 @@ export class DiscordGatewayService {
             channelId: input.channelId,
           },
         });
-        await this.events.append(
-          {
-            type: "discord.identity.linked",
-            originRequestId: input.originRequestId ?? null,
-            aggregateType: "user",
-            aggregateId: user.id,
-            actorUserId: user.id,
-            payload: {
-              actorDiscordId: input.actorDiscordId,
-              guildId: input.guildId,
-              channelId: input.channelId,
-            },
-            occurredAt: new Date(),
-          },
-          tx,
-        );
         return { linked: true, idempotent: false };
       });
       try {
@@ -561,21 +545,6 @@ export class DiscordGatewayService {
           channelId: input.channelId,
         },
       });
-      await this.events.append(
-        {
-          type: "series.creation_grant.invalidated",
-          originRequestId: input.originRequestId ?? null,
-          aggregateType: "series_creation_grant",
-          aggregateId: input.grantId,
-          payload: {
-            actorDiscordId: input.actorDiscordId,
-            guildId: input.guildId,
-            channelId: input.channelId,
-          },
-          occurredAt: new Date(),
-        },
-        tx,
-      );
       return { invalidated: true, idempotent: false };
     });
   }

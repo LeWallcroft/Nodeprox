@@ -98,7 +98,7 @@ export class WebSeriesCreationGrantService {
   async invalidate(
     actor: AuthorizationContext,
     grantId: string,
-    originRequestId?: string,
+    _originRequestId?: string,
   ) {
     if (
       !(
@@ -135,18 +135,6 @@ export class WebSeriesCreationGrantService {
         resourceId: grant.id,
         metadata: { source: "web" },
       });
-      await this.events.append(
-        {
-          type: "series.creation_grant.invalidated",
-          originRequestId: originRequestId ?? null,
-          aggregateType: "series_creation_grant",
-          aggregateId: grant.id,
-          actorUserId: actor.userId,
-          payload: { source: "web" },
-          occurredAt: new Date(),
-        },
-        tx,
-      );
       return { invalidated: true, idempotent: false };
     });
   }

@@ -25,6 +25,9 @@ export const domainEventOutbox = pgTable(
       .notNull()
       .defaultNow(),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    completionKind: text("completion_kind").$type<
+      "dispatched" | "terminal-no-handler"
+    >(),
     attemptCount: integer("attempt_count").notNull().default(0),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     claimToken: text("claim_token"),
