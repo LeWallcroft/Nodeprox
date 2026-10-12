@@ -121,7 +121,12 @@ describe("paginated master-detail layout stability", () => {
     expect(sharedContent).toContain(
       'className={`min-h-0 flex-1 p-4 ${scrollable ? "overflow-y-auto"',
     );
-    expect(context).toContain("xl:h-[640px]");
+    expect(context).not.toContain("xl:h-[640px]");
+    expect(context).toContain("relative");
+    expect(context).toContain("xl:min-h-0");
+    expect(context).toContain("xl:self-stretch");
+    expect(context).toContain('className="xl:absolute xl:inset-0"');
+    expect(context).not.toContain("xl:h-[");
     expect(context).not.toContain("xl:h-full");
     expect(list).toContain("h-[76px]");
     expect(list).toContain('index === items.length - 1 ? "border-b-0"');
