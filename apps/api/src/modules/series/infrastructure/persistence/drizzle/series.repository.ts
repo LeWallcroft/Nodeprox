@@ -604,25 +604,25 @@ export class DrizzleSeriesRepository
         .select({ count: count(chapters.id).mapWith(Number) })
         .from(chapters)
         .where(eq(chapters.seriesId, input.seriesId));
+      await tx.delete(chapters).where(eq(chapters.seriesId, input.seriesId));
+      const [deleted] = await tx
+        .delete(series)
+        .where(eq(series.id, input.seriesId))
+        .returning({ id: series.id });
+      if (!deleted) throw new Error("series-delete-lost-row");
       await tx.insert(auditLogs).values({
         actorId: input.actor.userId,
         action: "series.deleted",
         resourceType: "series",
         resourceId: input.seriesId,
+        result: "success",
         metadata: {
           deletedEmptyChapterCount: countRow?.count ?? 0,
           previousOperationalState: oldSeries?.operationalState ?? "active",
           responsibleUserId: responsible?.id ?? null,
         },
       });
-      await tx.delete(chapters).where(eq(chapters.seriesId, input.seriesId));
-      const [deleted] = await tx
-        .delete(series)
-        .where(eq(series.id, input.seriesId))
-        .returning({ id: series.id });
-      return deleted
-        ? { outcome: "deleted" as const }
-        : { outcome: "conflict" as const };
+      return { outcome: "deleted" as const };
     });
   }
 

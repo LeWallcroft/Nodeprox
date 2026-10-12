@@ -1,5 +1,6 @@
 "use client";
 
+import { CircleAlert } from "lucide-react";
 import { AppDialog } from "./app-dialog";
 import { Button } from "./button";
 
@@ -11,6 +12,8 @@ export function ConfirmationDialog({
   confirmLabel,
   pending = false,
   error,
+  confirmActionVisible = true,
+  alternativeAction,
   onConfirm,
 }: {
   open: boolean;
@@ -20,6 +23,8 @@ export function ConfirmationDialog({
   confirmLabel: string;
   pending?: boolean;
   error?: string | null;
+  confirmActionVisible?: boolean;
+  alternativeAction?: { label: string; onClick: () => void };
   onConfirm: () => void;
 }) {
   return (
@@ -40,21 +45,38 @@ export function ConfirmationDialog({
           >
             Cancelar
           </Button>
-          <Button
-            variant="destructive"
-            disabled={pending}
-            type="button"
-            onClick={onConfirm}
-          >
-            {pending ? "Procesando…" : confirmLabel}
-          </Button>
+          {alternativeAction ? (
+            <Button
+              variant="destructive"
+              disabled={pending}
+              type="button"
+              onClick={alternativeAction.onClick}
+            >
+              {alternativeAction.label}
+            </Button>
+          ) : null}
+          {confirmActionVisible ? (
+            <Button
+              variant="destructive"
+              disabled={pending}
+              type="button"
+              onClick={onConfirm}
+            >
+              {pending ? "Procesando…" : confirmLabel}
+            </Button>
+          ) : null}
         </div>
       }
     >
       {error ? (
-        <p className="m-0 text-sm text-danger" role="alert">
-          {error}
-        </p>
+        <div
+          className="flex items-start gap-3 rounded-control bg-destructive-surface p-3 text-sm text-destructive-text"
+          role="alert"
+          aria-live="assertive"
+        >
+          <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <p className="m-0">{error}</p>
+        </div>
       ) : null}
     </AppDialog>
   );

@@ -651,6 +651,10 @@ describe("Series operational lifecycle", () => {
   });
 
   it("blocks destructive deletion of media history", async () => {
+    const previousDeleteAudits = await database.db
+      .select({ id: auditLogs.id })
+      .from(auditLogs)
+      .where(eq(auditLogs.resourceId, mediaSeriesId));
     const response = await app.inject({
       method: "DELETE",
       url: `/series/${mediaSeriesId}`,
@@ -658,6 +662,13 @@ describe("Series operational lifecycle", () => {
     });
     expect(response.statusCode).toBe(409);
     expect(response.json<{ code: string }>().code).toBe("series-has-media");
+    const deletionAudits = await database.db
+      .select({ id: auditLogs.id, action: auditLogs.action })
+      .from(auditLogs)
+      .where(eq(auditLogs.resourceId, mediaSeriesId));
+    expect(deletionAudits.filter((entry) => entry.action === "series.deleted"))
+      .toHaveLength(0);
+    expect(deletionAudits).toHaveLength(previousDeleteAudits.length);
     expect(
       await database.db
         .select()

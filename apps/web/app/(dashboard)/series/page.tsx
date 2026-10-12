@@ -3,7 +3,6 @@
 import { Plus, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { errorMessage } from "../../../components/domains/feedback";
 import { SeriesContextPanel } from "../../../components/domains/series/series-context-panel";
 import { SeriesDetailPanel } from "../../../components/domains/series/series-detail-panel";
 import { SeriesForm } from "../../../components/domains/series/series-form";
@@ -61,7 +60,6 @@ export default function SeriesPage() {
   const [mineOnly, setMineOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
   const selectedQuery = useSeries(selectedSeriesId ?? "");
   const selectedCapabilities = useSeriesCapabilities(selectedSeriesId ?? "");
   const update = useUpdateSeries(selectedSeriesId ?? "");
@@ -154,17 +152,11 @@ export default function SeriesPage() {
 
   async function handleDelete() {
     if (!selectedSeriesId) return;
-    setActionError(null);
-    try {
-      await remove.mutateAsync(selectedSeriesId);
-      setSelectedSeriesId(null);
-    } catch (cause) {
-      setActionError(errorMessage(cause));
-    }
+    await remove.mutateAsync(selectedSeriesId);
+    setSelectedSeriesId(null);
   }
 
   function selectSeries(seriesId: string) {
-    setActionError(null);
     setSelectedSeriesId(seriesId);
   }
 
@@ -222,11 +214,6 @@ export default function SeriesPage() {
           onRetryChannels={() => void seriesChannels.refetch()}
         />
       </AppDialog>
-      {actionError ? (
-        <p className="mb-section text-sm text-danger" role="alert">
-          {actionError}
-        </p>
-      ) : null}
       {listQuery.isPending ? <LoadingState label="Cargando Series" /> : null}
       {listQuery.isError ? (
         <ErrorState
