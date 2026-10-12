@@ -1,5 +1,13 @@
 import type { DiscordUserProfileGateway } from "./discord-user-profile.gateway.js";
+import { DiscordUserProfileUnavailableError } from "./discord-user-profile.gateway.js";
 import type { DiscordProfileRepository } from "./discord-profile.repository.js";
+
+export type DiscordTargetedProfileSyncResult =
+  | "changed"
+  | "refreshed"
+  | "not-linked"
+  | "link-changed"
+  | "unavailable";
 
 export class SyncDiscordUserProfilesService {
   constructor(
@@ -7,6 +15,30 @@ export class SyncDiscordUserProfilesService {
     private readonly profiles: DiscordUserProfileGateway,
     private readonly clock: () => Date = () => new Date(),
   ) {}
+
+  async syncLinkedProfileByDiscordId(
+    discordId: string,
+  ): Promise<DiscordTargetedProfileSyncResult> {
+    const linked = await this.repository.findLinkedByDiscordId(discordId);
+    if (!linked) return "not-linked";
+    try {
+      const profile = await this.profiles.getProfile(discordId, {
+        force: true,
+      });
+      if (!profile) return "unavailable";
+      return await this.repository.updateDiscordProfile({
+        userId: linked.userId,
+        expectedDiscordId: discordId,
+        discordUsername: profile.username,
+        avatarUrl: profile.avatarUrl,
+        syncedAt: this.clock(),
+      });
+    } catch (error) {
+      if (error instanceof DiscordUserProfileUnavailableError)
+        return "unavailable";
+      throw error;
+    }
+  }
 
   async syncBatch(input: {
     afterId?: string;

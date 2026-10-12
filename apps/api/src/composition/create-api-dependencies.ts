@@ -99,6 +99,7 @@ export interface AppDependencies {
     runner: DiscordProfileSyncRunner;
     coordinator: DiscordProfileSyncCoordinator;
     config: NodeProxDiscordProfileSyncConfig;
+    targeted?: SyncDiscordUserProfilesService;
   };
   seriesChannelGateway?: DiscordSeriesChannelGateway;
   discord?: {
@@ -129,20 +130,21 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
   const discordProfileRepository = database
     ? new DrizzleDiscordProfileRepository(database)
     : undefined;
-  const discordProfileSyncRunner = discordProfileRepository
-    ? new DiscordProfileSyncRunner(
-        new SyncDiscordUserProfilesService(
-          discordProfileRepository,
-          new DiscordBotUserProfileGateway(
-            input.discord?.botInternalUrl ??
-              environment.DISCORD_BOT_INTERNAL_URL ??
-              "http://127.0.0.1:3002",
-            input.discord?.internalToken ??
-              environment.DISCORD_BOT_INTERNAL_TOKEN ??
-              "",
-          ),
+  const targetedProfileSync = discordProfileRepository
+    ? new SyncDiscordUserProfilesService(
+        discordProfileRepository,
+        new DiscordBotUserProfileGateway(
+          input.discord?.botInternalUrl ??
+            environment.DISCORD_BOT_INTERNAL_URL ??
+            "http://127.0.0.1:3002",
+          input.discord?.internalToken ??
+            environment.DISCORD_BOT_INTERNAL_TOKEN ??
+            "",
         ),
       )
+    : undefined;
+  const discordProfileSyncRunner = targetedProfileSync
+    ? new DiscordProfileSyncRunner(targetedProfileSync)
     : undefined;
   const discordProfileSync =
     input.discordProfileSync ??
@@ -161,6 +163,7 @@ export function createApiDependencies(input: ApiCompositionInput = {}) {
             },
           ),
           config: discordProfileSyncConfig,
+          targeted: targetedProfileSync,
         }
       : undefined);
   const storageConfig = input.storage ?? {

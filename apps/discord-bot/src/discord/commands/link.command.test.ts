@@ -37,6 +37,7 @@ describe("/vincular", () => {
         .fn()
         .mockResolvedValue({ linked: true, idempotent: false }),
       getIntegration: vi.fn(),
+      notifyProfileChanged: vi.fn(),
       issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
@@ -69,6 +70,7 @@ describe("/vincular", () => {
           new NodeProxApiError("discord-link-code-invalid", 400),
         ),
       getIntegration: vi.fn(),
+      notifyProfileChanged: vi.fn(),
       issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
@@ -85,6 +87,7 @@ describe("/vincular", () => {
         .fn()
         .mockResolvedValue({ linked: true, idempotent: true }),
       getIntegration: vi.fn(),
+      notifyProfileChanged: vi.fn(),
       issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
@@ -103,6 +106,7 @@ describe("/vincular", () => {
           new NodeProxApiError("discord-link-already-exists", 409),
         ),
       getIntegration: vi.fn(),
+      notifyProfileChanged: vi.fn(),
       issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));
@@ -118,6 +122,7 @@ describe("/vincular", () => {
     const api = {
       confirmLink: vi.fn().mockRejectedValue(new NodeProxApiError(null, 0)),
       getIntegration: vi.fn(),
+      notifyProfileChanged: vi.fn(),
       issueSeriesCreationGrant: vi.fn(),
     };
     const command = new LinkCommand(new LinkDiscordAccount(api));

@@ -5,6 +5,8 @@ import type {
   IssueSeriesCreationGrantInput,
   IssueSeriesCreationGrantResult,
   NodeProxDiscordApi,
+  NotifyDiscordProfileChangedInput,
+  NotifyDiscordProfileChangedResult,
   ReplaceDiscordAuthorizedRolesInput,
   ReplaceDiscordAuthorizedRolesResult,
 } from "./contracts.js";
@@ -26,6 +28,13 @@ export class NodeProxApiClient implements NodeProxDiscordApi {
     private readonly internalToken: string,
     private readonly fetcher: typeof fetch = fetch,
   ) {}
+
+  notifyProfileChanged(input: NotifyDiscordProfileChangedInput) {
+    return this.request<NotifyDiscordProfileChangedResult>(
+      `/internal/discord/users/${encodeURIComponent(input.discordId)}/profile-changed`,
+      { method: "POST", body: "{}" },
+    );
+  }
 
   confirmLink(input: ConfirmDiscordLinkInput) {
     return this.request<ConfirmDiscordLinkResult>(

@@ -15,6 +15,7 @@ const integration = {
 function api() {
   return {
     getIntegration: vi.fn().mockResolvedValue(integration),
+    notifyProfileChanged: vi.fn(),
     issueSeriesCreationGrant: vi.fn().mockResolvedValue({
       id: "grant",
       displayCode: "NPX-SER-OPAQUE",

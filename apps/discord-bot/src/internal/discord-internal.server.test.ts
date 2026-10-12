@@ -81,6 +81,16 @@ describe("guild role verifier internal endpoint", () => {
         extension: "webp",
         size: 128,
       });
+      const fresh = await fetch(
+        `http://127.0.0.1:${port}/internal/discord/users/12345678901234567/profile?force=true`,
+        { headers: { authorization: "Bearer internal-token" } },
+      );
+      expect(fresh.status).toBe(200);
+      expect(profileUser.displayAvatarURL).toHaveBeenCalledTimes(2);
+      expect(
+        (client as unknown as { users: { fetch: ReturnType<typeof vi.fn> } })
+          .users.fetch,
+      ).toHaveBeenLastCalledWith("12345678901234567", { force: true });
     } finally {
       await server.stop();
     }

@@ -20,6 +20,7 @@ import { DiscordProfileSyncAdministrationService } from "./modules/discord/appli
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
 import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
 import { registerDiscordProfileSyncAdminPlugin } from "./modules/discord/presentation/discord-profile-sync-admin.plugin.js";
+import { registerDiscordProfileEventPlugin } from "./modules/discord/presentation/discord-profile-event.plugin.js";
 import { registerSeriesGrantAdminPlugin } from "./modules/discord/presentation/series-grant-admin.plugin.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -103,6 +104,11 @@ export function buildApp(
         });
     }
     if (services.discordProfileSync) {
+      if (services.discordProfileSync.targeted)
+        registerDiscordProfileEventPlugin(app, {
+          service: services.discordProfileSync.targeted,
+          internalToken: services.discord?.internalToken,
+        });
       registerDiscordProfileSyncAdminPlugin(app, {
         service: new DiscordProfileSyncAdministrationService(
           authorization,

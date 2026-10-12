@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { buildApp } from "../../apps/api/src/app.js";
 import { Argon2PasswordHasher } from "../../apps/api/src/modules/authentication/index.js";
 import { DiscordProfileSyncCoordinator } from "../../apps/api/src/modules/discord/application/discord-profile-sync.coordinator.js";
+import { SyncDiscordUserProfilesService } from "../../apps/api/src/modules/discord/application/sync-discord-user-profiles.service.js";
 import { DrizzleDiscordIdentityLinkRepository } from "../../apps/api/src/modules/discord/infrastructure/persistence/drizzle/discord-identity-link.repository.js";
 import { DrizzleDiscordProfileRepository } from "../../apps/api/src/modules/discord/infrastructure/persistence/drizzle/discord-profile.repository.js";
 import { PostgresDiscordProfileSyncLease } from "../../apps/api/src/modules/discord/infrastructure/postgres/postgres-discord-profile-sync.lease.js";
@@ -208,6 +209,50 @@ describe("Discord profile projection synchronization", () => {
       avatarUrl: "https://cdn.discordapp.com/embed/avatars/3.png",
       updatedAt: changedAt,
       syncedAt: changedAt,
+    });
+  });
+
+  it("uses indexed identity lookup for targeted refresh and preserves a linked profile on provider failure", async () => {
+    expect(
+      await profileRepository.findLinkedByDiscordId(adminDiscordId),
+    ).toEqual({
+      userId: adminId,
+      discordId: adminDiscordId,
+    });
+    expect(
+      await profileRepository.findLinkedByDiscordId("99999999999999999"),
+    ).toBeNull();
+    const getProfile = vi
+      .fn()
+      .mockResolvedValueOnce({
+        id: adminDiscordId,
+        username: "targeted_name",
+        avatarUrl: "https://cdn.discordapp.com/embed/avatars/4.png",
+      })
+      .mockResolvedValueOnce(null);
+    const service = new SyncDiscordUserProfilesService(profileRepository, {
+      getProfile,
+    });
+    expect(await service.syncLinkedProfileByDiscordId(adminDiscordId)).toBe(
+      "changed",
+    );
+    expect(getProfile).toHaveBeenCalledWith(adminDiscordId, { force: true });
+    expect(await service.syncLinkedProfileByDiscordId(adminDiscordId)).toBe(
+      "unavailable",
+    );
+    const [stored] = await database.db
+      .select({
+        discordId: users.discordId,
+        discordUsername: users.discordUsername,
+        avatarUrl: users.avatarUrl,
+      })
+      .from(users)
+      .where(inArray(users.id, [adminId]))
+      .limit(1);
+    expect(stored).toEqual({
+      discordId: adminDiscordId,
+      discordUsername: "targeted_name",
+      avatarUrl: "https://cdn.discordapp.com/embed/avatars/4.png",
     });
   });
 

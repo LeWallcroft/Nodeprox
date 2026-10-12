@@ -14,6 +14,9 @@ export type ConfirmDiscordLinkResult = {
   idempotent: boolean;
 };
 
+export type NotifyDiscordProfileChangedInput = { discordId: string };
+export type NotifyDiscordProfileChangedResult = { accepted: boolean };
+
 export type DiscordBotCapability =
   | "series_grant.issue"
   | "series_grant.invalidate"
@@ -69,6 +72,9 @@ export type IssueSeriesCreationGrantResult = {
 };
 
 export interface NodeProxDiscordApi {
+  notifyProfileChanged(
+    input: NotifyDiscordProfileChangedInput,
+  ): Promise<NotifyDiscordProfileChangedResult>;
   confirmLink(
     input: ConfirmDiscordLinkInput,
   ): Promise<ConfirmDiscordLinkResult>;

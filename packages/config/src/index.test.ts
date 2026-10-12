@@ -4,7 +4,7 @@ import { loadDiscordProfileSyncConfig } from "./index.js";
 describe("Discord profile sync configuration", () => {
   it("uses operational defaults", () => {
     expect(loadDiscordProfileSyncConfig({})).toEqual({
-      DISCORD_PROFILE_SYNC_INTERVAL_MS: 3_600_000,
+      DISCORD_PROFILE_SYNC_INTERVAL_MS: 1_200_000,
       DISCORD_PROFILE_SYNC_BATCH_SIZE: 200,
       DISCORD_PROFILE_SYNC_CONCURRENCY: 5,
     });
