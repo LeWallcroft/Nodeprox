@@ -18,7 +18,6 @@ import { ChapterDeleteService } from "../../chapters/application/services/chapte
 import type { ChapterPermissionService } from "../../chapters/application/services/chapter-permission.service.js";
 import { ChapterNumber } from "../../chapters/domain/chapter-number.js";
 import type { DiscordSeriesChannelGateway } from "../../discord/application/discord-series-channel-gateway.js";
-import type { DomainEventOutbox } from "../../events/application/domain-event-outbox.js";
 import { SeriesService } from "../application/services/series.service.js";
 import { SeriesLifecycleService } from "../application/services/series-lifecycle.service.js";
 import { InvalidSeriesSlugError } from "../domain/series-slug.js";
@@ -237,14 +236,13 @@ export function registerSeriesPlugin(
   authentication: { service: SessionService; cookies: SessionCookieAdapter },
   authorization: AuthorizationService,
   chapterPermissions: ChapterPermissionService,
-  events?: DomainEventOutbox,
   seriesChannels?: DiscordSeriesChannelGateway,
 ) {
   const session = requireSession(
     authentication.service,
     authentication.cookies,
   );
-  const repository = new DrizzleSeriesRepository(db, events);
+  const repository = new DrizzleSeriesRepository(db);
   const chapters = new DrizzleChapterCoreRepository(db);
   const seriesService = new SeriesService(
     repository,

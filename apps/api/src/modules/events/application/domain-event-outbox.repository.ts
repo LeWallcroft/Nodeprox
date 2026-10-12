@@ -4,6 +4,8 @@ export interface ClaimedDomainEventEnvelope extends DomainEventEnvelope {
   claimToken: string;
 }
 
+export type DomainEventCompletionKind = "dispatched" | "terminal-no-handler";
+
 export interface DomainEventOutboxRepository {
   claimPending(input: {
     limit: number;
@@ -11,10 +13,11 @@ export interface DomainEventOutboxRepository {
     leaseDurationMs: number;
   }): Promise<ClaimedDomainEventEnvelope[]>;
 
-  markProcessed(input: {
+  complete(input: {
     eventId: string;
     claimToken: string;
-    processedAt: Date;
+    completedAt: Date;
+    completionKind: DomainEventCompletionKind;
   }): Promise<boolean>;
 
   recordFailure(input: {

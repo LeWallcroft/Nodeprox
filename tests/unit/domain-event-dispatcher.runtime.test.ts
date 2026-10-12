@@ -14,7 +14,14 @@ describe("DomainEventDispatcherRuntime", () => {
       runOnce: async () => {
         calls += 1;
         if (calls === 1) throw new Error("temporary");
-        return { claimed: 0, processed: 0, failed: 0, skipped: 0 };
+        return {
+          claimed: 0,
+          dispatched: 0,
+          terminal: 0,
+          failed: 0,
+          deferred: 0,
+          claimLost: 0,
+        };
       },
     } as unknown as DomainEventDispatcher;
     const runtime = new DomainEventDispatcherRuntime(dispatcher, logger, 1);
@@ -36,7 +43,14 @@ describe("DomainEventDispatcherRuntime", () => {
       runOnce: async () => {
         calls += 1;
         await pending;
-        return { claimed: 1, processed: 1, failed: 0, skipped: 0 };
+        return {
+          claimed: 1,
+          dispatched: 1,
+          terminal: 0,
+          failed: 0,
+          deferred: 0,
+          claimLost: 0,
+        };
       },
     } as unknown as DomainEventDispatcher;
     const runtime = new DomainEventDispatcherRuntime(dispatcher, logger, 1);

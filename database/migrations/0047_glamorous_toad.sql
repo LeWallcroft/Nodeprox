@@ -1,0 +1,1 @@
+ALTER TABLE "domain_event_outbox" ADD COLUMN "completion_kind" text;

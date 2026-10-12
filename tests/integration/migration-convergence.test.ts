@@ -87,15 +87,20 @@ afterAll(async () => {
 });
 
 describe("convergent migration sequence", () => {
-  it("upgrades historical domain events through 0045 with NULL origin and an index", async () => {
+  it("upgrades historical domain events with nullable correlation and completion metadata", async () => {
     const database = createDatabase(databaseUrl(incidentCorrelationName));
     const subset = await migrationsThrough(44);
     const eventId = randomUUID();
+    const processedEventId = randomUUID();
     try {
       await migrate(database.db, { migrationsFolder: subset });
       await database.sql`
         INSERT INTO domain_event_outbox (id, event_type, aggregate_type, aggregate_id, payload)
         VALUES (${eventId}, 'historical.event', 'series', ${randomUUID()}, '{}'::jsonb)
+      `;
+      await database.sql`
+        INSERT INTO domain_event_outbox (id, event_type, aggregate_type, aggregate_id, payload, processed_at)
+        VALUES (${processedEventId}, 'historical.processed', 'series', ${randomUUID()}, '{}'::jsonb, now())
       `;
       await migrate(database.db, { migrationsFolder: "database/migrations" });
       const [historical] = await database.sql<
@@ -104,6 +109,34 @@ describe("convergent migration sequence", () => {
         SELECT origin_request_id AS "originRequestId" FROM domain_event_outbox WHERE id = ${eventId}
       `;
       expect(historical?.originRequestId).toBeNull();
+      const historicalCompletion = await database.sql<
+        {
+          id: string;
+          completionKind: string | null;
+          processedAt: Date | null;
+        }[]
+      >`
+        SELECT id, completion_kind AS "completionKind", processed_at AS "processedAt"
+        FROM domain_event_outbox WHERE id IN (${eventId}, ${processedEventId})
+      `;
+      expect(
+        historicalCompletion.find((row) => row.id === eventId),
+      ).toMatchObject({
+        completionKind: null,
+        processedAt: null,
+      });
+      expect(
+        historicalCompletion.find((row) => row.id === processedEventId)
+          ?.completionKind,
+      ).toBeNull();
+      expect(
+        Date.parse(
+          String(
+            historicalCompletion.find((row) => row.id === processedEventId)
+              ?.processedAt,
+          ),
+        ),
+      ).not.toBeNaN();
       const [index] = await database.sql<{ indexname: string }[]>`
         SELECT indexname FROM pg_indexes WHERE tablename = 'domain_event_outbox'
           AND indexname = 'domain_event_outbox_origin_request_idx'

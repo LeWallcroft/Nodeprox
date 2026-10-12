@@ -149,7 +149,6 @@ export function buildApp(
       authentication,
       authorization,
       chapterPermissions,
-      services.domainEvents,
       services.seriesChannelGateway,
     );
     const sessionGuard = requireSession(

@@ -6,6 +6,10 @@ import type {
   ClaimedDomainEventEnvelope,
   DomainEventOutboxRepository,
 } from "./domain-event-outbox.repository.js";
+import {
+  domainEventPolicyCatalog,
+  type DomainEventPolicyCatalog,
+} from "./domain-event-policy.js";
 
 export interface DomainEventDispatchLogger {
   debug(context: Record<string, unknown>, message: string): void;
@@ -23,9 +27,11 @@ export interface DomainEventDispatcherOptions {
 
 export interface DomainEventDispatchResult {
   claimed: number;
-  processed: number;
+  dispatched: number;
+  terminal: number;
   failed: number;
-  skipped: number;
+  deferred: number;
+  claimLost: number;
 }
 
 const defaultOptions: DomainEventDispatcherOptions = {
@@ -44,6 +50,7 @@ export class DomainEventDispatcher {
     private readonly registry: DomainEventHandlerRegistry,
     private readonly logger: DomainEventDispatchLogger,
     options: Partial<DomainEventDispatcherOptions> = {},
+    private readonly policy: DomainEventPolicyCatalog = domainEventPolicyCatalog,
   ) {
     this.options = { ...defaultOptions, ...options };
   }
@@ -59,68 +66,115 @@ export class DomainEventDispatcher {
     });
     const result: DomainEventDispatchResult = {
       claimed: events.length,
-      processed: 0,
+      dispatched: 0,
+      terminal: 0,
       failed: 0,
-      skipped: 0,
+      deferred: 0,
+      claimLost: 0,
     };
     for (const event of events) {
+      const disposition = this.policy.getDisposition(event.eventType);
       const handlers = this.registry.getHandlers(event.eventType);
-      if (handlers.length === 0) {
-        await this.outbox.defer({
+      if (
+        disposition === null ||
+        (disposition === "dispatch-required" && handlers.length === 0) ||
+        (disposition === "terminal-legacy" && handlers.length > 0)
+      ) {
+        const reason =
+          disposition === null
+            ? "unclassified-event-type"
+            : disposition === "terminal-legacy"
+              ? "terminal-handler-conflict"
+              : "missing-required-handler";
+        const deferred = await this.outbox.defer({
           eventId: event.id,
           claimToken: event.claimToken,
           nextAttemptAt: new Date(
             now.getTime() + this.options.noHandlerDelayMs,
           ),
         });
-        result.skipped += 1;
-        this.logger.warn(
-          this.logContext(event, { result: "no-handler" }),
-          "Domain event deferred because no handler is registered",
-        );
+        if (!deferred) this.claimLost(result, event);
+        else {
+          result.deferred += 1;
+          const context = this.logContext(event, { result: reason });
+          if (reason === "terminal-handler-conflict")
+            this.logger.error(
+              context,
+              "Domain event policy conflicts with registered handler",
+            );
+          else this.logger.warn(context, "Domain event deferred by policy");
+        }
+        continue;
+      }
+      if (disposition === "terminal-legacy") {
+        const completed = await this.outbox.complete({
+          eventId: event.id,
+          claimToken: event.claimToken,
+          completedAt: new Date(),
+          completionKind: "terminal-no-handler",
+        });
+        if (!completed) this.claimLost(result, event);
+        else {
+          result.terminal += 1;
+          this.logger.debug(
+            this.logContext(event, { result: "terminal-no-handler" }),
+            "Legacy domain event completed without handler",
+          );
+        }
         continue;
       }
       const failure = await this.runHandlers(event, handlers);
       if (failure) {
         const attempt = event.attemptCount + 1;
-        await this.outbox.recordFailure({
+        const recorded = await this.outbox.recordFailure({
           eventId: event.id,
           claimToken: event.claimToken,
           attemptedAt: now,
           nextAttemptAt: new Date(now.getTime() + this.retryDelayMs(attempt)),
           errorCode: failure.errorCode,
         });
-        result.failed += 1;
-        this.logger.error(
-          this.logContext(event, {
-            handlerName: failure.handlerName,
-            result: "failed",
-            errorCode: failure.errorCode,
-          }),
-          "Domain event handler failed",
-        );
+        if (!recorded) this.claimLost(result, event);
+        else {
+          result.failed += 1;
+          this.logger.error(
+            this.logContext(event, {
+              handlerName: failure.handlerName,
+              result: "handler-failed",
+              errorCode: failure.errorCode,
+            }),
+            "Domain event handler failed",
+          );
+        }
         continue;
       }
-      const processed = await this.outbox.markProcessed({
+      const completed = await this.outbox.complete({
         eventId: event.id,
         claimToken: event.claimToken,
-        processedAt: new Date(),
+        completedAt: new Date(),
+        completionKind: "dispatched",
       });
-      if (!processed) {
-        result.skipped += 1;
-        this.logger.warn(
-          this.logContext(event, { result: "claim-lost" }),
-          "Domain event claim was lost before it could be marked processed",
-        );
+      if (!completed) {
+        this.claimLost(result, event);
         continue;
       }
-      result.processed += 1;
+      result.dispatched += 1;
       this.logger.debug(
-        this.logContext(event, { result: "processed" }),
-        "Domain event processed",
+        this.logContext(event, { result: "dispatched" }),
+        "Domain event dispatched",
       );
     }
     return result;
+  }
+
+  private claimLost(
+    result: DomainEventDispatchResult,
+    event: ClaimedDomainEventEnvelope,
+  ): void {
+    result.claimLost += 1;
+    this.logger.warn(
+      this.logContext(event, { result: "claim-lost" }),
+      "Domain event claim was lost before transition persisted",
+    );
   }
 
   private async runHandlers(
