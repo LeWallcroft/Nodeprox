@@ -11,6 +11,7 @@ export class DrizzleDomainEventOutbox implements DomainEventOutbox {
       aggregateType: event.aggregateType,
       aggregateId: event.aggregateId,
       ...(event.actorUserId ? { actorUserId: event.actorUserId } : {}),
+      originRequestId: event.originRequestId ?? null,
       payload: event.payload,
       occurredAt: event.occurredAt,
     });

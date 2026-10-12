@@ -40,7 +40,7 @@ export interface SeriesLifecycleDetail {
     actorUserId: string;
     responsibleUserIdAtEvent: string | null;
     responsibleLabelSnapshot: string | null;
-    sourceRequestId: string | null;
+    sourceReactivationRequestId: string | null;
     occurredAt: string;
   }>;
   requests: Array<{

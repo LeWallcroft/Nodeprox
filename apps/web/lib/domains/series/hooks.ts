@@ -82,19 +82,25 @@ export function useSeriesLifecycleActions(seriesId: string) {
       onSuccess: refresh,
     }),
     approve: useMutation({
-      mutationFn: (input: { requestId: string; resolutionNote?: string }) =>
+      mutationFn: (input: {
+        reactivationRequestId: string;
+        resolutionNote?: string;
+      }) =>
         approveSeriesReactivation(
           seriesId,
-          input.requestId,
+          input.reactivationRequestId,
           input.resolutionNote,
         ),
       onSuccess: refresh,
     }),
     reject: useMutation({
-      mutationFn: (input: { requestId: string; resolutionNote?: string }) =>
+      mutationFn: (input: {
+        reactivationRequestId: string;
+        resolutionNote?: string;
+      }) =>
         rejectSeriesReactivation(
           seriesId,
-          input.requestId,
+          input.reactivationRequestId,
           input.resolutionNote,
         ),
       onSuccess: refresh,

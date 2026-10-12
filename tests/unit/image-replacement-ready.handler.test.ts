@@ -81,6 +81,7 @@ function event() {
     aggregateType: "image_replacement_operation",
     aggregateId: operation.id,
     actorUserId: targetUserId,
+    originRequestId: null,
     payload: {
       targetUserId,
       chapterId: operation.chapterId,

@@ -48,28 +48,28 @@ export function reactivateSeries(seriesId: string, resolutionNote?: string) {
   return lifecyclePost(`/series/${seriesId}/reactivate`, { resolutionNote });
 }
 export function requestSeriesReactivation(seriesId: string, note?: string) {
-  return lifecyclePost<{ requestId: string }>(
+  return lifecyclePost<{ reactivationRequestId: string }>(
     `/series/${seriesId}/reactivation-requests`,
     { note },
   );
 }
 export function approveSeriesReactivation(
   seriesId: string,
-  requestId: string,
+  reactivationRequestId: string,
   resolutionNote?: string,
 ) {
   return lifecyclePost(
-    `/series/${seriesId}/reactivation-requests/${requestId}/approve`,
+    `/series/${seriesId}/reactivation-requests/${reactivationRequestId}/approve`,
     { resolutionNote },
   );
 }
 export function rejectSeriesReactivation(
   seriesId: string,
-  requestId: string,
+  reactivationRequestId: string,
   resolutionNote?: string,
 ) {
   return lifecyclePost(
-    `/series/${seriesId}/reactivation-requests/${requestId}/reject`,
+    `/series/${seriesId}/reactivation-requests/${reactivationRequestId}/reject`,
     { resolutionNote },
   );
 }

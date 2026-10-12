@@ -35,7 +35,7 @@ export const seriesOperationalHistory = pgTable(
       { onDelete: "set null" },
     ),
     responsibleLabelSnapshot: text("responsible_label_snapshot"),
-    sourceRequestId: uuid("source_request_id"),
+    sourceReactivationRequestId: uuid("source_request_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

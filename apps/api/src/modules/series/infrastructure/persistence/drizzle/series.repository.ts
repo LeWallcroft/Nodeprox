@@ -115,6 +115,7 @@ export class DrizzleSeriesRepository
     grantId?: string | undefined;
     discordChannelId?: string | undefined;
     discordChannelNameSnapshot?: string | undefined;
+    originRequestId?: string | undefined;
   }) {
     const discordChannelId = input.discordChannelId;
     if (input.actorRole === "gestor" && !discordChannelId)
@@ -179,6 +180,7 @@ export class DrizzleSeriesRepository
         await this.events?.append(
           {
             type: "series.responsibility.assigned",
+            originRequestId: input.originRequestId ?? null,
             aggregateType: "series",
             aggregateId: created.id,
             actorUserId: input.createdBy,
@@ -214,6 +216,7 @@ export class DrizzleSeriesRepository
           await this.events?.append(
             {
               type: "series.creation_grant.consumed",
+              originRequestId: input.originRequestId ?? null,
               aggregateType: "series_creation_grant",
               aggregateId: grant.id,
               actorUserId: input.createdBy,
@@ -235,6 +238,7 @@ export class DrizzleSeriesRepository
           await this.events?.append(
             {
               type: "series.channel.bound",
+              originRequestId: input.originRequestId ?? null,
               aggregateType: "series",
               aggregateId: created.id,
               actorUserId: input.createdBy,

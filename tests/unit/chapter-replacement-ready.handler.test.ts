@@ -16,6 +16,7 @@ describe("ChapterReplacementReadyHandler", () => {
       aggregateType: "chapter_replacement_operation",
       aggregateId: replacementId,
       actorUserId: targetUserId,
+      originRequestId: null,
       payload: { targetUserId, chapterId },
       occurredAt: new Date(),
       attemptCount: 0,

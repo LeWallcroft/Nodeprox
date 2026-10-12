@@ -7,6 +7,7 @@ const event = (source: string) => ({
   aggregateType: "series_creation_grant",
   aggregateId: "grant-1",
   actorUserId: "actor-1",
+  originRequestId: null,
   payload: {
     targetUserId: "00000000-0000-4000-8000-000000000002",
     source,

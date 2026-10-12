@@ -40,6 +40,7 @@ export class SeriesService {
       coverUrl?: string | null | undefined;
       grantId?: string | undefined;
       discordChannelId?: string | undefined;
+      originRequestId?: string | undefined;
     },
   ) {
     this.requireSession(context);
@@ -76,6 +77,7 @@ export class SeriesService {
       slug,
       createdBy: context.userId,
       actorRole: decision.role,
+      originRequestId: input.originRequestId,
     });
     return result.outcome === "created" ? result.series : result;
   }

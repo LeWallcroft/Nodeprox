@@ -7,6 +7,7 @@ export interface DomainEventOutbox {
       aggregateType: string;
       aggregateId: string;
       actorUserId?: string | null | undefined;
+      originRequestId?: string | null | undefined;
       payload: Record<string, unknown>;
       occurredAt: Date;
     },

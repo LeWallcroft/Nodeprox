@@ -26,7 +26,11 @@ export class WebSeriesCreationGrantService {
   ) {}
   async issue(
     actor: AuthorizationContext,
-    input: { targetUserId: string; reference?: string | undefined },
+    input: {
+      targetUserId: string;
+      reference?: string | undefined;
+      originRequestId?: string | undefined;
+    },
   ) {
     if (
       !(
@@ -70,6 +74,7 @@ export class WebSeriesCreationGrantService {
       await this.events.append(
         {
           type: "series.creation_grant.issued",
+          originRequestId: input.originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: grant.id,
           actorUserId: actor.userId,
@@ -90,7 +95,11 @@ export class WebSeriesCreationGrantService {
       };
     });
   }
-  async invalidate(actor: AuthorizationContext, grantId: string) {
+  async invalidate(
+    actor: AuthorizationContext,
+    grantId: string,
+    originRequestId?: string,
+  ) {
     if (
       !(
         await this.authorization.authorize(
@@ -129,6 +138,7 @@ export class WebSeriesCreationGrantService {
       await this.events.append(
         {
           type: "series.creation_grant.invalidated",
+          originRequestId: originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: grant.id,
           actorUserId: actor.userId,

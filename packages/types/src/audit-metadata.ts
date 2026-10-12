@@ -1,5 +1,6 @@
 const ALLOWED_METADATA_KEYS = new Set([
   "requestId",
+  "reactivationRequestId",
   "userId",
   "sessionId",
   "reason",

@@ -19,6 +19,7 @@ export const domainEventOutbox = pgTable(
     actorUserId: uuid("actor_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
+    originRequestId: text("origin_request_id"),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
     occurredAt: timestamp("occurred_at", { withTimezone: true })
       .notNull()
@@ -41,6 +42,7 @@ export const domainEventOutbox = pgTable(
       table.aggregateType,
       table.aggregateId,
     ),
+    index("domain_event_outbox_origin_request_idx").on(table.originRequestId),
     index("domain_event_outbox_claimable_idx").on(
       table.processedAt,
       table.nextAttemptAt,

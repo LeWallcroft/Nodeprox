@@ -296,7 +296,7 @@ export function InactiveSeriesDetailPanel({
         onReview={(decision, resolutionNote) =>
           (decision === "approve" ? actions.approve : actions.reject)
             .mutateAsync({
-              requestId: pending?.id ?? "",
+              reactivationRequestId: pending?.id ?? "",
               ...(resolutionNote ? { resolutionNote } : {}),
             })
             .then(() => undefined)

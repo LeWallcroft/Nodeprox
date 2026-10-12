@@ -100,14 +100,12 @@ export function registerSeriesGrantAdminPlugin(
     { preHandler: session },
     async (request, reply) => {
       try {
-        return reply
-          .code(201)
-          .send(
-            await input.commands.issue(
-              actor(),
-              parse(issueSchema, request.body),
-            ),
-          );
+        return reply.code(201).send(
+          await input.commands.issue(actor(), {
+            ...parse(issueSchema, request.body),
+            originRequestId: getRequestContext()?.requestId,
+          }),
+        );
       } catch (error) {
         return map(error);
       }
@@ -121,6 +119,7 @@ export function registerSeriesGrantAdminPlugin(
         return await input.commands.invalidate(
           actor(),
           parse(idSchema, request.params).id,
+          getRequestContext()?.requestId,
         );
       } catch (error) {
         return map(error);

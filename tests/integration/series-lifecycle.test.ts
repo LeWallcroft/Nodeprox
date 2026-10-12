@@ -298,7 +298,8 @@ describe("Series operational lifecycle", () => {
       payload: { note: "Puedo retomar esta serie" },
     });
     expect(request.statusCode).toBe(201);
-    const requestId = request.json<{ requestId: string }>().requestId;
+    const requestId = request.json<{ reactivationRequestId: string }>()
+      .reactivationRequestId;
     const approval = await app.inject({
       method: "POST",
       url: `/series/${unassignedSeriesId}/reactivation-requests/${requestId}/approve`,
@@ -352,7 +353,8 @@ describe("Series operational lifecycle", () => {
       payload: { note: "Puedo continuar esta serie" },
     });
     expect(request.statusCode).toBe(201);
-    const requestId = request.json<{ requestId: string }>().requestId;
+    const requestId = request.json<{ reactivationRequestId: string }>()
+      .reactivationRequestId;
     const approval = await app.inject({
       method: "POST",
       url: `/series/${reassignedSeriesId}/reactivation-requests/${requestId}/approve`,
@@ -368,6 +370,21 @@ describe("Series operational lifecycle", () => {
       responsibleUserId: uploaderId,
       assignedBy: adminId,
     });
+    const approvalRequestId = approval.headers["x-request-id"];
+    const correlatedAudits = await database.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.resourceId, reassignedSeriesId));
+    for (const action of [
+      "series.assignment.changed_on_reactivation",
+      "series.reactivation.approved",
+      "series.lifecycle.reactivated",
+    ]) {
+      const row = correlatedAudits.find((audit) => audit.action === action);
+      expect(row?.requestId).toBe(approvalRequestId);
+      expect(row?.requestId).not.toBe(requestId);
+      expect(row?.metadata).toMatchObject({ reactivationRequestId: requestId });
+    }
     const activeList = await app.inject({
       method: "GET",
       url: "/series",
@@ -486,7 +503,8 @@ describe("Series operational lifecycle", () => {
       payload: { note: "Disponible para continuar" },
     });
     expect(request.statusCode).toBe(201);
-    const requestId = request.json<{ requestId: string }>().requestId;
+    const requestId = request.json<{ reactivationRequestId: string }>()
+      .reactivationRequestId;
     const lifecycle = await app.inject({
       method: "GET",
       url: `/series/${seriesId}/lifecycle`,
@@ -504,6 +522,7 @@ describe("Series operational lifecycle", () => {
     expect(requestEvents).toHaveLength(1);
     expect(requestEvents[0]).toMatchObject({
       eventType: "series.reactivation.requested",
+      originRequestId: request.headers["x-request-id"],
       actorUserId: uploaderId,
       payload: {
         targetUserIds: [adminId],
@@ -584,7 +603,8 @@ describe("Series operational lifecycle", () => {
       payload: {},
     });
     expect(first.statusCode).toBe(201);
-    const firstId = first.json<{ requestId: string }>().requestId;
+    const firstId = first.json<{ reactivationRequestId: string }>()
+      .reactivationRequestId;
     const rejected = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/reactivation-requests/${firstId}/reject`,
@@ -592,6 +612,15 @@ describe("Series operational lifecycle", () => {
       payload: { resolutionNote: "Aún no" },
     });
     expect(rejected.statusCode).toBe(200);
+    const [rejectionAudit] = await database.db
+      .select()
+      .from(auditLogs)
+      .where(eq(auditLogs.action, "series.reactivation.rejected"));
+    expect(rejectionAudit?.requestId).toBe(rejected.headers["x-request-id"]);
+    expect(rejectionAudit?.requestId).not.toBe(firstId);
+    expect(rejectionAudit?.metadata).toMatchObject({
+      reactivationRequestId: firstId,
+    });
     expect(
       (
         await database.db.select().from(series).where(eq(series.id, seriesId))
@@ -604,7 +633,8 @@ describe("Series operational lifecycle", () => {
       payload: {},
     });
     expect(second.statusCode).toBe(201);
-    const secondId = second.json<{ requestId: string }>().requestId;
+    const secondId = second.json<{ reactivationRequestId: string }>()
+      .reactivationRequestId;
     const direct = await app.inject({
       method: "POST",
       url: `/series/${seriesId}/reactivate`,

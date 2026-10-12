@@ -105,8 +105,8 @@ const noteSchema = z
 const requestSchema = z
   .object({ note: z.string().max(1000).nullable().optional() })
   .strict();
-const requestIdSchema = z
-  .object({ seriesId: z.uuid(), requestId: z.uuid() })
+const reactivationRequestIdSchema = z
+  .object({ seriesId: z.uuid(), reactivationRequestId: z.uuid() })
   .strict();
 
 const error = (
@@ -290,7 +290,10 @@ export function registerSeriesPlugin(
         seriesCreateSchema,
         request.body,
       );
-      const result = await seriesService.create(context(), input);
+      const result = await seriesService.create(context(), {
+        ...input,
+        originRequestId: getRequestContext()?.requestId,
+      });
       if ("forbidden" in result) throw forbidden;
       if ("outcome" in result) {
         if (result.outcome === "channel-required")
@@ -383,7 +386,7 @@ export function registerSeriesPlugin(
         await lifecycleService.deactivate(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
@@ -399,7 +402,7 @@ export function registerSeriesPlugin(
         await lifecycleService.reactivate(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
@@ -415,7 +418,7 @@ export function registerSeriesPlugin(
         await lifecycleService.requestReactivation(context(), {
           seriesId,
           ...body,
-          requestId: getRequestContext()?.requestId,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
       return reply.code(201).send(result);
@@ -423,30 +426,32 @@ export function registerSeriesPlugin(
   );
 
   app.post(
-    "/series/:seriesId/reactivation-requests/:requestId/approve",
+    "/series/:seriesId/reactivation-requests/:reactivationRequestId/approve",
     { preHandler: session },
     async (request) => {
-      const params = parse(requestIdSchema, request.params);
+      const params = parse(reactivationRequestIdSchema, request.params);
       const body = parse(noteSchema, request.body ?? {});
       return lifecycleOutcome(
         await lifecycleService.approveReactivation(context(), {
           ...params,
           ...body,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
   );
 
   app.post(
-    "/series/:seriesId/reactivation-requests/:requestId/reject",
+    "/series/:seriesId/reactivation-requests/:reactivationRequestId/reject",
     { preHandler: session },
     async (request) => {
-      const params = parse(requestIdSchema, request.params);
+      const params = parse(reactivationRequestIdSchema, request.params);
       const body = parse(noteSchema, request.body ?? {});
       return lifecycleOutcome(
         await lifecycleService.rejectReactivation(context(), {
           ...params,
           ...body,
+          correlationRequestId: getRequestContext()?.requestId,
         }),
       );
     },
