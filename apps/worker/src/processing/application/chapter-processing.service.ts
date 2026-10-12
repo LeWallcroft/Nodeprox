@@ -9,6 +9,8 @@ import type {
   ZipExtractorPort,
 } from "./ports.js";
 import { classifyProcessingError } from "./processing-error.classifier.js";
+import { ProcessingPermanentFailure } from "./processing.errors.js";
+export { ProcessingPermanentFailure } from "./processing.errors.js";
 import { putIfAbsentOrVerifyEquivalent } from "./put-if-absent-or-verify-equivalent.js";
 export class ChapterProcessingService {
   constructor(
@@ -204,12 +206,6 @@ export class ChapterProcessingService {
         );
       });
     }
-  }
-}
-
-export class ProcessingPermanentFailure extends Error {
-  constructor(readonly code: string) {
-    super(code);
   }
 }
 

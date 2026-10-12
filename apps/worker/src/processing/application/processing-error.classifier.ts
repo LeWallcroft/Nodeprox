@@ -2,6 +2,8 @@ import {
   StorageError,
   StorageObjectNotFoundError,
 } from "@nodeprox/storage/errors";
+import { findPostgresFailure } from "../../../../../database/postgres-error.js";
+import { ProcessingPermanentFailure } from "./processing.errors.js";
 
 export type ProcessingErrorCode =
   | "SOURCE_OBJECT_MISSING"
@@ -54,6 +56,12 @@ export function classifyProcessingError(
       retryable: error.retryable,
       message: error.code,
     };
+  if (error instanceof ProcessingPermanentFailure)
+    return {
+      code: error.code as ProcessingErrorCode,
+      retryable: false,
+      message: error.code,
+    };
   const code =
     typeof error === "object" &&
     error !== null &&
@@ -67,10 +75,23 @@ export function classifyProcessingError(
       retryable: false,
       message: code,
     };
-  if (code === "40001" || code === "40P01")
-    return { code: "DB_PUBLICATION_FAILED", retryable: true, message: code };
-  if (code === "23505" || code === "23503" || code === "23514")
-    return { code: "DB_PUBLICATION_FAILED", retryable: false, message: code };
+  if (code === "SOURCE_OBJECT_CHANGED")
+    return { code: "SOURCE_OBJECT_CHANGED", retryable: false, message: code };
+  if (code === "SOURCE_OBJECT_MISSING")
+    return { code: "SOURCE_OBJECT_MISSING", retryable: false, message: code };
+  const postgres = findPostgresFailure(error);
+  if (postgres && (postgres.code === "40001" || postgres.code === "40P01"))
+    return {
+      code: "DB_PUBLICATION_FAILED",
+      retryable: true,
+      message: postgres.code,
+    };
+  if (postgres && ["23505", "23503", "23514"].includes(postgres.code))
+    return {
+      code: "DB_PUBLICATION_FAILED",
+      retryable: false,
+      message: postgres.code,
+    };
   if (zipInvalidMessages.has(raw))
     return { code: "ZIP_INVALID", retryable: false, message };
   if (imageInvalidMessages.has(raw))
