@@ -501,20 +501,16 @@ export function registerSeriesPlugin(
 
   app.patch("/series/:seriesId", { preHandler: session }, async (request) => {
     const { seriesId } = parse(idSchema, request.params);
-    try {
-      const result = await seriesService.update(
-        context(),
-        seriesId,
-        parse(seriesPatchSchema, request.body),
-      );
-      if (!result) throw notFound;
-      if ("forbidden" in result) throw forbidden;
-      if ("inactive" in result) throw seriesInactive;
-      if ("conflict" in result) throw conflict;
-      return result;
-    } catch (cause) {
-      throw cause;
-    }
+    const result = await seriesService.update(
+      context(),
+      seriesId,
+      parse(seriesPatchSchema, request.body),
+    );
+    if (!result) throw notFound;
+    if ("forbidden" in result) throw forbidden;
+    if ("inactive" in result) throw seriesInactive;
+    if ("conflict" in result) throw conflict;
+    return result;
   });
 
   app.delete(
@@ -651,7 +647,10 @@ export function registerSeriesPlugin(
         if (cause instanceof SeriesInactiveError) throw seriesInactive;
         if (
           cause instanceof KnownPersistenceConflictError &&
-          cause.constraint === "chapters_series_number_unique"
+          [
+            "chapters_series_number_unique",
+            "chapters_series_public_key_unique",
+          ].includes(cause.constraint)
         ) {
           const requestContext = getRequestContext();
           request.log.info(
@@ -714,20 +713,16 @@ export function registerSeriesPlugin(
     { preHandler: session },
     async (request) => {
       const { chapterId } = parse(chapterIdSchema, request.params);
-      try {
-        const result = await chapterCore.update(
-          context(),
-          chapterId,
-          parse(chapterPatchSchema, request.body),
-        );
-        if ("notFound" in result) throw notFound;
-        if ("denied" in result) throw forbidden;
-        if ("inactive" in result) throw seriesInactive;
-        if ("conflict" in result) throw conflict;
-        return result.chapter;
-      } catch (cause) {
-        throw cause;
-      }
+      const result = await chapterCore.update(
+        context(),
+        chapterId,
+        parse(chapterPatchSchema, request.body),
+      );
+      if ("notFound" in result) throw notFound;
+      if ("denied" in result) throw forbidden;
+      if ("inactive" in result) throw seriesInactive;
+      if ("conflict" in result) throw conflict;
+      return result.chapter;
     },
   );
 

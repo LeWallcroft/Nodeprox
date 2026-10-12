@@ -1,4 +1,5 @@
 import { type Job, Worker, type WorkerOptions } from "bullmq";
+import { StorageError } from "@nodeprox/storage/errors";
 import type { WorkerDependencies } from "./create-worker-dependencies.js";
 import { createWorkerJobHandler } from "./worker-job-handler.js";
 
@@ -58,6 +59,15 @@ export function createWorkerRuntime(
         uploadId: job?.data.uploadId,
         replacementId: job?.data.replacementId,
         errorName: error.name,
+        ...(error instanceof StorageError
+          ? {
+              code: error.code,
+              retryable: error.retryable,
+              providerCode: error.providerCode,
+              providerRequestId: error.providerRequestId,
+              httpStatus: error.httpStatus,
+            }
+          : {}),
         errorMessage: sanitizeDiagnosticText(error.message, dependencies),
       },
       "Worker job failed",

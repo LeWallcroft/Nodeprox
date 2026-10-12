@@ -84,7 +84,10 @@ export function registerImportBatchPlugin(
       } catch (error) {
         if (
           error instanceof KnownPersistenceConflictError &&
-          error.constraint === "chapters_series_number_unique"
+          [
+            "chapters_series_number_unique",
+            "chapters_series_public_key_unique",
+          ].includes(error.constraint)
         )
           return { outcome: "conflict" as const };
         throw error;

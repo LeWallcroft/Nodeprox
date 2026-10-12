@@ -104,7 +104,7 @@ describe("SessionService security and lifecycle", () => {
         email: "missing@example.com",
         password: "x",
       }),
-    ).rejects.toMatchObject({ statusCode: 401 });
+    ).rejects.toMatchObject({ code: "invalid-credentials" });
     expect(passwords.dummy).toBe(true);
   });
 
@@ -119,7 +119,7 @@ describe("SessionService security and lifecycle", () => {
           new FakeSessions(),
           new FakePasswords(),
         ).authenticate({ email: "user@example.com", password: "x" }),
-      ).rejects.toMatchObject({ statusCode: 401 });
+      ).rejects.toMatchObject({ code: "invalid-credentials" });
     },
   );
 

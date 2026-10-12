@@ -257,6 +257,7 @@ export class DiscordGatewayService {
   }
 
   async confirmLink(input: {
+    originRequestId?: string | undefined;
     code: string;
     discordId: string;
     discordUsername: string;
@@ -356,6 +357,7 @@ export class DiscordGatewayService {
         await this.events.append(
           {
             type: "discord.identity.linked",
+            originRequestId: input.originRequestId ?? null,
             aggregateType: "user",
             aggregateId: user.id,
             actorUserId: user.id,
@@ -392,6 +394,7 @@ export class DiscordGatewayService {
   }
 
   async issueGrant(input: {
+    originRequestId?: string | undefined;
     targetDiscordId: string;
     reference?: string | undefined;
     actorDiscordId: string;
@@ -471,6 +474,7 @@ export class DiscordGatewayService {
       await this.events.append(
         {
           type: "series.creation_grant.issued",
+          originRequestId: input.originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: grant.id,
           payload: {
@@ -493,6 +497,7 @@ export class DiscordGatewayService {
   }
 
   async invalidateGrant(input: {
+    originRequestId?: string | undefined;
     grantId: string;
     actorDiscordId: string;
     actorRoleIds: string[];
@@ -555,6 +560,7 @@ export class DiscordGatewayService {
       await this.events.append(
         {
           type: "series.creation_grant.invalidated",
+          originRequestId: input.originRequestId ?? null,
           aggregateType: "series_creation_grant",
           aggregateId: input.grantId,
           payload: {

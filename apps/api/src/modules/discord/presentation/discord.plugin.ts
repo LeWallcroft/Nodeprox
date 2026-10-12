@@ -160,11 +160,12 @@ export function registerDiscordPlugin(
     { preHandler: internalGuard },
     async (request, reply) => {
       try {
-        return reply
-          .code(201)
-          .send(
-            await input.service.issueGrant(parsed(grantInput, request.body)),
-          );
+        return reply.code(201).send(
+          await input.service.issueGrant({
+            ...parsed(grantInput, request.body),
+            originRequestId: getRequestContext()?.requestId,
+          }),
+        );
       } catch (error) {
         return mapError(error);
       }
@@ -178,6 +179,7 @@ export function registerDiscordPlugin(
         return await input.service.invalidateGrant({
           grantId: parsed(idSchema, request.params).id,
           ...parsed(invalidateInput, request.body),
+          originRequestId: getRequestContext()?.requestId,
         });
       } catch (error) {
         return mapError(error);
@@ -224,9 +226,10 @@ export function registerDiscordPlugin(
     { preHandler: internalGuard },
     async (request) => {
       try {
-        return await input.service.confirmLink(
-          parsed(confirmInput, request.body),
-        );
+        return await input.service.confirmLink({
+          ...parsed(confirmInput, request.body),
+          originRequestId: getRequestContext()?.requestId,
+        });
       } catch (error) {
         return mapError(error);
       }

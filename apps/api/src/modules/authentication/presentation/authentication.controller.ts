@@ -16,7 +16,7 @@ export function registerAuthenticationController(
   app.post("/auth/login", async (request, reply) => {
     validateMutationOrigin(request);
     const input = parseWithSchema(loginSchema, request.body);
-    let result;
+    let result: Awaited<ReturnType<SessionService["authenticate"]>>;
     try {
       result = await service.authenticate(input);
     } catch (error) {

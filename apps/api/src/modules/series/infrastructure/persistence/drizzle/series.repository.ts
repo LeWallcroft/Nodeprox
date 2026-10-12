@@ -939,8 +939,10 @@ export class DrizzleChapterCoreRepository
       });
     } catch (error) {
       throw (
-        knownPersistenceConflict(error, ["chapters_series_number_unique"]) ??
-        error
+        knownPersistenceConflict(error, [
+          "chapters_series_number_unique",
+          "chapters_series_public_key_unique",
+        ]) ?? error
       );
     }
   }
@@ -1184,7 +1186,12 @@ export class DrizzleChapterCoreRepository
           : { outcome: "conflict" as const };
       });
     } catch (error) {
-      if (knownPersistenceConflict(error, ["chapters_series_number_unique"]))
+      if (
+        knownPersistenceConflict(error, [
+          "chapters_series_number_unique",
+          "chapters_series_public_key_unique",
+        ])
+      )
         return { outcome: "conflict" as const };
       throw error;
     }

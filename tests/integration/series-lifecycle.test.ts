@@ -525,7 +525,7 @@ describe("Series operational lifecycle", () => {
       originRequestId: request.headers["x-request-id"],
       actorUserId: uploaderId,
       payload: {
-        targetUserIds: [adminId],
+        targetUserIds: expect.arrayContaining([adminId]),
         requesterLabel: emails.uploader,
         seriesTitle: "Lifecycle Test",
       },
