@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { errorMessage } from "../feedback";
 import { AppDialog } from "../../ui/app-dialog";
 import { Button } from "../../ui/button";
 
@@ -25,11 +26,7 @@ export function ReactivationReviewDialog({
     void onReview(decision, note.trim() || undefined)
       .then(() => onOpenChange(false))
       .catch((cause: unknown) =>
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "No se pudo revisar la solicitud.",
-        ),
+        setError(errorMessage(cause, "No se pudo revisar la solicitud.")),
       );
   }
   return (

@@ -21,4 +21,12 @@ describe("API error normalization", () => {
       "API request failed (503)",
     );
   });
+  it.each([
+    { code: 12, detail: "unsafe" },
+    { category: "not-a-category", detail: "unsafe" },
+    { requestId: 42, detail: "unsafe" },
+    { status: "500", detail: "unsafe" },
+  ])("rejects malformed Problem Details", (payload) => {
+    expect(normalizeApiError(500, payload).details).toBeUndefined();
+  });
 });

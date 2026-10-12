@@ -36,9 +36,9 @@ export function errorMessage(
       return "La operación entra en conflicto con el estado actual.";
     if (error.status === 413) return "El archivo supera el límite permitido.";
     if (error.status === 415) return "Solo se aceptan archivos ZIP.";
-    if (error.status === 422) return error.message;
+    if (error.status === 422) return `${presentation.message}${reference}`;
     if (error.status >= 500) return `${presentation.message}${reference}`;
-    return `${error.message}${reference}`;
+    return `${presentation.message}${reference}`;
   }
   return fallback;
 }

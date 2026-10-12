@@ -105,7 +105,7 @@ export function SeriesDetailPanel({
           {error ? (
             <ErrorState
               title="No se pudo cargar el detalle"
-              description={error.message}
+              description={errorMessage(error)}
               action={
                 onRetry ? (
                   <Button type="button" onClick={onRetry}>

@@ -2,9 +2,58 @@ import { EventEmitter } from "node:events";
 import { MessageFlags } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { DiscordInteractionError } from "./commands/discord-interaction-error.js";
+import { NodeProxApiError } from "../infrastructure/nodeprox-api/nodeprox-api.client.js";
 import { registerInteractionRouter } from "./interaction-router.js";
 
 describe("interaction router", () => {
+  it("logs API incident correlation without returning raw details to Discord", async () => {
+    const client = new EventEmitter();
+    const reply = vi.fn().mockResolvedValue(undefined);
+    const logger = { info: vi.fn(), error: vi.fn(), warn: vi.fn() };
+    registerInteractionRouter({
+      client: client as never,
+      guildId: "guild",
+      controlChannelId: "channel",
+      handlers: [
+        {
+          name: "vincular",
+          execute: vi
+            .fn()
+            .mockRejectedValue(
+              new NodeProxApiError(
+                "discord-link-code-invalid",
+                400,
+                "api-request-1",
+              ),
+            ),
+        },
+      ],
+      logger: logger as never,
+    });
+    client.emit("interactionCreate", {
+      isChatInputCommand: () => true,
+      commandName: "vincular",
+      guildId: "guild",
+      channelId: "channel",
+      id: "interaction-1",
+      user: { id: "user" },
+      replied: false,
+      deferred: false,
+      reply,
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interactionId: "interaction-1",
+        apiRequestId: "api-request-1",
+        errorCode: "discord-link-code-invalid",
+        apiStatus: 400,
+        status: 400,
+      }),
+      expect.any(String),
+    );
+    expect(JSON.stringify(reply.mock.calls)).not.toContain("api-request-1");
+  });
   it("contains handler exceptions and sends one safe ephemeral response", async () => {
     const client = new EventEmitter();
     const reply = vi.fn().mockResolvedValue(undefined);

@@ -15,6 +15,24 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("HTTP error layering", () => {
+  it("keeps raw error messages out of Series lifecycle UI", () => {
+    const files = [
+      "reactivation-review-dialog.tsx",
+      "reactivation-request-dialog.tsx",
+      "assign-series-user-dialog.tsx",
+      "inactive-series-detail-panel.tsx",
+      "series-detail-panel.tsx",
+    ];
+    const violations = files.filter((name) =>
+      /(?:cause|error)\.message/.test(
+        readFileSync(
+          join(root, "apps/web/components/domains/series", name),
+          "utf8",
+        ),
+      ),
+    );
+    expect(violations).toEqual([]);
+  });
   it("keeps SQLSTATE inspection out of Presentation", () => {
     const violations = sourceFiles(join(root, "apps/api/src"))
       .filter((file) => /[/\\]presentation[/\\]/.test(file))

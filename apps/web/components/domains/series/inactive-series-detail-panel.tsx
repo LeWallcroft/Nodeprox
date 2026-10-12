@@ -2,6 +2,7 @@
 
 import { Eye, RotateCcw, Send, X } from "lucide-react";
 import { useState } from "react";
+import { errorMessage } from "../feedback";
 import {
   useSeriesCapabilities,
   useSeriesLifecycle,
@@ -254,9 +255,7 @@ export function InactiveSeriesDetailPanel({
                   .mutateAsync(undefined)
                   .catch((cause: unknown) =>
                     setActionError(
-                      cause instanceof Error
-                        ? cause.message
-                        : "No se pudo habilitar.",
+                      errorMessage(cause, "No se pudo habilitar."),
                     ),
                   );
               }}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { errorMessage } from "../feedback";
 import type {
   Series,
   SeriesResponsibleCandidate,
@@ -78,9 +79,7 @@ export function AssignSeriesUserDialog({
               setSubmitError(null);
               void onAssign(selectedId).catch((cause: unknown) =>
                 setSubmitError(
-                  cause instanceof Error
-                    ? cause.message
-                    : "No se pudo asignar el responsable.",
+                  errorMessage(cause, "No se pudo asignar el responsable."),
                 ),
               );
             }}
@@ -100,7 +99,7 @@ export function AssignSeriesUserDialog({
       {error ? (
         <ErrorState
           title="No se pudieron cargar candidatos"
-          description={error.message}
+          description={errorMessage(error)}
         />
       ) : null}
       {!isLoading && !error ? (

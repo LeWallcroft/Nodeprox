@@ -83,4 +83,17 @@ describe("resolveErrorPresentation", () => {
     expect(presentation.message).not.toContain("SQLSTATE");
     expect(presentation.requestId).toBe("req-internal");
   });
+  it("does not expose unknown validation or business details", () => {
+    for (const category of ["validation", "business_rule"] as const) {
+      const presentation = resolveErrorPresentation(
+        new ApiError(422, "private SQL text", "unknown", {
+          category,
+          detail: "private SQL text",
+          requestId: "req-safe",
+        }),
+      );
+      expect(presentation.message).not.toContain("private SQL text");
+      expect(presentation.requestId).toBe("req-safe");
+    }
+  });
 });

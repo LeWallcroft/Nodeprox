@@ -1,4 +1,8 @@
-import { type ApiRequestOptions, normalizeApiError } from "./types";
+import {
+  type ApiRequestOptions,
+  ApiUnavailableError,
+  normalizeApiError,
+} from "./types";
 
 const sameOriginApiPrefix = "/api";
 
@@ -6,11 +10,21 @@ export async function apiRequestBrowser<T>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const response = await fetch(`${sameOriginApiPrefix}${path}`, {
-    ...options,
-    cache: "no-store",
-    credentials: "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${sameOriginApiPrefix}${path}`, {
+      ...options,
+      cache: "no-store",
+      credentials: "include",
+    });
+  } catch (error) {
+    if (
+      options.signal?.aborted ||
+      (error instanceof Error && error.name === "AbortError")
+    )
+      throw error;
+    throw new ApiUnavailableError();
+  }
   if (!response.ok) {
     let payload: unknown;
     try {

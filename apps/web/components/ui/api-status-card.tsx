@@ -1,8 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { errorMessage } from "../domains/feedback";
 import { getApiHealth } from "../../lib/api/health";
-import { ApiError } from "../../lib/api/types";
 import { ErrorState } from "./error-state";
 import { Skeleton } from "./skeleton";
 import { StatusBadge } from "./status-badge";
@@ -56,11 +56,10 @@ export function ApiStatusCard() {
       ) : query.isError ? (
         <ErrorState
           title="No se pudo conectar con la API"
-          description={
-            query.error instanceof ApiError
-              ? query.error.message
-              : "Comprueba que el servicio esté disponible."
-          }
+          description={errorMessage(
+            query.error,
+            "Comprueba que el servicio esté disponible.",
+          )}
           action={
             <button
               className="inline-flex min-h-control items-center justify-center rounded-lg border border-border bg-surface px-3.5 font-semibold text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
