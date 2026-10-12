@@ -1,3 +1,4 @@
+import { MessageFlags } from "discord.js";
 import { describe, expect, it, vi } from "vitest";
 import { AuthorizeSeriesWorkflow } from "./authorize-series.workflow.js";
 import { DiscordInteractionError } from "./discord-interaction-error.js";
@@ -53,6 +54,10 @@ function component(customId: string, shape: "select" | "button" | "modal") {
     isModalSubmit: () => shape === "modal",
     isFromMessage: () => shape === "modal",
     fields: { getTextInputValue: vi.fn().mockReturnValue("Proyecto Alpha") },
+    channel: {
+      isSendable: () => true,
+      send: vi.fn().mockResolvedValue(undefined),
+    },
     update: vi.fn().mockResolvedValue(undefined),
     showModal: vi.fn().mockResolvedValue(undefined),
     reply: vi.fn().mockResolvedValue(undefined),
@@ -80,7 +85,7 @@ function customId(payload: unknown, row: number, item: number) {
 }
 
 describe("/autorizar-serie workflow", () => {
-  it("publishes an embedded selector only for an issuing actor", async () => {
+  it("shows the embedded authorization workflow only to the issuing actor", async () => {
     const client = api();
     const workflow = new AuthorizeSeriesWorkflow(client);
     const command = commandInteraction();
@@ -90,7 +95,7 @@ describe("/autorizar-serie workflow", () => {
     expect(command.reply).toHaveBeenCalledOnce();
     const response = command.reply.mock.calls[0]?.[0];
     expect(response.embeds).toHaveLength(1);
-    expect(response.flags).toBeUndefined();
+    expect(response.flags).toBe(MessageFlags.Ephemeral);
     expect(customId(response, 0, 0)).toMatch(
       /^nodeprox:series-grant:[a-f0-9-]{36}:target$/,
     );
@@ -111,7 +116,7 @@ describe("/autorizar-serie workflow", () => {
     },
   );
 
-  it("updates one public panel through selection, modal confirmation, and issuance", async () => {
+  it("updates the private panel and posts authorization details to the control channel", async () => {
     const client = api();
     const workflow = new AuthorizeSeriesWorkflow(client);
     const command = commandInteraction();
@@ -133,6 +138,7 @@ describe("/autorizar-serie workflow", () => {
     );
     await workflow.executeComponent(modal as never);
     expect(modal.followUp).not.toHaveBeenCalled();
+    expect(modal.channel.send).not.toHaveBeenCalled();
 
     const confirmButton = component(
       customId(modal.update.mock.calls[0]?.[0], 0, 0),
@@ -148,11 +154,21 @@ describe("/autorizar-serie workflow", () => {
         components: [],
       }),
     );
-    expect(confirmButton.followUp).toHaveBeenCalledWith({
-      content:
-        "<@target-discord> tienes una nueva autorización disponible en NodeProx.",
-      allowedMentions: { parse: [], users: ["target-discord"] },
+    expect(confirmButton.followUp).not.toHaveBeenCalled();
+    expect(confirmButton.channel.send).toHaveBeenCalledOnce();
+    const notification = confirmButton.channel.send.mock.calls[0]?.[0];
+    expect(notification.content).toBe("<@target-discord>");
+    expect(notification.allowedMentions).toEqual({
+      parse: [],
+      users: ["target-discord"],
     });
+    expect(notification.embeds[0]?.data.title).toBe(
+      "🎉 ¡Ya puedes crear una Serie!",
+    );
+    expect(JSON.stringify(notification)).not.toContain("NPX-SER-OPAQUE");
+    expect(notification.components[0]?.components[0]?.data.url).toBe(
+      "http://localhost:3000",
+    );
   });
 
   it("rejects another actor without mutating the public panel", async () => {
@@ -190,6 +206,7 @@ describe("/autorizar-serie workflow", () => {
       expect.objectContaining({ components: [] }),
     );
     expect(cancel.followUp).not.toHaveBeenCalled();
+    expect(cancel.channel.send).not.toHaveBeenCalled();
   });
 
   it("does not notify the target when grant issuance fails", async () => {
@@ -227,6 +244,7 @@ describe("/autorizar-serie workflow", () => {
 
     expect(confirmButton.editReply).not.toHaveBeenCalled();
     expect(confirmButton.followUp).not.toHaveBeenCalled();
+    expect(confirmButton.channel.send).not.toHaveBeenCalled();
   });
 
   it("keeps stale workflow errors private to the component interaction", async () => {

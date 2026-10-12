@@ -14,12 +14,14 @@ import {
 } from "../guards/authorized-role.guard.js";
 import {
   deferComponentUpdate,
+  ephemeralPayload,
   respondSafely,
 } from "../interaction-response.js";
 import {
   authorizeSeriesCustomIdPrefix,
   createAuthorizeSeriesCustomId,
 } from "../ui/components/authorize-series.components.js";
+import { presentSeriesGrantNotification } from "../ui/embeds/series-grant-notification.embed.js";
 import { createAuthorizeSeriesReferenceModal } from "../ui/modals/authorize-series-reference.modal.js";
 import { presentAuthorizeSeries } from "../ui/presenters/authorize-series.presenter.js";
 import type { AuthorizeSeriesViewModel } from "../ui/view-models/authorize-series.view-model.js";
@@ -27,16 +29,6 @@ import { CommandUserError } from "./command-user-error.js";
 import { DiscordInteractionError } from "./discord-interaction-error.js";
 
 const EXPIRES_IN_MS = 10 * 60 * 1000;
-
-function targetGrantMentionPayload(targetDiscordId: string) {
-  return {
-    content: `<@${targetDiscordId}> tienes una nueva autorización disponible en NodeProx.`,
-    allowedMentions: {
-      parse: [],
-      users: [targetDiscordId],
-    },
-  };
-}
 
 type WorkflowStep = "target" | "reference" | "confirming" | "completed";
 type Workflow = {
@@ -88,6 +80,7 @@ export class AuthorizeSeriesWorkflow {
 
   constructor(
     private readonly api: NodeProxDiscordApi,
+    private readonly webUrl = "http://localhost:3000",
     private readonly issueGrant = new IssueSeriesCreationGrant(api),
   ) {}
 
@@ -106,7 +99,9 @@ export class AuthorizeSeriesWorkflow {
     this.workflows.set(workflowId, workflow);
     await respondSafely(
       interaction,
-      presentAuthorizeSeries(this.toViewModel(workflowId, workflow)),
+      ephemeralPayload(
+        presentAuthorizeSeries(this.toViewModel(workflowId, workflow)),
+      ),
     );
   }
 
@@ -213,9 +208,10 @@ export class AuthorizeSeriesWorkflow {
     if (!workflow.targetDiscordId)
       throw new CommandUserError("Selecciona primero un usuario.", undefined);
     workflow.submitting = true;
+    await deferComponentUpdate(interaction);
+    let result: Awaited<ReturnType<IssueSeriesCreationGrant["execute"]>>;
     try {
-      await deferComponentUpdate(interaction);
-      const result = await this.issueGrant.execute({
+      result = await this.issueGrant.execute({
         targetDiscordId: workflow.targetDiscordId,
         ...(workflow.reference ? { reference: workflow.reference } : {}),
         actorDiscordId: interaction.user.id,
@@ -224,24 +220,37 @@ export class AuthorizeSeriesWorkflow {
         channelId: interaction.channelId ?? "",
         interactionId: interaction.id,
       });
-      workflow.step = "completed";
-      await respondSafely(
-        interaction,
-        presentAuthorizeSeries({
-          state: "completed",
-          initiatedByDiscordUserId: workflow.actorDiscordId,
-          targetDiscordId: workflow.targetDiscordId,
-          reference: result.reference,
-          displayCode: result.displayCode,
-        }),
-      );
-      await interaction.followUp(
-        targetGrantMentionPayload(workflow.targetDiscordId),
-      );
     } catch (error) {
       workflow.submitting = false;
       if (error instanceof CommandUserError) throw error;
       throw new CommandUserError(messageFor(error), error);
+    }
+    workflow.step = "completed";
+    await respondSafely(
+      interaction,
+      presentAuthorizeSeries({
+        state: "completed",
+        initiatedByDiscordUserId: workflow.actorDiscordId,
+        targetDiscordId: workflow.targetDiscordId,
+        reference: result.reference,
+        displayCode: result.displayCode,
+      }),
+    );
+    try {
+      if (!interaction.channel?.isSendable())
+        throw new Error("The authorization channel cannot send messages.");
+      await interaction.channel.send(
+        presentSeriesGrantNotification({
+          targetDiscordId: workflow.targetDiscordId,
+          reference: result.reference,
+          webUrl: this.webUrl,
+        }),
+      );
+    } catch (error) {
+      throw new CommandUserError(
+        "La autorización se creó, pero no se pudo publicar el aviso en el canal. El resultado privado conserva los datos de la autorización.",
+        error,
+      );
     }
   }
 
