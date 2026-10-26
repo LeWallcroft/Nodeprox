@@ -3,8 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { asc, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import { BufferedPerformanceObserver } from "../../apps/worker/src/observability/infrastructure/buffered-performance-observer.js";
 import { DrizzleIntegrityRepository } from "../../apps/api/src/modules/reconciliation/infrastructure/drizzle-integrity.repository.js";
 import type {
   ProcessingAuditPort,
@@ -148,6 +149,80 @@ afterAll(async () => {
 });
 
 describe("M4-B processing integration", () => {
+  it("keeps processing state and storage calls with observability enabled or disabled", async () => {
+    const run = async (enabled: boolean) => {
+      const fixture = await createFixture();
+      const storage = new FilesystemStorage(storageRoot);
+      await storage.put({
+        key: fixture.storageKey,
+        body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
+        contentType: "application/zip",
+        sizeBytes: 3,
+      });
+      const put = vi.spyOn(storage, "put");
+      const head = vi.spyOn(storage, "head");
+      const get = vi.spyOn(storage, "get");
+      const emitted = vi.fn();
+      const observer = enabled
+        ? new BufferedPerformanceObserver(emitted)
+        : undefined;
+      const service = new ChapterProcessingService(
+        new DrizzleProcessingRepository(database.db),
+        legacyStorageExecution(storage),
+        extractorFor(async () => [image]),
+        audit,
+        undefined,
+        observer,
+      );
+      await service.process({
+        chapterId: fixture.chapterId,
+        seriesId,
+        uploadId: fixture.uploadId,
+        sourceStorageKey: fixture.storageKey,
+      });
+      observer?.finish({
+        jobName: "chapter.process",
+        jobId: "test-job",
+        jobAttempt: 1,
+        outcome: "success",
+        handlerDurationMs: 1,
+      });
+      const [chapter] = await database.db
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, fixture.chapterId));
+      const rows = await database.db
+        .select()
+        .from(images)
+        .where(eq(images.chapterId, fixture.chapterId));
+      return {
+        status: chapter?.status,
+        imageCount: rows.length,
+        calls: {
+          put: put.mock.calls.length,
+          head: head.mock.calls.length,
+          get: get.mock.calls.length,
+        },
+        emitted,
+      };
+    };
+    const disabled = await run(false);
+    const enabled = await run(true);
+    expect(enabled.status).toBe(disabled.status);
+    expect(enabled.status).toBe("ready");
+    expect(enabled.imageCount).toBe(disabled.imageCount);
+    expect(enabled.calls).toEqual(disabled.calls);
+    expect(disabled.emitted).not.toHaveBeenCalled();
+    expect(enabled.emitted).toHaveBeenCalledOnce();
+    expect(enabled.emitted.mock.calls[0]?.[0]).toMatchObject({
+      imageCount: 1,
+      stages: {
+        "processing.zip.fetch_extract": { count: 1 },
+        "storage.put_with_existence_check": { count: 1 },
+        "storage.verify_get_sha256": { bytes: 3 },
+      },
+    });
+  });
   it("serializes orphan cleanup with a Chapter processing claim", async () => {
     const { chapterId, uploadId } = await createFixture();
     const storage = new FilesystemStorage(storageRoot);

@@ -5,6 +5,8 @@ import {
   type ReplayableObjectBody,
   type StoredObject,
 } from "@nodeprox/storage/port";
+import { measureStage } from "../../observability/application/measure-stage.js";
+import type { PerformanceObserverPort } from "../../observability/application/performance-observer.port.js";
 
 export type EquivalentWriteOutcome =
   | "created"
@@ -19,15 +21,21 @@ export async function putIfAbsentOrVerifyEquivalent(input: {
   sizeBytes: number;
   checksum: string;
   onCreated?: () => Promise<void>;
+  observer?: PerformanceObserverPort;
 }): Promise<{ outcome: EquivalentWriteOutcome; key: string }> {
   let stored: StoredObject;
   try {
-    stored = await input.storage.put({
-      key: input.key,
-      body: input.body,
-      contentType: input.contentType,
-      sizeBytes: input.sizeBytes,
-    });
+    stored = await measureStage(
+      input.observer,
+      "storage.put_with_existence_check",
+      () =>
+        input.storage.put({
+          key: input.key,
+          body: input.body,
+          contentType: input.contentType,
+          sizeBytes: input.sizeBytes,
+        }),
+    );
   } catch (error) {
     if (error instanceof StorageObjectAlreadyExistsError) {
       const equivalent = await verifyEquivalent(input);
@@ -56,8 +64,14 @@ async function verifyEquivalent(input: {
   contentType: string;
   sizeBytes: number;
   checksum: string;
+  observer?: PerformanceObserverPort;
 }): Promise<boolean> {
-  const metadata = await input.storage.head?.(input.key);
+  const head = input.storage.head?.bind(input.storage);
+  const metadata = head
+    ? await measureStage(input.observer, "storage.verify_head", () =>
+        head(input.key),
+      )
+    : undefined;
   if (input.storage.head && !metadata) return false;
   if (
     metadata &&
@@ -67,9 +81,16 @@ async function verifyEquivalent(input: {
     return false;
   const hash = createHash("sha256");
   let sizeBytes = 0;
-  for await (const chunk of await input.storage.get(input.key)) {
-    hash.update(chunk);
-    sizeBytes += chunk.length;
-  }
+  await measureStage(
+    input.observer,
+    "storage.verify_get_sha256",
+    async () => {
+      for await (const chunk of await input.storage.get(input.key)) {
+        hash.update(chunk);
+        sizeBytes += chunk.length;
+      }
+    },
+    () => ({ bytes: sizeBytes }),
+  );
   return sizeBytes === input.sizeBytes && hash.digest("hex") === input.checksum;
 }
