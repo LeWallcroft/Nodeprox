@@ -1,5 +1,8 @@
 import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import { StorageError } from "@nodeprox/storage/errors";
+import { measureStage } from "../../observability/application/measure-stage.js";
+import { safeInvokeNoThrow } from "../../observability/application/safe-invoke-no-throw.js";
+import type { PerformanceObserverPort } from "../../observability/application/performance-observer.port.js";
 import type { ChapterZipInspector } from "../infrastructure/zip/chapter-zip.inspector.js";
 import type {
   AdmissionOwner,
@@ -20,6 +23,7 @@ export class AdmissionValidationService {
     private readonly repository: AdmissionValidationRepositoryPort,
     private readonly storageExecution: StorageExecutionResolver,
     private readonly inspector: ChapterZipInspector,
+    private readonly observer?: PerformanceObserverPort,
   ) {}
 
   async validate(
@@ -30,15 +34,31 @@ export class AdmissionValidationService {
       requestId?: string;
     },
   ): Promise<void> {
-    const claim = await this.repository.begin(input);
-    if (!claim) return;
-    try {
-      const storage = await this.storageExecution.storageFor(
-        claim.storageProfileId,
+    const claim = await measureStage(this.observer, "admission.begin", () =>
+      this.repository.begin(input),
+    );
+    if (!claim) {
+      safeInvokeNoThrow(() =>
+        this.observer?.markWorkOutcome?.("skipped", "admission-not-claimed"),
       );
-      const source = await storage.get(claim.sourceStorageKey);
-      const result = await this.inspector.inspect(source);
-      await this.repository.settle(claim.runId, result);
+      return;
+    }
+    try {
+      const result = await measureStage(
+        this.observer,
+        "admission.zip.fetch_inspect",
+        async () => {
+          const storage = await this.storageExecution.storageFor(
+            claim.storageProfileId,
+          );
+          const source = await storage.get(claim.sourceStorageKey);
+          return this.inspector.inspect(source);
+        },
+      );
+      await measureStage(this.observer, "admission.settle", () =>
+        this.repository.settle(claim.runId, result),
+      );
+      safeInvokeNoThrow(() => this.observer?.markWorkOutcome?.(result.outcome));
     } catch (error) {
       const storageError = error instanceof StorageError ? error : null;
       const retryable = storageError?.retryable ?? true;
@@ -47,13 +67,15 @@ export class AdmissionValidationService {
           ? "retry_exhausted"
           : "retryable"
         : "terminal";
-      await this.repository.fail(claim.runId, {
-        disposition,
-        code: storageError?.code ?? "ADMISSION_TECHNICAL_FAILURE",
-        ...(storageError?.providerCode
-          ? { providerCode: storageError.providerCode }
-          : {}),
-      });
+      await measureStage(this.observer, "admission.settle", () =>
+        this.repository.fail(claim.runId, {
+          disposition,
+          code: storageError?.code ?? "ADMISSION_TECHNICAL_FAILURE",
+          ...(storageError?.providerCode
+            ? { providerCode: storageError.providerCode }
+            : {}),
+        }),
+      );
       throw new AdmissionTechnicalFailure(
         retryable,
         storageError?.code ?? "ADMISSION_TECHNICAL_FAILURE",

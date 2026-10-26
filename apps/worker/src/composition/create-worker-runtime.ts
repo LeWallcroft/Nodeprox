@@ -25,7 +25,8 @@ type RuntimeDependencies = Pick<
   | "createChapterProcessing"
   | "createReplacementProcessing"
   | "createAdmissionValidation"
->;
+> &
+  Partial<Pick<WorkerDependencies, "createPerformanceObserver">>;
 
 export function createWorkerRuntime(
   dependencies: RuntimeDependencies,

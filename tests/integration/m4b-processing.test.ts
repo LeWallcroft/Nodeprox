@@ -3,8 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { asc, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, inject, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from "vitest";
 import { ChapterProcessingService } from "../../apps/worker/src/processing/application/chapter-processing.service.js";
+import { BufferedPerformanceObserver } from "../../apps/worker/src/observability/infrastructure/buffered-performance-observer.js";
 import { DrizzleIntegrityRepository } from "../../apps/api/src/modules/reconciliation/infrastructure/drizzle-integrity.repository.js";
 import type {
   ProcessingAuditPort,
@@ -148,6 +149,179 @@ afterAll(async () => {
 });
 
 describe("M4-B processing integration", () => {
+  for (const failure of ["transient-storage", "manifest-mismatch"] as const) {
+    it(`preserves database state and publication with telemetry ON/OFF for ${failure}`, async () => {
+      const run = async (enabled: boolean) => {
+        const fixture = await createFixture();
+        const storage = new FilesystemStorage(storageRoot);
+        await storage.put({
+          key: fixture.storageKey,
+          body: {
+            sizeBytes: 3,
+            open: () => Readable.from([Buffer.from("zip")]),
+          },
+          contentType: "application/zip",
+          sizeBytes: 3,
+        });
+        const put = vi.spyOn(storage, "put");
+        const head = vi.spyOn(storage, "head");
+        const get = vi.spyOn(storage, "get");
+        if (failure === "transient-storage")
+          get.mockRejectedValueOnce(
+            new StorageProviderUnavailableError({ httpStatus: 503 }),
+          );
+        const emit = vi.fn();
+        const observer = enabled
+          ? new BufferedPerformanceObserver(emit)
+          : undefined;
+        const service = new ChapterProcessingService(
+          new DrizzleProcessingRepository(database.db),
+          legacyStorageExecution(storage),
+          extractorFor(async () =>
+            failure === "manifest-mismatch"
+              ? [{ ...image, checksum: "f".repeat(64) }]
+              : [image],
+          ),
+          audit,
+          undefined,
+          observer,
+        );
+        const invocation = service.process({
+          chapterId: fixture.chapterId,
+          seriesId,
+          uploadId: fixture.uploadId,
+          sourceStorageKey: fixture.storageKey,
+        });
+        let error: unknown;
+        try {
+          await invocation;
+        } catch (caught) {
+          error = caught;
+        }
+        observer?.finish({
+          jobName: "chapter.process",
+          jobId: "test-job",
+          jobAttempt: 1,
+          outcome: "error",
+          handlerDurationMs: 1,
+        });
+        const [chapter] = await database.db
+          .select({ status: chapters.status })
+          .from(chapters)
+          .where(eq(chapters.id, fixture.chapterId));
+        const [attempt] = await database.db
+          .select({
+            status: chapterProcessingAttempts.status,
+            errorCode: chapterProcessingAttempts.errorCode,
+          })
+          .from(chapterProcessingAttempts)
+          .where(eq(chapterProcessingAttempts.chapterId, fixture.chapterId));
+        const imageRows = await database.db
+          .select()
+          .from(images)
+          .where(eq(images.chapterId, fixture.chapterId));
+        return {
+          errorName: error instanceof Error ? error.name : "unknown",
+          chapterStatus: chapter?.status,
+          attempt,
+          imageCount: imageRows.length,
+          calls: {
+            put: put.mock.calls.length,
+            head: head.mock.calls.length,
+            get: get.mock.calls.length,
+          },
+          emit,
+        };
+      };
+      const off = await run(false);
+      const on = await run(true);
+      expect({ ...on, emit: undefined }).toEqual({ ...off, emit: undefined });
+      expect(on.imageCount).toBe(0);
+      expect(on.calls.put).toBe(0);
+      expect(on.emit).toHaveBeenCalledOnce();
+      expect(off.emit).not.toHaveBeenCalled();
+      expect(on.attempt?.status).toBe(
+        failure === "transient-storage"
+          ? "retryable_failed"
+          : "terminal_failed",
+      );
+    });
+  }
+
+  it("keeps processing state and storage calls with observability enabled or disabled", async () => {
+    const run = async (enabled: boolean) => {
+      const fixture = await createFixture();
+      const storage = new FilesystemStorage(storageRoot);
+      await storage.put({
+        key: fixture.storageKey,
+        body: { sizeBytes: 3, open: () => Readable.from([Buffer.from("zip")]) },
+        contentType: "application/zip",
+        sizeBytes: 3,
+      });
+      const put = vi.spyOn(storage, "put");
+      const head = vi.spyOn(storage, "head");
+      const get = vi.spyOn(storage, "get");
+      const emitted = vi.fn();
+      const observer = enabled
+        ? new BufferedPerformanceObserver(emitted)
+        : undefined;
+      const service = new ChapterProcessingService(
+        new DrizzleProcessingRepository(database.db),
+        legacyStorageExecution(storage),
+        extractorFor(async () => [image]),
+        audit,
+        undefined,
+        observer,
+      );
+      await service.process({
+        chapterId: fixture.chapterId,
+        seriesId,
+        uploadId: fixture.uploadId,
+        sourceStorageKey: fixture.storageKey,
+      });
+      observer?.finish({
+        jobName: "chapter.process",
+        jobId: "test-job",
+        jobAttempt: 1,
+        outcome: "success",
+        handlerDurationMs: 1,
+      });
+      const [chapter] = await database.db
+        .select({ status: chapters.status })
+        .from(chapters)
+        .where(eq(chapters.id, fixture.chapterId));
+      const rows = await database.db
+        .select()
+        .from(images)
+        .where(eq(images.chapterId, fixture.chapterId));
+      return {
+        status: chapter?.status,
+        imageCount: rows.length,
+        calls: {
+          put: put.mock.calls.length,
+          head: head.mock.calls.length,
+          get: get.mock.calls.length,
+        },
+        emitted,
+      };
+    };
+    const disabled = await run(false);
+    const enabled = await run(true);
+    expect(enabled.status).toBe(disabled.status);
+    expect(enabled.status).toBe("ready");
+    expect(enabled.imageCount).toBe(disabled.imageCount);
+    expect(enabled.calls).toEqual(disabled.calls);
+    expect(disabled.emitted).not.toHaveBeenCalled();
+    expect(enabled.emitted).toHaveBeenCalledOnce();
+    expect(enabled.emitted.mock.calls[0]?.[0]).toMatchObject({
+      imageCount: 1,
+      stages: {
+        "processing.zip.fetch_extract": { count: 1 },
+        "storage.put_with_existence_check": { count: 1 },
+        "storage.verify_get_sha256": { bytes: 3 },
+      },
+    });
+  });
   it("serializes orphan cleanup with a Chapter processing claim", async () => {
     const { chapterId, uploadId } = await createFixture();
     const storage = new FilesystemStorage(storageRoot);

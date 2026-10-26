@@ -3,6 +3,8 @@ import { UnrecoverableError } from "bullmq";
 import { StorageProviderUnavailableError } from "@nodeprox/storage/errors";
 import { describe, expect, it, vi } from "vitest";
 import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
+import { BufferedPerformanceObserver } from "../observability/infrastructure/buffered-performance-observer.js";
+import { noopPerformanceObserver } from "../observability/infrastructure/noop-performance-observer.js";
 import { createWorkerRuntime } from "./create-worker-runtime.js";
 import { createWorkerJobHandler } from "./worker-job-handler.js";
 
@@ -209,5 +211,124 @@ describe("Worker composition", () => {
     expect(close).toHaveBeenCalledOnce();
     expect(end).toHaveBeenCalledOnce();
     expect(factory).toHaveBeenCalledOnce();
+    expect(factory.mock.calls[0]?.[2]).toMatchObject({ concurrency: 1 });
+  });
+
+  it("keeps job behavior while emitting one sanitized summary only when enabled", async () => {
+    const info = vi.fn();
+    const process = vi.fn().mockResolvedValue(undefined);
+    const makeHandler = (enabled: boolean) =>
+      createWorkerJobHandler({
+        logger: { info },
+        deletion: { execute: vi.fn() },
+        loadUploadProcessingPolicy: vi.fn().mockResolvedValue({ warnings: {} }),
+        createExtractor: vi.fn().mockReturnValue({}),
+        createChapterProcessing: (
+          _extractor: unknown,
+          observer: { record: (sample: object) => void },
+        ) => ({
+          process: (...args: unknown[]) => {
+            observer.record({
+              stage: "processing.claim",
+              durationMs: 2,
+              outcome: "success",
+            });
+            return process(...args);
+          },
+        }),
+        createReplacementProcessing: vi.fn(),
+        createAdmissionValidation: vi.fn(),
+        createPerformanceObserver: () =>
+          enabled
+            ? new BufferedPerformanceObserver((summary) =>
+                info(summary, "Worker performance summary"),
+              )
+            : noopPerformanceObserver,
+      } as never);
+    await makeHandler(false)(fakeJob("chapter.process"));
+    expect(
+      info.mock.calls.filter(
+        ([, message]) => message === "Worker performance summary",
+      ),
+    ).toHaveLength(0);
+    await makeHandler(true)(fakeJob("chapter.process"));
+    expect(process).toHaveBeenCalledTimes(2);
+    const summaries = info.mock.calls.filter(
+      ([, message]) => message === "Worker performance summary",
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.[0]).toMatchObject({
+      event: "worker.performance-summary.v1",
+      jobOutcome: "success",
+      workOutcome: "unknown",
+      stages: { "processing.claim": { count: 1 } },
+    });
+    expect(JSON.stringify(summaries[0]?.[0])).not.toMatch(
+      /storageKey|checksum|password|stack/,
+    );
+  });
+
+  it("does not let a failing observer change BullMQ success or the original failure", async () => {
+    const finish = vi.fn((_result: unknown) => {
+      throw new Error("observer-finish");
+    });
+    const original = new Error("original-processing-failure");
+    const process = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(original);
+    const handler = createWorkerJobHandler({
+      logger: { info: vi.fn() },
+      deletion: { execute: vi.fn() },
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({ warnings: {} }),
+      createExtractor: vi.fn().mockReturnValue({}),
+      createChapterProcessing: () => ({ process }),
+      createReplacementProcessing: vi.fn(),
+      createAdmissionValidation: vi.fn(),
+      createPerformanceObserver: () => ({
+        enabled: true,
+        record: vi.fn(),
+        finish,
+      }),
+    } as never);
+    await expect(handler(fakeJob("chapter.process"))).resolves.toBeUndefined();
+    await expect(handler(fakeJob("chapter.process"))).rejects.toBe(original);
+    expect(finish).toHaveBeenCalledTimes(2);
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({ outcome: "success" });
+    expect(finish.mock.calls[1]?.[0]).toMatchObject({ outcome: "error" });
+  });
+
+  it("absorbs rejected observer promises and async performance logger failures", async () => {
+    const original = new Error("original-processing-failure");
+    const process = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(original);
+    const finish = vi.fn((_result: unknown) =>
+      Promise.reject(new Error("finish rejected")),
+    );
+    const handler = createWorkerJobHandler({
+      logger: { info: vi.fn() },
+      deletion: { execute: vi.fn() },
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({ warnings: {} }),
+      createExtractor: vi.fn().mockReturnValue({}),
+      createChapterProcessing: () => ({ process }),
+      createReplacementProcessing: vi.fn(),
+      createAdmissionValidation: vi.fn(),
+      createPerformanceObserver: () => ({
+        enabled: true,
+        record: vi.fn(),
+        markWorkOutcome: vi.fn(() =>
+          Promise.reject(new Error("work rejected")),
+        ),
+        finish,
+      }),
+    } as never);
+    await expect(handler(fakeJob("chapter.process"))).resolves.toBeUndefined();
+    await expect(handler(fakeJob("chapter.process"))).rejects.toBe(original);
+    await Promise.resolve();
+    expect(finish).toHaveBeenCalledTimes(2);
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({ outcome: "success" });
+    expect(finish.mock.calls[1]?.[0]).toMatchObject({ outcome: "error" });
   });
 });

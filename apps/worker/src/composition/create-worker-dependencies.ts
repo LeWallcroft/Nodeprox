@@ -26,6 +26,10 @@ import { ChapterZipInspector } from "../admission-validation/infrastructure/zip/
 import { ChapterDeletionService } from "../deletion/application/chapter-deletion.service.js";
 import { DrizzleChapterDeletionRepository } from "../deletion/infrastructure/persistence/drizzle/chapter-deletion.repository.js";
 import { MediaEffectProcessor } from "../media-effects/application/media-effect.processor.js";
+import type { PerformanceObserverPort } from "../observability/application/performance-observer.port.js";
+import { BufferedPerformanceObserver } from "../observability/infrastructure/buffered-performance-observer.js";
+import { noopPerformanceObserver } from "../observability/infrastructure/noop-performance-observer.js";
+import { loadWorkerPerformanceConfig } from "../observability/infrastructure/worker-performance-config.js";
 import { CloudflareCdnInvalidationAdapter } from "../media-effects/infrastructure/cloudflare-cdn-invalidation.adapter.js";
 import { DrizzleMediaEffectRepository } from "../media-effects/infrastructure/persistence/drizzle/media-effect.repository.js";
 import { ChapterProcessingService } from "../processing/application/chapter-processing.service.js";
@@ -64,6 +68,7 @@ export function createWorkerDependencies() {
     },
   });
   const processing = loadProcessingConfig();
+  const performanceConfig = loadWorkerPerformanceConfig();
   const database = createDatabase(config.DATABASE_URL);
   const storageConfig = loadStorageConfig();
   const storage =
@@ -126,6 +131,16 @@ export function createWorkerDependencies() {
     repository,
     admissionRepository,
     replacementRepository,
+    createPerformanceObserver(): PerformanceObserverPort {
+      if (
+        !performanceConfig.enabled ||
+        Math.random() >= performanceConfig.sampleRate
+      )
+        return noopPerformanceObserver;
+      return new BufferedPerformanceObserver((summary) =>
+        logger.info(summary, "Worker performance summary"),
+      );
+    },
     deletion: new ChapterDeletionService(
       new DrizzleChapterDeletionRepository(database.db),
       storageExecution,
@@ -144,7 +159,10 @@ export function createWorkerDependencies() {
         ...warnings,
       });
     },
-    createAdmissionValidation(policy: UploadProcessingPolicy) {
+    createAdmissionValidation(
+      policy: UploadProcessingPolicy,
+      observer?: PerformanceObserverPort,
+    ) {
       return new AdmissionValidationService(
         admissionRepository,
         storageExecution,
@@ -154,15 +172,20 @@ export function createWorkerDependencies() {
           ...policy.admission,
           ...policy.warnings,
         }),
+        observer,
       );
     },
-    createChapterProcessing(extractor: UnzipperExtractor) {
+    createChapterProcessing(
+      extractor: UnzipperExtractor,
+      observer?: PerformanceObserverPort,
+    ) {
       return new ChapterProcessingService(
         repository,
         storageExecution,
         extractor,
         repository,
         logger,
+        observer,
       );
     },
     createReplacementProcessing(extractor: UnzipperExtractor) {
