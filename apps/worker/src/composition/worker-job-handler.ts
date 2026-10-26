@@ -2,6 +2,7 @@ import { type Job, UnrecoverableError } from "bullmq";
 import { performance } from "node:perf_hooks";
 import { AdmissionTechnicalFailure } from "../admission-validation/application/admission-validation.service.js";
 import { noopPerformanceObserver } from "../observability/infrastructure/noop-performance-observer.js";
+import { safeInvokeNoThrow } from "../observability/application/safe-invoke-no-throw.js";
 import { ProcessingPermanentFailure } from "../processing/application/chapter-processing.service.js";
 import type { WorkerDependencies } from "./create-worker-dependencies.js";
 
@@ -108,20 +109,20 @@ export function createWorkerJobHandler(
       dependencies.logger.info(correlation, "Worker job completed");
     } catch (error) {
       outcome = "error";
+      if (observer.enabled)
+        safeInvokeNoThrow(() => observer.markWorkOutcome?.("failed"));
       throw error;
     } finally {
       if (observedJob && observer.enabled) {
-        try {
+        safeInvokeNoThrow(() =>
           observer.finish({
             jobName: job.name as "chapter.process" | "chapter.upload.validate",
             jobId: String(job.id),
             jobAttempt: job.attemptsMade + 1,
             outcome,
             handlerDurationMs: Math.max(0, performance.now() - started),
-          });
-        } catch {
-          // Logging cannot change the BullMQ attempt.
-        }
+          }),
+        );
       }
     }
   };

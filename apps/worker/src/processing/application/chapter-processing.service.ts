@@ -2,6 +2,7 @@ import type { StorageExecutionResolver } from "@nodeprox/storage/profile-executi
 import type { ProcessChapterInput } from "@nodeprox/types";
 import type { ValidatedChapterManifest } from "../../admission-validation/domain/admission-validation.types.js";
 import { measureStage } from "../../observability/application/measure-stage.js";
+import { safeInvokeNoThrow } from "../../observability/application/safe-invoke-no-throw.js";
 import type { PerformanceObserverPort } from "../../observability/application/performance-observer.port.js";
 import type { ValidatedImage } from "../domain/image-policy.js";
 import { buildPermanentImageStorageKey } from "../domain/image-policy.js";
@@ -29,6 +30,7 @@ export class ChapterProcessingService {
     finalAttempt = false,
     invocation?: { jobId: string; jobAttempt: number },
   ): Promise<void> {
+    let skipReason: "invalid-upload" | "already-ready" = "invalid-upload";
     const preflight = await measureStage(
       this.observer,
       "processing.preflight",
@@ -45,11 +47,19 @@ export class ChapterProcessingService {
         const storage = await this.storageExecution.storageFor(
           upload.storageProfileId,
         );
-        if (upload.chapterStatus === "ready") return null;
+        if (upload.chapterStatus === "ready") {
+          skipReason = "already-ready";
+          return null;
+        }
         return { upload, storage };
       },
     );
-    if (!preflight) return;
+    if (!preflight) {
+      safeInvokeNoThrow(() =>
+        this.observer?.markWorkOutcome?.("skipped", skipReason),
+      );
+      return;
+    }
     const { upload, storage } = preflight;
     const claim = await measureStage(this.observer, "processing.claim", () =>
       this.repository.claimChapter({
@@ -61,7 +71,12 @@ export class ChapterProcessingService {
           : {}),
       }),
     );
-    if (!("attempt" in claim) || claim.outcome === "finished") return;
+    if (!("attempt" in claim) || claim.outcome === "finished") {
+      safeInvokeNoThrow(() =>
+        this.observer?.markWorkOutcome?.("skipped", "claim-unavailable"),
+      );
+      return;
+    }
     const attempt = claim.attempt;
     const createdKeys: string[] = [];
     try {
@@ -160,6 +175,7 @@ export class ChapterProcessingService {
           records,
         ),
       );
+      safeInvokeNoThrow(() => this.observer?.markWorkOutcome?.("processed"));
       await measureStage(this.observer, "processing.audit", () =>
         this.audit
           .append({

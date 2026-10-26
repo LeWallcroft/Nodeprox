@@ -41,10 +41,10 @@ describe("Worker performance observability", () => {
     ).toThrow();
   });
 
-  it("aggregates 100 images in bounded stage data and emits once", () => {
+  it("aggregates more than 100 images in bounded stage data and emits once", () => {
     const emit = vi.fn();
     const observer = new BufferedPerformanceObserver(emit);
-    for (let index = 0; index < 100; index++) {
+    for (let index = 0; index < 125; index++) {
       observer.record({
         stage: "processing.image.persist_verify",
         durationMs: index + 1,
@@ -61,15 +61,17 @@ describe("Worker performance observability", () => {
       event: "worker.performance-summary.v1",
       schemaVersion: 1,
       jobName: "chapter.process",
-      imageCount: 100,
-      totalImageBytes: 1000,
+      jobOutcome: "success",
+      workOutcome: "unknown",
+      imageCount: 125,
+      totalImageBytes: 1250,
       stages: {
         "processing.image.persist_verify": {
-          count: 100,
-          totalMs: 5050,
-          maxMs: 100,
+          count: 125,
+          totalMs: 7875,
+          maxMs: 125,
           errorCount: 0,
-          createdCount: 100,
+          createdCount: 125,
         },
       },
     });
@@ -77,6 +79,55 @@ describe("Worker performance observability", () => {
     expect(JSON.stringify(summary)).not.toMatch(
       /secret|filename|storageKey|checksum|stack/,
     );
+  });
+
+  it("keeps expected collisions separate from storage failures", () => {
+    const emit = vi.fn();
+    const observer = new BufferedPerformanceObserver(emit);
+    observer.record({
+      stage: "storage.put_with_existence_check",
+      durationMs: 1,
+      outcome: "expected_existing",
+    });
+    observer.record({
+      stage: "storage.put_with_existence_check",
+      durationMs: 2,
+      outcome: "error",
+    });
+    observer.markWorkOutcome("skipped", "already-ready");
+    observer.finish(result);
+    expect(emit.mock.calls[0]?.[0]).toMatchObject({
+      jobOutcome: "success",
+      workOutcome: "skipped",
+      skipReason: "already-ready",
+      stages: {
+        "storage.put_with_existence_check": { count: 2, errorCount: 1 },
+      },
+    });
+  });
+
+  it("absorbs rejected promises from record, work outcome and emitter", async () => {
+    const original = new Error("original");
+    const observer = {
+      enabled: true,
+      record: () => Promise.reject(new Error("record")),
+      markWorkOutcome: () => Promise.reject(new Error("work")),
+      finish: () => Promise.reject(new Error("finish")),
+    } as unknown as PerformanceObserverPort;
+    await expect(
+      measureStage(observer, "processing.claim", async () => 42),
+    ).resolves.toBe(42);
+    await expect(
+      measureStage(observer, "processing.claim", async () => {
+        throw original;
+      }),
+    ).rejects.toBe(original);
+    const emitted = vi.fn(() => Promise.reject(new Error("emitter")));
+    const buffered = new BufferedPerformanceObserver(emitted);
+    expect(() => buffered.finish(result)).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(emitted).toHaveBeenCalledOnce();
   });
 
   it("preserves returns and original errors when record or finish fails", async () => {
@@ -206,4 +257,96 @@ describe("Worker performance observability", () => {
     ]);
     expect(settle).toHaveBeenCalledOnce();
   });
+
+  it("records a normal ZIP rejection as successful work rejection and a missing claim as skipped", async () => {
+    for (const outcome of ["rejected", "skipped"] as const) {
+      const emit = vi.fn();
+      const observer = new BufferedPerformanceObserver(emit);
+      const settle = vi.fn().mockResolvedValue(undefined);
+      const result = { outcome: "rejected", issues: [] };
+      const service = new AdmissionValidationService(
+        {
+          begin: vi.fn().mockResolvedValue(
+            outcome === "skipped"
+              ? null
+              : {
+                  runId: "run-1",
+                  storageProfileId: "profile-1",
+                  sourceStorageKey: "private-key",
+                },
+          ),
+          settle,
+          fail: vi.fn(),
+        } as never,
+        {
+          storageFor: vi.fn().mockResolvedValue({
+            get: vi.fn().mockResolvedValue(Readable.from([Buffer.from("zip")])),
+          }),
+        } as never,
+        { inspect: vi.fn().mockResolvedValue(result) } as never,
+        observer,
+      );
+      await service.validate({
+        uploadId: "upload-1",
+        jobId: "job-1",
+        jobAttempt: 1,
+        finalAttempt: false,
+      });
+      observer.finish({ ...resultForAdmission, outcome: "success" });
+      expect(emit.mock.calls[0]?.[0]).toMatchObject({
+        jobOutcome: "success",
+        workOutcome: outcome,
+      });
+      expect(settle).toHaveBeenCalledTimes(outcome === "rejected" ? 1 : 0);
+    }
+  });
+
+  it("ignores an asynchronous rejection from admission work outcome recording", async () => {
+    const markWorkOutcome = vi.fn(() =>
+      Promise.reject(new Error("observer rejected")),
+    );
+    const observer = {
+      enabled: true,
+      record: vi.fn(),
+      markWorkOutcome,
+      finish: vi.fn(),
+    } as unknown as PerformanceObserverPort;
+    const settle = vi.fn().mockResolvedValue(undefined);
+    const service = new AdmissionValidationService(
+      {
+        begin: vi.fn().mockResolvedValue({
+          runId: "run-1",
+          storageProfileId: "profile-1",
+          sourceStorageKey: "private-key",
+        }),
+        settle,
+        fail: vi.fn(),
+      } as never,
+      {
+        storageFor: vi.fn().mockResolvedValue({
+          get: vi.fn().mockResolvedValue(Readable.from([Buffer.from("zip")])),
+        }),
+      } as never,
+      {
+        inspect: vi.fn().mockResolvedValue({ outcome: "rejected", issues: [] }),
+      } as never,
+      observer,
+    );
+    await expect(
+      service.validate({
+        uploadId: "upload-1",
+        jobId: "job-1",
+        jobAttempt: 1,
+        finalAttempt: false,
+      }),
+    ).resolves.toBeUndefined();
+    await Promise.resolve();
+    expect(settle).toHaveBeenCalledOnce();
+    expect(markWorkOutcome).toHaveBeenCalledWith("rejected");
+  });
 });
+
+const resultForAdmission = {
+  ...result,
+  jobName: "chapter.upload.validate" as const,
+};

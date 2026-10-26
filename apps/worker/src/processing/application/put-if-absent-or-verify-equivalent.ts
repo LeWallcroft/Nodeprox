@@ -35,6 +35,11 @@ export async function putIfAbsentOrVerifyEquivalent(input: {
           contentType: input.contentType,
           sizeBytes: input.sizeBytes,
         }),
+      undefined,
+      (error) =>
+        error instanceof StorageObjectAlreadyExistsError
+          ? "expected_existing"
+          : "error",
     );
   } catch (error) {
     if (error instanceof StorageObjectAlreadyExistsError) {
@@ -81,6 +86,7 @@ async function verifyEquivalent(input: {
     return false;
   const hash = createHash("sha256");
   let sizeBytes = 0;
+  let equivalent = false;
   await measureStage(
     input.observer,
     "storage.verify_get_sha256",
@@ -89,8 +95,10 @@ async function verifyEquivalent(input: {
         hash.update(chunk);
         sizeBytes += chunk.length;
       }
+      const digest = hash.digest("hex");
+      equivalent = sizeBytes === input.sizeBytes && digest === input.checksum;
     },
-    () => ({ bytes: sizeBytes }),
+    () => ({ bytes: sizeBytes, outcome: equivalent ? "success" : "error" }),
   );
-  return sizeBytes === input.sizeBytes && hash.digest("hex") === input.checksum;
+  return equivalent;
 }

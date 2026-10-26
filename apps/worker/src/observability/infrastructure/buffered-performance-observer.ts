@@ -4,7 +4,10 @@ import type {
   PerformanceStageName,
   StageAggregate,
   TimingSample,
+  WorkOutcome,
+  WorkSkipReason,
 } from "../application/performance-observer.port.js";
+import { safeInvokeNoThrow } from "../application/safe-invoke-no-throw.js";
 
 type MutableAggregate = {
   count: number;
@@ -23,6 +26,8 @@ export class BufferedPerformanceObserver implements PerformanceObserverPort {
   private imageCount = 0;
   private totalImageBytes = 0;
   private finished = false;
+  private workOutcome: WorkOutcome = "unknown";
+  private skipReason: WorkSkipReason | undefined;
 
   constructor(
     private readonly emit: (summary: Record<string, unknown>) => void,
@@ -68,27 +73,37 @@ export class BufferedPerformanceObserver implements PerformanceObserverPort {
     if (sample.objectOutcome === "existing-conflict") aggregate.conflictCount++;
   }
 
+  markWorkOutcome(outcome: WorkOutcome, reason?: WorkSkipReason): void {
+    if (this.finished) return;
+    this.workOutcome = outcome;
+    this.skipReason = outcome === "skipped" ? reason : undefined;
+  }
+
   finish(result: InvocationResult): void {
     if (this.finished) return;
     this.finished = true;
     const stages: Partial<Record<PerformanceStageName, StageAggregate>> = {};
     for (const [stage, aggregate] of this.stages)
       stages[stage] = { ...aggregate };
-    try {
+    safeInvokeNoThrow(() =>
       this.emit({
         event: "worker.performance-summary.v1",
         schemaVersion: 1,
         jobName: result.jobName,
         jobId: result.jobId,
         jobAttempt: result.jobAttempt,
-        outcome: result.outcome,
+        jobOutcome: result.outcome,
+        workOutcome: result.outcome === "error" ? "failed" : this.workOutcome,
+        ...(result.outcome === "success" &&
+        this.workOutcome === "skipped" &&
+        this.skipReason
+          ? { skipReason: this.skipReason }
+          : {}),
         handlerDurationMs: result.handlerDurationMs,
         imageCount: this.imageCount,
         totalImageBytes: this.totalImageBytes,
         stages,
-      });
-    } catch {
-      // A logging failure cannot fail a BullMQ attempt.
-    }
+      }),
+    );
   }
 }

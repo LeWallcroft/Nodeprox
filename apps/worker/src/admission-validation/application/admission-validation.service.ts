@@ -1,6 +1,7 @@
 import type { StorageExecutionResolver } from "@nodeprox/storage/profile-execution";
 import { StorageError } from "@nodeprox/storage/errors";
 import { measureStage } from "../../observability/application/measure-stage.js";
+import { safeInvokeNoThrow } from "../../observability/application/safe-invoke-no-throw.js";
 import type { PerformanceObserverPort } from "../../observability/application/performance-observer.port.js";
 import type { ChapterZipInspector } from "../infrastructure/zip/chapter-zip.inspector.js";
 import type {
@@ -36,7 +37,12 @@ export class AdmissionValidationService {
     const claim = await measureStage(this.observer, "admission.begin", () =>
       this.repository.begin(input),
     );
-    if (!claim) return;
+    if (!claim) {
+      safeInvokeNoThrow(() =>
+        this.observer?.markWorkOutcome?.("skipped", "admission-not-claimed"),
+      );
+      return;
+    }
     try {
       const result = await measureStage(
         this.observer,
@@ -52,6 +58,7 @@ export class AdmissionValidationService {
       await measureStage(this.observer, "admission.settle", () =>
         this.repository.settle(claim.runId, result),
       );
+      safeInvokeNoThrow(() => this.observer?.markWorkOutcome?.(result.outcome));
     } catch (error) {
       const storageError = error instanceof StorageError ? error : null;
       const retryable = storageError?.retryable ?? true;

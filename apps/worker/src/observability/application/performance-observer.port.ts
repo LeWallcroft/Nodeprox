@@ -15,8 +15,20 @@ export type PerformanceStageName =
   | "admission.zip.fetch_inspect"
   | "admission.settle";
 
-export type StageOutcome = "success" | "error";
+export type StageOutcome = "success" | "error" | "expected_existing";
 export type JobOutcome = "success" | "error";
+export type WorkOutcome =
+  | "processed"
+  | "skipped"
+  | "accepted"
+  | "rejected"
+  | "failed"
+  | "unknown";
+export type WorkSkipReason =
+  | "invalid-upload"
+  | "already-ready"
+  | "claim-unavailable"
+  | "admission-not-claimed";
 
 export type TimingSample = Readonly<{
   stage: PerformanceStageName;
@@ -48,5 +60,6 @@ export type InvocationResult = Readonly<{
 export interface PerformanceObserverPort {
   readonly enabled: boolean;
   record(sample: TimingSample): void;
+  markWorkOutcome?(outcome: WorkOutcome, reason?: WorkSkipReason): void;
   finish(result: InvocationResult): void;
 }

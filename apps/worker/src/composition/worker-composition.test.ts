@@ -259,7 +259,8 @@ describe("Worker composition", () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.[0]).toMatchObject({
       event: "worker.performance-summary.v1",
-      outcome: "success",
+      jobOutcome: "success",
+      workOutcome: "unknown",
       stages: { "processing.claim": { count: 1 } },
     });
     expect(JSON.stringify(summaries[0]?.[0])).not.toMatch(
@@ -292,6 +293,40 @@ describe("Worker composition", () => {
     } as never);
     await expect(handler(fakeJob("chapter.process"))).resolves.toBeUndefined();
     await expect(handler(fakeJob("chapter.process"))).rejects.toBe(original);
+    expect(finish).toHaveBeenCalledTimes(2);
+    expect(finish.mock.calls[0]?.[0]).toMatchObject({ outcome: "success" });
+    expect(finish.mock.calls[1]?.[0]).toMatchObject({ outcome: "error" });
+  });
+
+  it("absorbs rejected observer promises and async performance logger failures", async () => {
+    const original = new Error("original-processing-failure");
+    const process = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(original);
+    const finish = vi.fn((_result: unknown) =>
+      Promise.reject(new Error("finish rejected")),
+    );
+    const handler = createWorkerJobHandler({
+      logger: { info: vi.fn() },
+      deletion: { execute: vi.fn() },
+      loadUploadProcessingPolicy: vi.fn().mockResolvedValue({ warnings: {} }),
+      createExtractor: vi.fn().mockReturnValue({}),
+      createChapterProcessing: () => ({ process }),
+      createReplacementProcessing: vi.fn(),
+      createAdmissionValidation: vi.fn(),
+      createPerformanceObserver: () => ({
+        enabled: true,
+        record: vi.fn(),
+        markWorkOutcome: vi.fn(() =>
+          Promise.reject(new Error("work rejected")),
+        ),
+        finish,
+      }),
+    } as never);
+    await expect(handler(fakeJob("chapter.process"))).resolves.toBeUndefined();
+    await expect(handler(fakeJob("chapter.process"))).rejects.toBe(original);
+    await Promise.resolve();
     expect(finish).toHaveBeenCalledTimes(2);
     expect(finish.mock.calls[0]?.[0]).toMatchObject({ outcome: "success" });
     expect(finish.mock.calls[1]?.[0]).toMatchObject({ outcome: "error" });

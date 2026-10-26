@@ -139,12 +139,78 @@ describe("putIfAbsentOrVerifyEquivalent", () => {
     expect(target.storage.get).toHaveBeenCalledTimes(2);
     expect(samples[3]).toMatchObject({
       stage: "storage.put_with_existence_check",
-      outcome: "error",
+      outcome: "expected_existing",
     });
     expect(samples[5]).toMatchObject({
       stage: "storage.verify_get_sha256",
       bytes: 1,
     });
+  });
+
+  it("includes digest and comparison in GET timing and records checksum and size mismatches", async () => {
+    const target = setup();
+    const samples: TimingSample[] = [];
+    const observer: PerformanceObserverPort = {
+      enabled: true,
+      record: (sample) => {
+        samples.push(sample);
+      },
+      finish: vi.fn(),
+    };
+    await target.write(Buffer.from("A"));
+    vi.mocked(target.storage.get).mockResolvedValue(
+      Readable.from([Buffer.from("B")]),
+    );
+    await expect(
+      target.write(Buffer.from("A"), "text/plain", undefined, observer),
+    ).resolves.toMatchObject({ outcome: "existing-conflict" });
+    expect(samples.at(-1)).toMatchObject({
+      stage: "storage.verify_get_sha256",
+      outcome: "error",
+      bytes: 1,
+    });
+    vi.mocked(target.storage.get).mockResolvedValue(
+      Readable.from([Buffer.from("AA")]),
+    );
+    await expect(
+      target.write(Buffer.from("A"), "text/plain", undefined, observer),
+    ).resolves.toMatchObject({ outcome: "existing-conflict" });
+    expect(samples.at(-1)).toMatchObject({
+      stage: "storage.verify_get_sha256",
+      outcome: "error",
+      bytes: 2,
+    });
+    expect(target.storage.put).toHaveBeenCalledTimes(3);
+  });
+
+  it("records a stream read error while preserving its identity and bytes read", async () => {
+    const target = setup();
+    const original = new Error("read failed");
+    const samples: TimingSample[] = [];
+    const observer: PerformanceObserverPort = {
+      enabled: true,
+      record: (sample) => {
+        samples.push(sample);
+      },
+      finish: vi.fn(),
+    };
+    vi.mocked(target.storage.get).mockResolvedValue(
+      Readable.from(
+        (async function* () {
+          yield Buffer.from("A");
+          throw original;
+        })(),
+      ),
+    );
+    await expect(
+      target.write(Buffer.from("A"), "text/plain", undefined, observer),
+    ).rejects.toBe(original);
+    expect(samples.at(-1)).toMatchObject({
+      stage: "storage.verify_get_sha256",
+      outcome: "error",
+      bytes: 1,
+    });
+    expect(target.storage.get).toHaveBeenCalledOnce();
   });
 
   it("waits for stream consumption and hashing before recording GET duration", async () => {

@@ -4,12 +4,15 @@ import type {
   PerformanceStageName,
   TimingSample,
 } from "./performance-observer.port.js";
+import { safeInvokeNoThrow } from "./safe-invoke-no-throw.js";
 
 export async function measureStage<T>(
   observer: PerformanceObserverPort | undefined,
   stage: PerformanceStageName,
   task: () => Promise<T>,
-  details?: () => Pick<TimingSample, "bytes" | "objectOutcome">,
+  details?: () => Pick<TimingSample, "bytes" | "objectOutcome"> &
+    Partial<Pick<TimingSample, "outcome">>,
+  classifyError?: (error: unknown) => TimingSample["outcome"],
 ): Promise<T> {
   if (!observer?.enabled) return task();
   const started = performance.now();
@@ -17,18 +20,17 @@ export async function measureStage<T>(
   try {
     return await task();
   } catch (error) {
-    outcome = "error";
+    outcome = classifyError?.(error) ?? "error";
     throw error;
   } finally {
-    try {
-      observer.record({
+    safeInvokeNoThrow(() => {
+      const extra = details?.();
+      return observer.record({
         stage,
         durationMs: Math.max(0, performance.now() - started),
-        outcome,
-        ...details?.(),
+        ...extra,
+        outcome: outcome === "success" ? (extra?.outcome ?? outcome) : outcome,
       });
-    } catch {
-      // Observability must never change the processing result.
-    }
+    });
   }
 }
