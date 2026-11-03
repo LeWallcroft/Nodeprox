@@ -19,8 +19,8 @@ import { registerChapterPermissionPlugin } from "./modules/chapters/presentation
 import { DiscordProfileSyncAdministrationService } from "./modules/discord/application/discord-profile-sync-administration.service.js";
 import { registerDiscordPlugin } from "./modules/discord/presentation/discord.plugin.js";
 import { registerDiscordAdminPlugin } from "./modules/discord/presentation/discord-admin.plugin.js";
-import { registerDiscordProfileSyncAdminPlugin } from "./modules/discord/presentation/discord-profile-sync-admin.plugin.js";
 import { registerDiscordProfileEventPlugin } from "./modules/discord/presentation/discord-profile-event.plugin.js";
+import { registerDiscordProfileSyncAdminPlugin } from "./modules/discord/presentation/discord-profile-sync-admin.plugin.js";
 import { registerSeriesGrantAdminPlugin } from "./modules/discord/presentation/series-grant-admin.plugin.js";
 import { registerHealthController } from "./modules/health/health.controller.js";
 import { HealthRepository } from "./modules/health/health.repository.js";
@@ -36,6 +36,10 @@ import { registerStorageProfilePlugin } from "./modules/storage-profiles/present
 import { registerUploadPlugin } from "./modules/uploads/presentation/upload.plugin.js";
 import { registerUploadCenterPlugin } from "./modules/uploads/presentation/upload-center.plugin.js";
 import { registerUploadPolicyPlugin } from "./modules/uploads/presentation/upload-policy.plugin.js";
+import {
+  createApiPerformanceObserver,
+  registerHttpPerformanceObserver,
+} from "./observability/http-performance-observer.js";
 import { API_LOGGER_OPTIONS } from "./observability/logger.js";
 import { registerErrorHandler } from "./plugins/error-handler.js";
 import { registerRequestContext } from "./plugins/request-context.js";
@@ -65,6 +69,11 @@ export function buildApp(
       : createApiDependencies(dependencies);
 
   registerRequestContext(app, services.database);
+  const performanceObserver = createApiPerformanceObserver({
+    emit: (sample) =>
+      app.log.info({ performance: sample }, "performance.sample"),
+  });
+  registerHttpPerformanceObserver(app, performanceObserver);
   registerErrorHandler(app, services.operationAuditWriter);
   registerHealthController(app, new HealthService(new HealthRepository()));
   if (services.database) {
