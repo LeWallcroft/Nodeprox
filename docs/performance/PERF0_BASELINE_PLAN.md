@@ -12,6 +12,27 @@ Capturar evidencia reproducible de navegación, SSR, API, consultas e imágenes 
 - Staging y credenciales E2E: no disponibles en el checkout. No se ejecutaron requests contra producción ni se guardaron credenciales.
 - Estado de baseline: inventario estático reproducible; los percentiles y comparación ON/OFF requieren ejecución controlada en staging y se dejan explícitamente pendientes.
 
+## Preflight de staging NP-PERF-0-S — 2026-11-03
+
+**Resultado: BLOQUEADO / NO-GO para baseline autenticado.** La inspección se realizó sin leer ni imprimir valores secretos y sin hacer requests a producción.
+
+- HEAD local/remoto revisado: `0972c9df3c6f68d1b99db6f40679d37477fa424b`, rama `feat/perf0-web-cloud-baseline`; PR #83 está OPEN/DRAFT. Los siete Quality Gates de ese HEAD figuran SUCCESS en workflow `41557096069`; esto valida CI y no demuestra que haya un staging desplegado.
+- El endpoint de environments de GitHub no listó un environment de staging. La inspección del repo no encontró workflow/manifiesto/URL de staging ni digests de imágenes desplegadas. La suite CI de E2E configura servicios efímeros locales (PostgreSQL/Redis con valores placeholder y storage filesystem); no constituye staging.
+- `.env` contiene las claves de conexión locales esperadas, pero no claves de E2E/staging. Solo se inspeccionaron nombres de variables, nunca sus valores. No se encontraron credenciales autorizadas para login en staging ni dataset sintético provisionado/verificable.
+- No hay evidencia de versiones de runtime/browser, configuración de región/red ni digests de Web/API/Worker correspondientes a un entorno desplegado. El SHA del código y la versión declarada del proyecto no sustituyen esos datos.
+- No se hizo login, navegación autenticada, consulta de auditoría/SQL ni solicitud contra un host remoto. No se usó capítulo 97 ni datos de producción.
+
+### Aprovisionamiento propuesto (pendiente de autorización/operación del equipo; no ejecutado)
+
+1. Crear un environment `staging-perf` separado, privado y con acceso restringido (SSO/VPN o allowlist); exigir aprobación del environment antes de usar secretos. Confirmar que DNS/ingress, base de datos, colas y storage apunten exclusivamente a recursos staging. Ningún secreto, host, bucket, cuenta o rol de producción debe estar disponible desde ese environment.
+2. Desplegar artefactos de `0972c9df` y registrar SHA, Node/Next/API/browser, argumentos de build y digests de imágenes. Para browser OFF/ON construir dos bundles del mismo commit con `NEXT_PUBLIC_NODEPROX_WEB_PERF_ENABLED=false|true`; mantener iguales código, datos, recursos y configuración salvo esa variable. Registrar digests distintos. Configurar `NODEPROX_WEB_PERF_ENABLED` y `NODEPROX_API_PERF_ENABLED` en runtime, OFF por defecto y activarlas solo en su corrida ON; fijar sample rate API y documentarlo.
+3. Preparar fixture exclusivamente sintético y reproducible para Series, Chapters e Images con imágenes no sensibles. No importar respaldos ni datos anonimizados de producción y excluir capítulo 97. Fijar IDs fixture, volumen, estado y script de reset con alcance limitado al staging.
+4. Crear cuentas E2E dedicadas de privilegio mínimo para flujos autorizados, y sesiones separadas para probar revocación, 401 y 403. Guardar secretos solo en el environment protegido y no adjuntarlos a trazas, HAR, logs o este informe. Validar la ruta de reset y borrado de fixture antes de permitir pruebas.
+5. Antes de medir, ejecutar una corrida funcional sin telemetría y guardar referencia de status, headers permitidos, cuerpos de respuesta saneados, requests por interacción, autorización y evidencia de auditoría. Medir conteos SQL de escritura en ventanas iguales; con ON debe haber cero escrituras atribuibles a telemetría, sin contar el `UPDATE audit_logs` funcional preexistente.
+6. Ejecutar desktop y móvil en una misma región/red/dataset, al menos 30 iteraciones por flujo y modo; alternar/aleatorizar OFF/ON para controlar deriva. Guardar HAR/trace y muestras saneadas; calcular p50/p95 de HTTP, requests/acción, Web Vitals e imágenes, overhead, dropped y errores. Verificar revocación/401/403 antes y después, equivalencia funcional y ausencia de campos sensibles.
+
+Reanudar fases 2 y 3 solo cuando el equipo confirme URL privada staging, environment aislado, digest/versiones, dataset sintético y credenciales E2E activas. Hasta entonces, no hay decisión Go para PERF-1 ni baseline de rendimiento defendible.
+
 ## Instrumentación preparada
 
 - API usa reloj monotónico, rutas cerradas, muestreo y un adapter best-effort sin consultas ni exportación remota. Flag: `NODEPROX_API_PERF_ENABLED=false`; sample rate entre 0 y 1.

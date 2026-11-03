@@ -27,7 +27,7 @@ Informar `n`, p50, p95, p99 (requests/servidor), p75 y mediana para Web Vitals, 
 
 | Entorno/SHA/digest | Flujo | Perfil | Telemetría | n | p50 | p95 | p99 | Requests/acción | Bytes img | Observaciones |
 | --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| Pendiente: staging y digest no disponibles | Series/Capítulos/Imágenes | Desktop/Móvil | OFF/ON | — | — | — | — | — | — | No se ejecutó contra prod |
+| 2026-11-03: BLOQUEADO, sin staging aislado/dataset/credenciales/digests verificables | Series/Capítulos/Imágenes | Desktop/Móvil | OFF/ON | — | — | — | — | — | — | Sin baseline; no se accedió a producción. Preflight y aprovisionamiento propuesto en `PERF0_BASELINE_PLAN.md`. |
 
 ## Semántica del contrato y gaps
 
@@ -36,3 +36,16 @@ Informar `n`, p50, p95, p99 (requests/servidor), p75 y mediana para Web Vitals, 
 - `NEXT_PUBLIC_NODEPROX_WEB_PERF_ENABLED` es build-time: OFF/ON reproducible requiere dos artefactos construidos del mismo commit, registrar build args/config y ambos digests. `NODEPROX_WEB_PERF_ENABLED` (SSR) y `NODEPROX_API_PERF_ENABLED` son runtime. Los tres permanecen apagados por defecto.
 - El E2E de navegación local simula transiciones `history.pushState` y recursos para comprobar plantilla/atribución y ausencia de IDs/query; no reemplaza la prueba autenticada en staging de la UI real ni aporta percentiles de producto.
 - No se mide duración individual SQL ni el render SSR completo de Next. El costo de SQL de cada sentencia y las trazas de navegación autenticada quedan como trabajo de evidencia/staging, fuera de este contrato.
+
+## Preflight de ejecución autenticada
+
+| Control | Resultado al 2026-11-03 | Evidencia/acción requerida |
+| --- | --- | --- |
+| Environment privado de staging | No identificado en el endpoint de environments del repo | Crear environment privado con acceso aprobado y revisar aislamiento de DB, colas y storage |
+| URL, versiones y digests desplegados | No disponibles en checkout/PR | Registrar SHA, runtime/browser, región/red y digest por servicio/build |
+| Cuentas E2E y permisos | No disponibles; no se imprimieron valores secretos | Crear cuentas sintéticas de mínimo privilegio y cubrir revocación, 401 y 403 |
+| Dataset Series/Chapters/Images | No disponible para este entorno | Generar fixture sintético con imágenes no sensibles; prohibido usar datos productivos o capítulo 97 |
+| OFF/ON comparable | No ejecutado en staging | Dos builds del mismo SHA para la flag browser; runtime flags API/SSR controladas por corrida; documentar ambos digests |
+| Escrituras SQL de telemetría | Sin ensayo staging | Comparar conteos en ventanas iguales y atribuir cero escrituras nuevas a la observación; preservar UPDATE de auditoría existente |
+
+**Decisión:** NO-GO para cerrar PERF-0 y para comenzar PERF-1 hasta que haya staging aislado y se complete la matriz OFF/ON con trazas saneadas. Los quality gates de GitHub confirman CI, no sustituyen este baseline.
