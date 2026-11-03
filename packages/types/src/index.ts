@@ -17,13 +17,14 @@ export {
   evaluateChapterTransition,
 } from "./chapter-state.js";
 export type {
-  PerformanceMetricV1,
+  PerformanceHttpStatusClassV1,
+  PerformanceNavigationKindV1,
   PerformanceObserverPort,
   PerformanceOutcomeV1,
   PerformanceRouteTemplateV1,
   PerformanceSampleV1,
-  PerformanceStageV1,
 } from "./performance-sample.js";
+export { isValidPerformanceSampleV1 } from "./performance-sample.js";
 export {
   BROWSER_DIRECT_UPLOAD_CONCURRENCY_MAX,
   buildUploadProcessingPolicy,

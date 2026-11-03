@@ -141,6 +141,9 @@ importers:
       react-dom:
         specifier: ^19.1.1
         version: 19.2.8(react@19.2.8)
+      web-vitals:
+        specifier: 6.2.3
+        version: 6.2.3
     devDependencies:
       '@types/react':
         specifier: ^19.1.10
@@ -3042,6 +3045,9 @@ packages:
       jsdom:
         optional: true
 
+  web-vitals@6.2.3:
+    resolution: {integrity: sha512-Dmy+vdO1UPMqXiAtZSNayhl4f794Bxfd94W4HIj2HlYtczEQfEOon969memlcpcHrTuOKLa5baFjX7WbgmOq+A==}
+
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
     engines: {node: '>= 8'}
@@ -5760,6 +5766,8 @@ snapshots:
       - terser
       - tsx
       - yaml
+
+  web-vitals@6.2.3: {}
 
   which@2.0.2:
     dependencies:

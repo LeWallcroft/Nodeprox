@@ -1,11 +1,13 @@
 import { performance } from "node:perf_hooks";
-import type {
-  PerformanceObserverPort,
-  PerformanceSampleV1,
+import {
+  isValidPerformanceSampleV1,
+  type PerformanceObserverPort,
+  type PerformanceSampleV1,
 } from "@nodeprox/types";
+import { isServerPerformanceEnabled } from "./performance-flags";
 
 export function createServerPerformanceObserver(
-  enabled = process.env.NODEPROX_WEB_PERF_ENABLED === "true",
+  enabled = isServerPerformanceEnabled(),
   write: (sample: PerformanceSampleV1) => void = (sample) => {
     console.info("performance.sample", sample);
   },
@@ -13,7 +15,7 @@ export function createServerPerformanceObserver(
   if (!enabled) return { record() {} };
   return {
     record(sample) {
-      if (!Number.isFinite(sample.durationMs) || sample.durationMs < 0) return;
+      if (!isValidPerformanceSampleV1(sample)) return;
       try {
         write(sample);
       } catch {
@@ -38,7 +40,8 @@ export function startSsrBootstrapMeasurement(
         stage: "next-ssr",
         routeTemplate: "/dashboard",
         metric: "ssr.bootstrap.duration",
-        durationMs: Math.max(0, now() - startedAt),
+        value: Math.max(0, now() - startedAt),
+        unit: "ms",
         outcome,
         timeBucket: new Date().toISOString().slice(0, 16),
       });

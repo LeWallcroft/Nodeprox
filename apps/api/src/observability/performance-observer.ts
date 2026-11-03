@@ -2,6 +2,7 @@ import type {
   PerformanceObserverPort,
   PerformanceSampleV1,
 } from "@nodeprox/types";
+import { isValidPerformanceSampleV1 } from "@nodeprox/types";
 
 export const noopPerformanceObserver: PerformanceObserverPort = {
   record() {},
@@ -12,14 +13,7 @@ export class BoundedPerformanceObserver implements PerformanceObserverPort {
   constructor(private readonly emit: (sample: PerformanceSampleV1) => void) {}
 
   record(sample: PerformanceSampleV1): void {
-    if (
-      !Number.isFinite(sample.durationMs) ||
-      sample.durationMs < 0 ||
-      sample.routeTemplate.length > 80 ||
-      sample.metric.length > 64 ||
-      sample.timeBucket.length > 20
-    )
-      return;
+    if (!isValidPerformanceSampleV1(sample)) return;
     try {
       this.emit(sample);
     } catch {

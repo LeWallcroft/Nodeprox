@@ -72,7 +72,14 @@ export function registerHttpPerformanceObserver(
       stage: "api-http",
       routeTemplate: safeApiRouteTemplate(request.routeOptions.url),
       metric: "http.request.duration",
-      durationMs: Math.max(0, performance.now() - started),
+      value: Math.max(0, performance.now() - started),
+      unit: "ms",
+      httpStatusClass: `${Math.floor(status / 100)}xx` as
+        | "1xx"
+        | "2xx"
+        | "3xx"
+        | "4xx"
+        | "5xx",
       outcome: request.raw.aborted
         ? "aborted"
         : status >= 400

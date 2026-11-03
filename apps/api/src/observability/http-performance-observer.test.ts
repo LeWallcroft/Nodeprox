@@ -49,13 +49,15 @@ describe("HTTP performance observer", () => {
       stage: "api-http" as const,
       routeTemplate: "/api/health" as const,
       metric: "http.request.duration" as const,
-      durationMs: 3,
+      value: 3,
+      unit: "ms" as const,
+      httpStatusClass: "2xx" as const,
       outcome: "success" as const,
       timeBucket: "2026-11-02T12:00",
     };
     expect(() => observer.record(sample)).not.toThrow();
     expect(() =>
-      observer.record({ ...sample, durationMs: Number.NaN }),
+      observer.record({ ...sample, value: Number.NaN }),
     ).not.toThrow();
     expect(emit).toHaveBeenCalledOnce();
   });
@@ -93,10 +95,17 @@ describe("HTTP performance observer", () => {
           expect.objectContaining({
             routeTemplate: "/api/series/:seriesId",
             outcome: "success",
+            httpStatusClass: "2xx",
           }),
           expect.objectContaining({
             routeTemplate: "/api/other",
             outcome: "failure",
+            httpStatusClass: "4xx",
+          }),
+          expect.objectContaining({
+            routeTemplate: "/api/other",
+            outcome: "failure",
+            httpStatusClass: "5xx",
           }),
         ]),
       );

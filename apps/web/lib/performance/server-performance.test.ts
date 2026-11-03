@@ -13,7 +13,8 @@ describe("SSR bootstrap performance observer", () => {
       stage: "next-ssr",
       routeTemplate: "/dashboard",
       metric: "ssr.bootstrap.duration",
-      durationMs: 2,
+      value: 2,
+      unit: "ms",
       outcome: "success",
       timeBucket: "2026-11-02T12:00",
     });
@@ -29,7 +30,8 @@ describe("SSR bootstrap performance observer", () => {
     expect(write.mock.calls[0]?.[0]).toMatchObject({
       stage: "next-ssr",
       routeTemplate: "/dashboard",
-      durationMs: 7,
+      value: 7,
+      unit: "ms",
       outcome: "success",
     });
   });

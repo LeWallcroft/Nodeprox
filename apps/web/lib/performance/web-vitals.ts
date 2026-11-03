@@ -1,14 +1,17 @@
 import type {
-  PerformanceMetricV1,
+  PerformanceNavigationKindV1,
   PerformanceObserverPort,
   PerformanceRouteTemplateV1,
   PerformanceSampleV1,
 } from "@nodeprox/types";
+import { isValidPerformanceSampleV1 } from "@nodeprox/types";
+import { type Metric, onCLS, onINP, onLCP, onTTFB } from "web-vitals";
 
 const allowedRoutes: ReadonlyArray<
   readonly [RegExp, PerformanceRouteTemplateV1]
 > = [
-  [/^\/dashboard\/?$/, "/dashboard"],
+  [/^\/(?:dashboard)?\/?$/, "/dashboard"],
+  [/^\/login\/?$/, "/login"],
   [/^\/series\/?$/, "/series"],
   [/^\/series\/[^/]+\/?$/, "/series/:seriesId"],
   [/^\/series\/[^/]+\/chapters\/?$/, "/series/:seriesId/chapters"],
@@ -21,64 +24,161 @@ const allowedRoutes: ReadonlyArray<
 export function safeBrowserRouteTemplate(
   pathname: string,
 ): PerformanceRouteTemplateV1 {
+  const pathOnly = pathname.split(/[?#]/, 1)[0] ?? "";
   return (
-    allowedRoutes.find(([pattern]) => pattern.test(pathname))?.[1] ?? "/other"
+    allowedRoutes.find(([pattern]) => pattern.test(pathOnly))?.[1] ?? "/other"
   );
 }
 
-export function createBrowserPerformanceObserver(
-  write: (sample: PerformanceSampleV1) => void,
-  now: () => Date = () => new Date(),
-): PerformanceObserverPort {
+export function safeBrowserNavigationRoute(
+  navigationUrl: string | undefined,
+  fallbackPathname: string,
+): PerformanceRouteTemplateV1 {
+  if (!navigationUrl) return safeBrowserRouteTemplate(fallbackPathname);
+  try {
+    return safeBrowserRouteTemplate(
+      new URL(navigationUrl, "https://nodeprox.invalid").pathname,
+    );
+  } catch {
+    return "/other";
+  }
+}
+
+export function createBrowserPerformanceBuffer(
+  write: (batch: {
+    samples: readonly PerformanceSampleV1[];
+    dropped: number;
+  }) => void,
+  capacity = 64,
+): PerformanceObserverPort & { flush(): void } {
+  let samples: PerformanceSampleV1[] = [];
+  let dropped = 0;
+  let flushed = false;
   return {
     record(sample) {
-      if (!Number.isFinite(sample.durationMs) || sample.durationMs < 0) return;
+      if (flushed || !isValidPerformanceSampleV1(sample)) return;
+      if (samples.length >= capacity) {
+        dropped++;
+        return;
+      }
+      samples.push(sample);
+    },
+    flush() {
+      if (flushed) return;
+      flushed = true;
+      if (samples.length === 0 && dropped === 0) return;
+      const batch = { samples, dropped };
+      samples = [];
+      dropped = 0;
       try {
-        write({ ...sample, timeBucket: now().toISOString().slice(0, 16) });
+        write(batch);
       } catch {
-        // A telemetry sink cannot affect an interaction.
+        // A telemetry sink cannot affect navigation or rendering.
       }
     },
   };
 }
 
-export function installBrowserPerformance(
+function timeBucket(): string {
+  return new Date().toISOString().slice(0, 16);
+}
+
+function navigationKind(metric: Metric): PerformanceNavigationKindV1 {
+  return metric.navigationType === "soft-navigation" ? "spa" : "document";
+}
+
+function recordCoreWebVital(
   observer: PerformanceObserverPort,
-  pathname = window.location.pathname,
+  metric: Metric,
+  fallbackPathname: string,
+): void {
+  const kind = navigationKind(metric);
+  const routeTemplate = safeBrowserNavigationRoute(
+    metric.navigationURL,
+    fallbackPathname,
+  );
+  const base = {
+    schemaVersion: 1 as const,
+    routeTemplate,
+    outcome: "success" as const,
+    timeBucket: timeBucket(),
+    navigationKind: kind,
+  };
+  if (metric.name === "LCP")
+    observer.record({
+      ...base,
+      stage: "browser-web-vital",
+      metric: "browser.lcp",
+      value: metric.value,
+      unit: "ms",
+    });
+  else if (metric.name === "INP")
+    observer.record({
+      ...base,
+      stage: "browser-web-vital",
+      metric: "browser.inp",
+      value: metric.value,
+      unit: "ms",
+    });
+  else if (metric.name === "CLS")
+    observer.record({
+      ...base,
+      stage: "browser-web-vital",
+      metric: "browser.cls",
+      value: metric.value,
+      unit: "score",
+    });
+  else if (metric.name === "TTFB" && kind === "document")
+    observer.record({
+      ...base,
+      stage: "browser-web-vital",
+      metric: "browser.navigation.ttfb",
+      value: metric.value,
+      unit: "ms",
+      navigationKind: "document",
+    });
+}
+
+/** Register once per document; web-vitals handles INP, CLS and soft-nav lifecycle. */
+export function installCoreWebVitals(
+  observer: PerformanceObserverPort,
+  initialPathname: string,
+): void {
+  const report = (metric: Metric) =>
+    recordCoreWebVital(observer, metric, initialPathname);
+  onLCP(report, { reportSoftNavs: true });
+  onINP(report, { reportSoftNavs: true });
+  onCLS(report, { reportSoftNavs: true });
+  onTTFB(report);
+}
+
+/** Install bounded per-route resources/long-task observers, replacing them on SPA navigation. */
+export function installRoutePerformance(
+  observer: PerformanceObserverPort,
+  pathname: string,
+  kind: PerformanceNavigationKindV1,
+  includeBufferedEntries: boolean,
 ): () => void {
   const routeTemplate = safeBrowserRouteTemplate(pathname);
-  const emit = (
-    metric: PerformanceMetricV1,
-    durationMs: number,
-    stage: "browser-web-vital" | "media-network" = "browser-web-vital",
-  ) =>
-    observer.record({
-      schemaVersion: 1,
+  const observers: PerformanceObserver[] = [];
+  const record = (
+    stage: "browser-web-vital" | "media-network",
+    metric: PerformanceSampleV1["metric"],
+    value: number,
+    unit: "ms" | "bytes",
+  ) => {
+    const sample = {
+      schemaVersion: 1 as const,
       stage,
       routeTemplate,
       metric,
-      durationMs,
-      outcome: "success",
-      timeBucket: "1970-01-01T00:00",
-    });
-  const observers: PerformanceObserver[] = [];
-  let latestLcp = 0;
-  const interactionDurations = new Map<number, number>();
-  let clsWindowStart = 0;
-  let clsWindowEnd = 0;
-  let clsWindowValue = 0;
-  let maxClsSessionValue = 0;
-  let vitalsFlushed = false;
-  const flushVitals = () => {
-    if (vitalsFlushed) return;
-    vitalsFlushed = true;
-    if (latestLcp > 0) emit("browser.lcp", latestLcp);
-    const durations = [...interactionDurations.values()].sort((a, b) => a - b);
-    if (durations.length > 0) {
-      const p98Index = Math.max(0, Math.ceil(durations.length * 0.98) - 1);
-      emit("browser.inp", durations[p98Index] ?? 0);
-    }
-    emit("browser.cls", maxClsSessionValue);
+      value,
+      unit,
+      outcome: "success" as const,
+      timeBucket: timeBucket(),
+      navigationKind: kind,
+    };
+    if (isValidPerformanceSampleV1(sample)) observer.record(sample);
   };
   const observe = (
     type: string,
@@ -88,81 +188,39 @@ export function installBrowserPerformance(
     const perfObserver = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) callback(entry);
     });
-    perfObserver.observe({ type, buffered: true });
+    perfObserver.observe(
+      includeBufferedEntries ? { type, buffered: true } : { type },
+    );
     observers.push(perfObserver);
   };
 
-  observe("largest-contentful-paint", (entry) => {
-    latestLcp = entry.startTime;
-  });
-  observe("event", (entry) => {
-    const event = entry as PerformanceEventTiming & { interactionId: number };
-    if (event.interactionId <= 0) return;
-    const current = interactionDurations.get(event.interactionId) ?? 0;
-    const duration = Math.max(current, event.duration);
-    if (interactionDurations.has(event.interactionId)) {
-      interactionDurations.set(event.interactionId, duration);
-      return;
-    }
-    if (interactionDurations.size < 256) {
-      interactionDurations.set(event.interactionId, duration);
-      return;
-    }
-    let shortestId = 0;
-    let shortestDuration = Number.POSITIVE_INFINITY;
-    for (const [id, value] of interactionDurations) {
-      if (value < shortestDuration) {
-        shortestId = id;
-        shortestDuration = value;
-      }
-    }
-    if (duration > shortestDuration) {
-      interactionDurations.delete(shortestId);
-      interactionDurations.set(event.interactionId, duration);
-    }
-  });
-  observe("layout-shift", (entry) => {
-    const value = entry as PerformanceEntry & {
-      value?: number;
-      hadRecentInput?: boolean;
-    };
-    if (value.hadRecentInput || !Number.isFinite(value.value)) return;
-    const shift = value.value ?? 0;
-    const time = entry.startTime;
-    if (time - clsWindowEnd > 1_000 || time - clsWindowStart > 5_000) {
-      maxClsSessionValue = Math.max(maxClsSessionValue, clsWindowValue);
-      clsWindowStart = time;
-      clsWindowValue = 0;
-    }
-    if (clsWindowStart === 0) clsWindowStart = time;
-    clsWindowEnd = time;
-    clsWindowValue += shift;
-    maxClsSessionValue = Math.max(maxClsSessionValue, clsWindowValue);
-  });
   observe("longtask", (entry) =>
-    emit("browser.long_task.duration", entry.duration),
+    record(
+      "browser-web-vital",
+      "browser.long_task.duration",
+      entry.duration,
+      "ms",
+    ),
   );
   observe("resource", (entry) => {
     const resource = entry as PerformanceResourceTiming;
     if (resource.initiatorType !== "img") return;
-    emit("media.image.transfer.duration", resource.duration, "media-network");
+    record(
+      "media-network",
+      "media.image.transfer.duration",
+      resource.duration,
+      "ms",
+    );
     if (resource.transferSize > 0)
-      emit(
+      record(
+        "media-network",
         "media.image.transfer.bytes",
         resource.transferSize,
-        "media-network",
+        "bytes",
       );
   });
-  const navigation = performance.getEntriesByType("navigation")[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  if (navigation) emit("browser.navigation.ttfb", navigation.responseStart);
-  window.addEventListener("pagehide", flushVitals, { once: true });
-  return () => {
-    flushVitals();
-    window.removeEventListener("pagehide", flushVitals);
+  return () =>
     observers.forEach((perfObserver) => {
       perfObserver.disconnect();
     });
-  };
 }
