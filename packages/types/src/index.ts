@@ -1,5 +1,4 @@
 export type HealthStatus = "ok";
-export type { UserReference } from "./user-reference.js";
 export type { AuditMetadata } from "./audit-metadata.js";
 export {
   InvalidAuditMetadataError,
@@ -17,18 +16,27 @@ export {
   CHAPTER_TRANSITIONS,
   evaluateChapterTransition,
 } from "./chapter-state.js";
+export type {
+  PerformanceMetricV1,
+  PerformanceObserverPort,
+  PerformanceOutcomeV1,
+  PerformanceRouteTemplateV1,
+  PerformanceSampleV1,
+  PerformanceStageV1,
+} from "./performance-sample.js";
 export {
   BROWSER_DIRECT_UPLOAD_CONCURRENCY_MAX,
+  buildUploadProcessingPolicy,
   CHAPTER_IMAGE_EXTENSIONS,
   CHAPTER_IMAGE_FILENAME_PATTERN,
+  type ChapterImageExtension,
   DEFAULT_DIRECT_UPLOAD_CONCURRENCY,
-  buildUploadProcessingPolicy,
   minDefined,
   resolveDirectUploadConcurrency,
-  type ChapterImageExtension,
   type UploadProcessingPolicy,
   type UserUploadPolicy,
 } from "./upload-policy.js";
+export type { UserReference } from "./user-reference.js";
 
 export interface RequestContext {
   requestId: string;
